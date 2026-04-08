@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Simple schematic-style top-down quad diagram showing motor positions and mapped MCU pins -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <style>
+    .title { font: bold 22px sans-serif; }
+    .label { font: 16px sans-serif; }
+    .pin { font: 14px monospace; fill: #111; }
+    .motor { font: bold 16px sans-serif; }
+    .arrow { stroke: #000; stroke-width: 2px; fill: none; }
+    .cw { fill: #000; }
+    .ccw { fill: #000; }
+    .box { stroke: #666; stroke-width: 1px; fill: #f8f8f8; }
+  </style>
+
+  <rect x="10" y="10" width="1180" height="80" rx="6" class="box" />
+  <text x="30" y="55" class="title">Motor pin mapping ¡ª top-down view (quad X configuration)</text>
+
+  <!-- central flight controller box -->
+  <rect x="350" y="200" width="500" height="400" rx="12" fill="#e7eef6" stroke="#1f5f9b" stroke-width="2" />
+  <text x="600" y="240" text-anchor="middle" class="label">Flight Controller (STM32F407ZGTx)</text>
+
+  <!-- MCU pin callouts on the right -->
+  <g transform="translate(880,230)">
+    <rect x="0" y="0" width="280" height="160" class="box" />
+    <text x="10" y="26" class="label">Mapped signals (MCU pins)</text>
+    <text x="12" y="52" class="pin">M1 (TIM3 CH1)  -> PA6</text>
+    <text x="12" y="74" class="pin">M4 (TIM3 CH2)  -> PA7</text>
+    <text x="12" y="96" class="pin">M2 (TIM3 CH3)  -> PB0</text>
+    <text x="12" y="118" class="pin">M3 (TIM3 CH4)  -> PB1</text>
+  </g>
+
+  <!-- additional peripherals -->
+  <g transform="translate(880,410)">
+    <rect x="0" y="0" width="280" height="160" class="box" />
+    <text x="12" y="26" class="label">Other pins</text>
+    <text x="12" y="52" class="pin">Servo TIM4 CH1 -> PB6</text>
+    <text x="12" y="74" class="pin">Servo TIM4 CH2 -> PB7</text>
+    <text x="12" y="96" class="pin">Battery ADC -> ADC1 CH4 (PA4)</text>
+    <text x="12" y="118" class="pin">SWDIO -> PA13, SWCLK -> PA14</text>
+  </g>
+
+  <!-- motors positions -->
+  <!-- top-right motor (1) -->
+  <g id="motor1">
+    <circle cx="860" cy="150" r="60" fill="#ffefef" stroke="#b03030" stroke-width="3" />
+    <text x="860" y="150" text-anchor="middle" class="motor">1</text>
+    <text x="860" y="190" text-anchor="middle" class="label">Top - Right</text>
+    <text x="860" y="210" text-anchor="middle" class="pin">M1 -> PA6</text>
+    <!-- rotation arrow: CCW -->
+    <path d="M900 150 A60 60 0 1 0 820 150" class="arrow" />
+    <text x="900" y="128" class="label">CCW</text>
+  </g>
+
+  <!-- top-left motor (3) -->
+  <g id="motor3">
+    <circle cx="340" cy="150" r="60" fill="#efefff" stroke="#3030b0" stroke-width="3" />
+    <text x="340" y="150" text-anchor="middle" class="motor">3</text>
+    <text x="340" y="190" text-anchor="middle" class="label">Top - Left</text>
+    <text x="340" y="210" text-anchor="middle" class="pin">M3 -> PB1</text>
+    <!-- rotation arrow: CW -->
+    <path d="M380 150 A60 60 0 1 1 300 150" class="arrow" />
+    <text x="300" y="128" class="label">CW</text>
+  </g>
+
+  <!-- bottom-left motor (2) -->
+  <g id="motor2">
+    <circle cx="340" cy="610" r="60" fill="#efffef" stroke="#30a030" stroke-width="3" />
+    <text x="340" y="610" text-anchor="middle" class="motor">2</text>
+    <text x="340" y="650" text-anchor="middle" class="label">Bottom - Left</text>
+    <text x="340" y="670" text-anchor="middle" class="pin">M2 -> PB0</text>
+    <!-- rotation arrow: CCW -->
+    <path d="M380 610 A60 60 0 1 0 300 610" class="arrow" />
+    <text x="380" y="588" class="label">CCW</text>
+  </g>
+
+  <!-- bottom-right motor (4) -->
+  <g id="motor4">
+    <circle cx="860" cy="610" r="60" fill="#fff7ef" stroke="#b06b30" stroke-width="3" />
+    <text x="860" y="610" text-anchor="middle" class="motor">4</text>
+    <text x="860" y="650" text-anchor="middle" class="label">Bottom - Right</text>
+    <text x="860" y="670" text-anchor="middle" class="pin">M4 -> PA7</text>
+    <!-- rotation arrow: CW -->
+    <path d="M900 610 A60 60 0 1 1 820 610" class="arrow" />
+    <text x="820" y="588" class="label">CW</text>
+  </g>
+
+  <!-- wiring lines to FC box -->
+  <line x1="800" y1="200" x2="860" y2="150" stroke="#444" stroke-width="2" stroke-dasharray="4 2"/>
+  <line x1="400" y1="150" x2="340" y2="200" stroke="#444" stroke-width="2" stroke-dasharray="4 2"/>
+  <line x1="400" y1="550" x2="340" y2="600" stroke="#444" stroke-width="2" stroke-dasharray="4 2"/>
+  <line x1="800" y1="550" x2="860" y2="600" stroke="#444" stroke-width="2" stroke-dasharray="4 2"/>
+
+  <!-- footer notes -->
+  <rect x="10" y="760" width="1180" height="130" rx="6" class="box" />
+  <text x="30" y="790" class="label">Notes:</text>
+  <text x="30" y="815" class="pin">- Motor numbering and rotation are from `NOTE/readme.txt`. Confirm on your airframe before powering.</text>
+  <text x="30" y="840" class="pin">- M1..M4 are mapped to TIM3 CCR registers in firmware: see `BSP/pwm.h` and `BSP/pwm.c`.</text>
+  <text x="30" y="865" class="pin">- Servo outputs use TIM4 (PB6/PB7). Battery sense ADC uses ADC1 channel 4 (PA4). SWD: PA13/PA14.</text>
+</svg>

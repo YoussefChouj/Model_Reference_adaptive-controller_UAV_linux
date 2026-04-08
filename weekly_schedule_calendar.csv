@@ -1,0 +1,13 @@
+Time,Period,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday
+08:00-08:45,1,,,,,,,
+08:55-09:40,2,,,,,,,
+10:00-10:45,3,,[Exam] Numerical Analysis (for international students) · Yang Chang | [考试]数值分析（留学生）·杨畅,,Digital Image Processing · Gong Dawei | 数字图像处理·龚大伟,,Algorithm Design and Analysis · Zhang Dong | 算法设计与分析（留学生）·张栋,,
+10:55-11:40,4,,[Exam] Numerical Analysis (for international students) · Yang Chang | [考试]数值分析（留学生）·杨畅,,Digital Image Processing · Gong Dawei | 数字图像处理·龚大伟,,Algorithm Design and Analysis · Zhang Dong | 算法设计与分析（留学生）·张栋,,
+14:00-14:45,5,,,,,Digital Signal Processing · Li Zhuoming | 数字信号处理·李卓明,Digital Signal Processing · Li Zhuoming | 数字信号处理·李卓明,,
+14:55-15:40,6,,,,,Digital Signal Processing · Li Zhuoming | 数字信号处理·李卓明,Digital Signal Processing · Li Zhuoming | 数字信号处理·李卓明,,
+16:00-16:45,7,Algorithm Design and Analysis · Zhang Dong | 算法设计与分析（留学生）·张栋,,Digital Image Processing · Gong Dawei | 数字图像处理·龚大伟,Digital Signal Processing · Li Zhuoming | 数字信号处理·李卓明,,,
+16:55-17:40,8,Algorithm Design and Analysis · Zhang Dong | 算法设计与分析（留学生）·张栋,,Digital Image Processing · Gong Dawei | 数字图像处理·龚大伟,Digital Signal Processing · Li Zhuoming | 数字信号处理·李卓明,,,
+19:00-19:45,9,Information Theory and Coding · Shi Yan | 信息理论与编码·石砚,,,,,,
+19:55-20:40,10,Information Theory and Coding · Shi Yan | 信息理论与编码·石砚,,,,,,
+20:50-21:35,11,Information Theory and Coding · Shi Yan | 信息理论与编码·石砚,,,,,,
+21:45-22:30,12,Information Theory and Coding · Shi Yan | 信息理论与编码·石砚,,,,,,

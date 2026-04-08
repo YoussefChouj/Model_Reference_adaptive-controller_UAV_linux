@@ -1,0 +1,22 @@
+# Build artifacts
+*.o
+*.elf
+*.hex
+*.bin
+*.map
+build/
+Objects/
+Listings/
+OBJ/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# General
+.git/
+node_modules/
+*.lock
+*.bak
+.DS_Store

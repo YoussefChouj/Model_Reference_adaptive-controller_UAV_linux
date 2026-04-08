@@ -1,0 +1,126 @@
+VOFA+ JustFloat: map VOFA channel index (I0, I1, ...) to signal names.
+Names match vofa_channel_name() in serial_bridge.py (dots -> underscores).
+
+UDP: serial_bridge sends Frame A and Frame B on TWO different ports so each
+VOFA connection has a fixed float count (JustFloat requirement).
+
+  Connection 1 (fast / 100 Hz): bind VOFA to local UDP vofa_port_a (default 1347)
+                               -> 8 floats + 5 status bytes as floats (I0..I12) + tail
+
+  Connection 2 (slow / 20 Hz): bind VOFA to local UDP vofa_port_b (default 1348)
+                               -> 4*(MAX_NUM_BASIS+2)+36 floats (e.g. 68 for N=6)
+                               -> then 7 extra JustFloat channels from the 22-byte path tail (u8/float mix)
+
+Telemetry from the vehicle/simulator still goes to simulate_udp_port (default 50007)
+for serial_bridge --simulate; the bridge unpacks and forwards to vofa_port_a / vofa_port_b.
+
+-------------------------------------------------------------------------------
+JUSTFLOAT CHANNEL MAP - Frame A (100 Hz)  --  UDP vofa_port_a (default 1347)
+-------------------------------------------------------------------------------
+# I0  = mrac_pitch_e
+# I1  = mrac_pitch_u_ad
+# I2  = mrac_roll_e
+# I3  = mrac_roll_u_ad
+# I4  = mrac_yaw_e
+# I5  = mrac_yaw_u_ad
+# I6  = mrac_z_e
+# I7  = mrac_z_u_ad
+# I8  = status_arm
+# I9  = status_flymode
+# I10 = status_sbus_lost
+# I11 = status_twc_execute   (TWC.execute: 0/1)
+# I12 = status_twc_arrived   (within 0.15 m of TWC target, 3D)
+
+-------------------------------------------------------------------------------
+JUSTFLOAT CHANNEL MAP - Frame B (20 Hz)  --  UDP vofa_port_b (default 1348)
+-------------------------------------------------------------------------------
+Frame B length depends on MAX_NUM_BASIS from the telemetry header.
+Wire format: 16-bit little-endian payload length = (4 * (MAX_NUM_BASIS + 2) + 36) * 4 + 22
+(float block + 22-byte path tail before CRC). Same header for Frame A (payload length 37).
+
+Float block channel count: 4 * (MAX_NUM_BASIS + 2) + 36  (this part scales with N).
+Path tail is fixed 22 bytes (not MAX_NUM_BASIS-dependent); serial_bridge unpacks it to 7 extra
+(name, value) pairs appended after all MRAC+PID floats.
+
+The list below is for MAX_NUM_BASIS = 6 (68 float channels I0..I67, then I68..I74 from path tail).
+If MAX_NUM_BASIS = N, MRAC block uses 4*(N+2) floats; PID block stays 36 floats. Indices I0..I(4*(N+2)+35) are the float block; path fields are always the last 7 VOFA channels.
+
+# I0  = mrac_pitch_theta_0
+# I1  = mrac_pitch_theta_1
+# I2  = mrac_pitch_theta_2
+# I3  = mrac_pitch_theta_3
+# I4  = mrac_pitch_theta_4
+# I5  = mrac_pitch_theta_5
+# I6  = mrac_pitch_u_nom
+# I7  = mrac_pitch_xm
+# I8  = mrac_roll_theta_0
+# I9  = mrac_roll_theta_1
+# I10 = mrac_roll_theta_2
+# I11 = mrac_roll_theta_3
+# I12 = mrac_roll_theta_4
+# I13 = mrac_roll_theta_5
+# I14 = mrac_roll_u_nom
+# I15 = mrac_roll_xm
+# I16 = mrac_yaw_theta_0
+# I17 = mrac_yaw_theta_1
+# I18 = mrac_yaw_theta_2
+# I19 = mrac_yaw_theta_3
+# I20 = mrac_yaw_theta_4
+# I21 = mrac_yaw_theta_5
+# I22 = mrac_yaw_u_nom
+# I23 = mrac_yaw_xm
+# I24 = mrac_z_theta_0
+# I25 = mrac_z_theta_1
+# I26 = mrac_z_theta_2
+# I27 = mrac_z_theta_3
+# I28 = mrac_z_theta_4
+# I29 = mrac_z_theta_5
+# I30 = mrac_z_u_nom
+# I31 = mrac_z_xm
+# I32 = pid_pitch_FB
+# I33 = pid_pitch_Des
+# I34 = pid_pitch_U
+# I35 = pid_roll_FB
+# I36 = pid_roll_Des
+# I37 = pid_roll_U
+# I38 = pid_yaw_FB
+# I39 = pid_yaw_Des
+# I40 = pid_yaw_U
+# I41 = pid_gyrox_FB
+# I42 = pid_gyrox_Des
+# I43 = pid_gyrox_U
+# I44 = pid_gyroy_FB
+# I45 = pid_gyroy_Des
+# I46 = pid_gyroy_U
+# I47 = pid_gyroz_FB
+# I48 = pid_gyroz_Des
+# I49 = pid_gyroz_U
+# I50 = pid_z_rate_FB
+# I51 = pid_z_rate_Des
+# I52 = pid_z_rate_U
+# I53 = pid_locx_FB
+# I54 = pid_locx_Des
+# I55 = pid_locx_U
+# I56 = pid_locy_FB
+# I57 = pid_locy_Des
+# I58 = pid_locy_U
+# I59 = pid_z_pos_FB
+# I60 = pid_z_pos_Des
+# I61 = pid_z_pos_U
+# I62 = pid_locxs_FB
+# I63 = pid_locxs_Des
+# I64 = pid_locxs_U
+# I65 = pid_locys_FB
+# I66 = pid_locys_Des
+# I67 = pid_locys_U
+# --- Path state (7 channels after float block; indices depend on N) ---
+# I68 = path.active_path_mode   (0=none 1=TWC 2=sinusoid 3=circle)
+# I69 = path.twc_target_x
+# I70 = path.twc_target_y
+# I71 = path.twc_target_z
+# I72 = path.sinusoid_t_elapsed
+# I73 = path.circle_theta
+# I74 = path.twc_arrived
+#
+# For MAX_NUM_BASIS = N: MRAC+PID float block is I0 .. I(4*(N+2)+35). Path fields are the next 7 indices.
+# N=6 example: float block I0..I67, path I68..I74.

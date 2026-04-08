@@ -1,0 +1,1 @@
+{"nodes": [{"id": "adc", "label": "ADC.h", "file_type": "code", "source_file": "USER\\ADC.h", "source_location": "L1"}], "edges": [{"source": "adc", "target": "stm32f4xx", "relation": "imports", "confidence": "EXTRACTED", "source_file": "USER\\ADC.h", "source_location": "L4", "weight": 1.0}]}

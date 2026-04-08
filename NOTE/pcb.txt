@@ -1,0 +1,30 @@
+
+
+                            一代飞控结构图  2021.12.8
+
+
+                   串口3                   G    G    G   G    G                     
+                 5  T  R  G                8	8 	 8	 8    8                 5 串			                                                               
+                                           CH1  2    3   4                      T 口
+                                                TIM4                            R 五
+     G                                                                          G  
+下   SWCLK
+载   SWDIO
+口   3.3
+
+
+串  G                                                                           5  串
+口  R                                                                           T  口
+一  T                                                                           R  4
+    5                                                                           G
+
+
+    G                                                                           5  串
+串  R                                                                           T  口
+口  T                                                                           R  2
+六  5                                                                           G
+ 
+               TIM2                                      TIM3         
+         5  CH2 CH4 CH3 CH1 G                     CH1  CH2  CH3  CH4
+              电调                     BATT(AD)   8    8    8     8
+                                         G        G    G    G     G

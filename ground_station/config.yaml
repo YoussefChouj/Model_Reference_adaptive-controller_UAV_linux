@@ -1,0 +1,16 @@
+serial_port: COM6
+baud_rate: 115200
+vofa_host: 127.0.0.1
+# VOFA+ JustFloat: two UDP ports so each connection has a fixed channel count.
+vofa_port_a: 1347
+vofa_port_b: 1348
+# Legacy single key (optional): maps to vofa_port_a if vofa_port_a omitted
+# vofa_port: 1347
+# firewater_* = text; justfloat = I0,I1,... (set VOFA protocol to JustFloat)
+vofa_format: justfloat
+simulate_udp_port: 50007
+cmd_host: 127.0.0.1
+# Dashboard command channel (must not equal vofa_port_b)
+cmd_udp_port: 1349
+# JSON telemetry mirror (serial_bridge -> dashboard, one-way UDP)
+telemetry_mirror_port: 1350
