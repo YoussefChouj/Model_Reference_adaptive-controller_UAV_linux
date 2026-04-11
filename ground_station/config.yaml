@@ -8,6 +8,9 @@ vofa_port_b: 1348
 # vofa_port: 1347
 # firewater_* = text; justfloat = I0,I1,... (set VOFA protocol to JustFloat)
 vofa_format: justfloat
+vofa_executable: C:\Program Files\Gutega\VOFA+\x64\vofa+.exe
+# 1 = preserve manual VOFA edits and workspace organization; launcher will not auto-overwrite context.
+vofa_manual_mode: 1
 simulate_udp_port: 50007
 cmd_host: 127.0.0.1
 # Dashboard command channel (must not equal vofa_port_b)

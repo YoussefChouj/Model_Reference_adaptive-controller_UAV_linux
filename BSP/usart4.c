@@ -95,6 +95,7 @@ void UART4_Configuration(void)
 typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;
 volatile GS_Cmd_t gs_cmd_queue[8];
 volatile uint8_t gs_cmd_head = 0, gs_cmd_tail = 0;
+volatile uint32_t gs_cmd_drop_count = 0;
 
 void Handle_UART4_GroundStation_Command(void)
 {
@@ -126,13 +127,19 @@ void Handle_UART4_GroundStation_Command(void)
             calc_crc ^= UA4RxMailbox[i];
         }
         
-        if (calc_crc == crc) {
-            gs_cmd_queue[gs_cmd_head].id = cmd_id;
-            gs_cmd_queue[gs_cmd_head].index = index;
-            gs_cmd_queue[gs_cmd_head].value = val.f;
-            
-            // Advance head (mod 8)
-            gs_cmd_head = (gs_cmd_head + 1) % 8;
+		if (calc_crc == crc) {
+			uint8_t next_head = (uint8_t)((gs_cmd_head + 1U) % 8U);
+			if (next_head != gs_cmd_tail) {
+				gs_cmd_queue[gs_cmd_head].id = cmd_id;
+				gs_cmd_queue[gs_cmd_head].index = index;
+				gs_cmd_queue[gs_cmd_head].value = val.f;
+
+				// Advance head (mod 8)
+				gs_cmd_head = next_head;
+			} else {
+				// Queue full: drop newest command to avoid clobbering unread data.
+				gs_cmd_drop_count++;
+			}
         }
     }
 }

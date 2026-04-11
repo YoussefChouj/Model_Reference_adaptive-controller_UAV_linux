@@ -1,0 +1,165 @@
+{
+  "type": "config",
+  "vnumber": 100,
+  "ctx": {
+    "wave_view": {
+      "ctx": {
+        "left_panel": {
+          "ctx": {
+            "pal": {
+              "ctx": {
+                "udp": {
+                  "remote_ip": "127.0.0.1",
+                  "remote_port": "1347",
+                  "local_port": "1347"
+                },
+                "protocol_combo": "JustFloat",
+                "link_type_combo": 1
+              }
+            }
+          }
+        },
+        "settingsPanel": {
+          "ctx": {
+            ".": {
+              "settings_ctx": [
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_pitch_e"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_pitch_u_ad"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_roll_e"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_roll_u_ad"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_yaw_e"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_yaw_u_ad"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_z_e"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "mrac_z_u_ad"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "status_arm"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "status_flymode"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "status_sbus_lost"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "status_twc_execute"
+                },
+                {
+                  "is_draw": true,
+                  "color": "#ffffff",
+                  "scale": 1,
+                  "yoffset": 0,
+                  "xoffset": 0,
+                  "decimal": -7,
+                  "value": 0,
+                  "name": "status_twc_arrived"
+                }
+              ],
+              "selected_line": -1,
+              "down_line": 12
+            }
+          }
+        }
+      }
+    }
+  }
+}

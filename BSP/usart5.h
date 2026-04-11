@@ -11,6 +11,7 @@
 #define USART5_RXMB_LEN            28
 
 void UART5_Configuration(void);
+void Handle_UART5_GroundStation_Command(void);
 extern UCHAR8 UA5RxDMAbuf[USART5_RXDMA_LEN] ;
 extern UCHAR8 UA5RxMailbox[USART5_RXMB_LEN] ;
 extern USART_RX_TypeDef UART5_Rcr;

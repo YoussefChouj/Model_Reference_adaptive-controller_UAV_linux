@@ -428,14 +428,14 @@ void Send_Groundstation_Telemetry_UART4(void)
     
     frame_counter++;
     
-    // DMA transfer on UART4 (DMA1_Stream4)
-    while(DMA_GetCurrDataCounter(DMA1_Stream4)); 
-    DMA_ClearITPendingBit(DMA1_Stream4, DMA_IT_TCIF4); 
-    
-    DMA_Cmd(DMA1_Stream4, DISABLE);				             
-    DMA1_Stream4->M0AR = (uint32_t)&Buf_Telemetry_UART4;  
-    DMA1_Stream4->NDTR = len;     
-    DMA_Cmd(DMA1_Stream4, ENABLE);		
+    // DMA transfer on UART5 wireless link (DMA1_Stream7)
+    while(DMA_GetCurrDataCounter(DMA1_Stream7)); 
+    DMA_ClearITPendingBit(DMA1_Stream7, DMA_IT_TCIF7); 
+
+    DMA_Cmd(DMA1_Stream7, DISABLE);				             
+    DMA1_Stream7->M0AR = (uint32_t)&Buf_Telemetry_UART4;  
+    DMA1_Stream7->NDTR = len;     
+    DMA_Cmd(DMA1_Stream7, ENABLE);		
 }
 
 typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;
@@ -557,6 +557,9 @@ void Process_GroundStation_Command(void)
         else if (id == 0x04) {
             if (idx == 0) {
                 GroundStation_AbortAllPaths();
+                DroneStatus.ARM_Status = DisArmed;
+                DroneStatus.FlyMode = FlyMode_DangerousStop;
+                GS_KeySDKflag = 0U;
             } else if (idx == 1) {
                 DroneStatus.FlyMode = FlyMode_SDK;
             }
@@ -644,10 +647,16 @@ void Process_GroundStation_Command(void)
             }
         }
 
-        /* CMD 0x0E ¡ª ground-station SDK state machine arm (parallel to SBUS hold) */
+        /* CMD 0x0E ¡ª ground-station SDK arm switch */
         else if (id == 0x0E) {
             if (idx == 0) {
-                GS_KeySDKflag = ((uint8_t)(val + 0.5f) != 0) ? 1U : 0U;
+                if (((uint8_t)(val + 0.5f)) != 0) {
+                    GS_KeySDKflag = 1U;
+                    DroneStatus.ARM_Status = Armed;
+                } else {
+                    GS_KeySDKflag = 0U;
+                    DroneStatus.ARM_Status = DisArmed;
+                }
             }
         }
     }

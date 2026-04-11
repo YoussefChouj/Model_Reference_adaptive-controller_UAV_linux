@@ -44,7 +44,7 @@ void UART5_Configuration(void)
 		nvic.NVIC_IRQChannelCmd = ENABLE;//IRQ通道使能 
 		NVIC_Init(&nvic);//根据指定的参数初始化VIC寄存器
 
-		uart5.USART_BaudRate = 9600;//波特率
+		uart5.USART_BaudRate = 115200;//波特率 (ground station)
 		uart5.USART_WordLength = USART_WordLength_8b;//字长为8位数据格式
 		uart5.USART_StopBits = USART_StopBits_1;//一个停止位
 		uart5.USART_Parity = USART_Parity_No;//无奇偶校验位
@@ -101,4 +101,52 @@ void UART5_Configuration(void)
 		dma.DMA_PeripheralBurst		=	DMA_PeripheralBurst_Single;
 		DMA_Init(DMA1_Stream7, &dma);
 		DMA_Cmd(DMA1_Stream7, DISABLE);
+}
+
+typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;
+extern volatile GS_Cmd_t gs_cmd_queue[8];
+extern volatile uint8_t gs_cmd_head;
+extern volatile uint8_t gs_cmd_tail;
+extern volatile uint32_t gs_cmd_drop_count;
+
+void Handle_UART5_GroundStation_Command(void)
+{
+	// Format: [0xCC] [0xDD] [CMD_ID: uint8] [INDEX: uint8] [VALUE: float32 LE] [CRC8]
+	// Total frame length is 9 bytes.
+	if (UA5RxMailbox[0] == 0xCC && UA5RxMailbox[1] == 0xDD)
+	{
+		uint8_t cmd_id = UA5RxMailbox[2];
+		uint8_t index = UA5RxMailbox[3];
+
+		union {
+			float f;
+			uint8_t b[4];
+		} val;
+
+		val.b[0] = UA5RxMailbox[4];
+		val.b[1] = UA5RxMailbox[5];
+		val.b[2] = UA5RxMailbox[6];
+		val.b[3] = UA5RxMailbox[7];
+
+		{
+			uint8_t crc = UA5RxMailbox[8];
+			uint8_t calc_crc = 0;
+			int i;
+			for (i = 2; i < 8; i++) {
+				calc_crc ^= UA5RxMailbox[i];
+			}
+
+			if (calc_crc == crc) {
+				uint8_t next_head = (uint8_t)((gs_cmd_head + 1U) % 8U);
+				if (next_head != gs_cmd_tail) {
+					gs_cmd_queue[gs_cmd_head].id = cmd_id;
+					gs_cmd_queue[gs_cmd_head].index = index;
+					gs_cmd_queue[gs_cmd_head].value = val.f;
+					gs_cmd_head = next_head;
+				} else {
+					gs_cmd_drop_count++;
+				}
+			}
+		}
+	}
 }

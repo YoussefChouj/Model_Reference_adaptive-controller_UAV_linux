@@ -66,7 +66,7 @@ static int eff_ch_valid_yaw(void)
 //
 void stabilizer_Task(void)
 {
-	 Check_Fly_Mode(); //ÅÐ¶ÏÎÞÈË»úµÄ×´Ì¬
+	 Check_Fly_Mode(); //ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½Ë»ï¿½ï¿½ï¿½×´Ì¬
 	
 	 Update_Data();
 	 
@@ -74,14 +74,14 @@ void stabilizer_Task(void)
 	 
 	 Update_Motor();
 	
-//	 Get_Voltage();//¼ÆËãµçÑ¹
+//	 Get_Voltage();//ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¹
 
 } 
 
 /*************************************************************************
-º¯ Êý Ãû£ºvoid Update_Data(void);
-º¯Êý¹¦ÄÜ£º¸üÐÂ·´À¡Öµ
-±¸    ×¢£º
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void Update_Data(void);
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½Öµ
+ï¿½ï¿½    ×¢ï¿½ï¿½
 *************************************************************************/
 void Update_Data(void)
 {
@@ -94,38 +94,38 @@ void Update_Data(void)
 	Cos_pitch_01=cos(imu_data.pit* DEG2RAD);
 	Sin_pitch_01 = sin(imu_data.pit* DEG2RAD);
 	
-	//////////////////Î»ÖÃ»··´À¡Öµ¸üÐÂ/////////////////////////
+	//////////////////Î»ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½/////////////////////////
 		ano_of.DISTANCE_X = ano_of.DISTANCE_X+ano_of.of2_dx_fix*0.005f;
 	  ano_of.DISTANCE_Y = ano_of.DISTANCE_Y+ano_of.of2_dy_fix*0.005f;
 
 	
-			//¹âÁ÷ÔÚÊÀ½ç×ø±êÏµÏÂµÄÖµ
+			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½Âµï¿½Öµ
 	  ano_of.earth_x = ano_of.earth_x + (ano_of.of2_dx_fix*0.005f*Cos_Yaw_01 + ano_of.of2_dy_fix*0.005f*Sin_Yaw_01 );
 	
 	  ano_of.earth_y = ano_of.earth_y + (ano_of.of2_dy_fix*0.005f*Cos_Yaw_01 - ano_of.of2_dx_fix*0.005f*Sin_Yaw_01 );
 	  ano_of.earth_x_ture  =  ano_of.earth_y;
 	  ano_of.earth_y_ture  =  -ano_of.earth_x;
 	
-	  Ctrler.locxPID.FB= ano_of.earth_x_ture ;  //ÊÀ½ç×ø±êÏµÏÂ
-	  Ctrler.locyPID.FB= ano_of.earth_y_ture ; //x (ÊÀ½ç)<----
+	  Ctrler.locxPID.FB= ano_of.earth_x_ture ;  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½
+	  Ctrler.locyPID.FB= ano_of.earth_y_ture ; //x (ï¿½ï¿½ï¿½ï¿½)<----
 		//                                                     |
-		//                                                     | y(ÊÀ½ç)
-		//±£»¤ÐÔ´ëÊ©  //t265Ïòºó×°µÄ´úÂë
+		//                                                     | y(ï¿½ï¿½ï¿½ï¿½)
+		//ï¿½ï¿½ï¿½ï¿½ï¿½Ô´ï¿½Ê©  //t265ï¿½ï¿½ï¿½×°ï¿½Ä´ï¿½ï¿½ï¿½
 //		if(linux_data.t265posy>-1000000.0f && linux_data.t265posy<1000000.0f)
 //		{
-//			Ctrler.locxPID.FB= linux_data.t265posy  ;  //ÊÀ½ç×ø±êÏµÏÂ	
+//			Ctrler.locxPID.FB= linux_data.t265posy  ;  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½	
 //		}
 //		if(linux_data.t265posx>-1000000.0f && linux_data.t265posx<1000000.0f)
 //		{
 //			Ctrler.locyPID.FB= -linux_data.t265posx ;
 //		}
 		
-	//¹âÁ÷ËÙ¶È·´À¡                                                    ^y(»úÌå)
+	//ï¿½ï¿½ï¿½ï¿½ï¿½Ù¶È·ï¿½ï¿½ï¿½                                                    ^y(ï¿½ï¿½ï¿½ï¿½)
 //	  Ctrler.locxsPID.FB= ano_of.of2_dy;                           |
-//    Ctrler.locysPID.FB= -ano_of.of2_dx;   //»úÌå×ø±êÏµÏÂ          |-->x(»úÌå)          
+//    Ctrler.locysPID.FB= -ano_of.of2_dx;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½          |-->x(ï¿½ï¿½ï¿½ï¿½)          
 
 		Ctrler.locxsPID.FB= (ano_of.of2_dy) *Cos_Yaw_01 +(-ano_of.of2_dx)*Sin_Yaw_01;
-    Ctrler.locysPID.FB=  (-ano_of.of2_dx) * Cos_Yaw_01 - (ano_of.of2_dy)*Sin_Yaw_01; //ÊÀ½ç×ø±êÏµÏÂ
+    Ctrler.locysPID.FB=  (-ano_of.of2_dx) * Cos_Yaw_01 - (ano_of.of2_dy)*Sin_Yaw_01; //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½
 	
 	  if( ano_of.of_alt_cm>0.5f &&ano_of.of_alt_cm<500.0f)
 		{
@@ -133,14 +133,14 @@ void Update_Data(void)
 		}
 	
 	ano_of.of2_h =ano_of.of2_raw_h; 
-	ano_of.of2_h_v = (ano_of.of2_h - ano_of.of2_last_h )/(0.005f);  //³ýÒÔÊ±¼ä5ms
+	ano_of.of2_h_v = (ano_of.of2_h - ano_of.of2_last_h )/(0.005f);  //ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½5ms
 	ano_of.of2_last_h = ano_of.of2_h;
   ano_of.of2_h_f2_v  = ano_of.of2_h_f2_v  *0.9f +ano_of.of2_h_v *0.1f;
 	 
 	Ctrler.Z_posPID.FB =  ano_of.of2_h;
 	Ctrler.Z_ratePID.FB = ano_of.of2_h_f2_v ;
 	
-	////////////////////×ËÌ¬»·½Ç¶ÈÖµ¸üÐÂ//////////////////////////////////  
+	////////////////////ï¿½ï¿½Ì¬ï¿½ï¿½ï¿½Ç¶ï¿½Öµï¿½ï¿½ï¿½ï¿½//////////////////////////////////  
 	
 	Ctrler.pitchPID.FB = -imu_data.pit  ;
 	Ctrler.rollPID.FB  = imu_data.rol ;
@@ -152,22 +152,22 @@ void Update_Data(void)
 	
 }
 /*************************************************************************
-º¯ Êý Ãû£ºvoid Update_Motor(void);
-º¯Êý¹¦ÄÜ£º¸üÐÂËÄ¸öµç»úµÄ×´Ì¬
-±¸    ×¢£º
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void Update_Motor(void);
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬
+ï¿½ï¿½    ×¢ï¿½ï¿½
 *************************************************************************/
 void Update_Motor(void)
 {
-		if(DroneStatus.ARM_Status==Armed)//½âËøÁË
+		if(DroneStatus.ARM_Status==Armed)//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 		{
 			
        if( DroneStatus.FlyMode == FlyMode_SDK   )//SDKÄ£Ê½	
 			{			
 					if(Ctrler.Z_posPID.FB < 0.3f && eff_rc_thr()<2150.0f)
 				{
-					Set_IDLE_Motors();//»¹Ã»Æð·É£¨ÂäµØ¡¢´¥µØ£©£¬ÓÍÃÅ×îµÍ£¬µ¡ËÙ
+					Set_IDLE_Motors();//ï¿½ï¿½Ã»ï¿½ï¿½É£ï¿½ï¿½ï¿½Ø¡ï¿½ï¿½ï¿½ï¿½Ø£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í£ï¿½ï¿½ï¿½ï¿½ï¿½
 				}
-				else if(SDK_DelayWakeFlag==1)  //SDK_DelayWakeFlagÕâ¸ö±êÖ¾Î»Îª1µÄÊ±ºò»áµ¡ËÙ
+				else if(SDK_DelayWakeFlag==1)  //SDK_DelayWakeFlagï¿½ï¿½ï¿½ï¿½ï¿½Ö¾Î»Îª1ï¿½ï¿½Ê±ï¿½ï¿½áµ¡ï¿½ï¿½
 				{
 					Set_IDLE_Motors();
 				}
@@ -176,7 +176,7 @@ void Update_Motor(void)
 					Set_PWM_Motors();
 				}			
 			}
-			else if(DroneStatus.FlyMode == FlyMode_DangerousStop )//Ç¿ÖÆÍ£»ú
+			else if(DroneStatus.FlyMode == FlyMode_DangerousStop )//Ç¿ï¿½ï¿½Í£ï¿½ï¿½
 			{
 				Set_Zero_Motors();
 				DroneStatus.ARM_Status = DisArmed;
@@ -187,7 +187,7 @@ void Update_Motor(void)
 				DroneStatus.ARM_Status = DisArmed;
 			}
 		}
-		else//ÉÏËø×´Ì¬Çå³ý»ý·ÖÖµ£¬²¢ÇÒµç»ú¾ø¶Ô²»×ª
+		else//ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½ï¿½Òµï¿½ï¿½ï¿½ï¿½ï¿½Ô²ï¿½×ª
 		{
 		  SDK_StateMachine_Init();
 			Clear_Structure();
@@ -195,7 +195,7 @@ void Update_Motor(void)
 			
 		}
 }
-//ÒÔÏÂÊÇÐ£×¼µçµ÷´úÂë
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð£×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 //   if( DroneStatus.FlyMode == FlyMode_SDK   )//SDKÄ£Ê½	
 //			{
 //				 if(sbus_channel[5] >=1000) 
@@ -221,13 +221,13 @@ void Update_Motor(void)
 //		}
 //}
 /*************************************************************************
-º¯ Êý Ãû£ºvoid Compute_Motor(void);
-º¯Êý¹¦ÄÜ£º¼ÆËãPID²ÎÊý
-±¸    ×¢£º
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void Compute_Motor(void);
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½ï¿½PIDï¿½ï¿½ï¿½ï¿½
+ï¿½ï¿½    ×¢ï¿½ï¿½
 *************************************************************************/
 void Compute_Motor(void)
 {
-////////////////¼ÆËã¸ß¶ÈÊý¾Ý//////////////////////////////////////////////////////////
+////////////////ï¿½ï¿½ï¿½ï¿½ß¶ï¿½ï¿½ï¿½ï¿½ï¿½//////////////////////////////////////////////////////////
 				
 	Update_Des(case_Update_height_Des);  
 	cnt_h++;
@@ -249,23 +249,23 @@ void Compute_Motor(void)
 		
   cnt_loc=0;
   Update_Des(case_Update_v_loc_Des);
-	SDK_Set_V_Loc();//£¡£¡£¡
+	SDK_Set_V_Loc();//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 	ComputePID(&Ctrler.locxsPID);
 	ComputePID(&Ctrler.locysPID);
   }
 	
-//////////////////////¼ÆËã×ËÌ¬Êý¾Ý////////////////////////////////////////////////////////////
+//////////////////////ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¬ï¿½ï¿½ï¿½ï¿½////////////////////////////////////////////////////////////
 	
-	Update_Des(case_Update_pitrol_Des);  //¸üÐÂpitºÍroll½Ç¶ÈÖµ
+	Update_Des(case_Update_pitrol_Des);  //ï¿½ï¿½ï¿½ï¿½pitï¿½ï¿½rollï¿½Ç¶ï¿½Öµ
 	ComputePID(&Ctrler.pitchPID);
 	ComputePID(&Ctrler.rollPID);
 	
-	Update_Des(case_Update_yaw_Des);    //¸üÐÂyawµÄ½Ç¶È
+	Update_Des(case_Update_yaw_Des);    //ï¿½ï¿½ï¿½ï¿½yawï¿½Ä½Ç¶ï¿½
 	ComputeYawPID(&Ctrler.yawPID);
 	
 	
-	Update_Des(case_Update_gyro_Des);   //¸üÐÂ½ÇËÙ¶È
+	Update_Des(case_Update_gyro_Des);   //ï¿½ï¿½ï¿½Â½ï¿½ï¿½Ù¶ï¿½
 	
 	SDK_Set_Gyroz();
 	ComputePID(&Ctrler.gyroxPID);
@@ -278,20 +278,28 @@ void Compute_Motor(void)
 	
  
 
-	 //Throttle_th=2800+(16.70f-real_voltage)*105.5f;  //4sµç³ØÂã»ú+d435i+t265+orin  
+	 //Throttle_th=2800+(16.70f-real_voltage)*105.5f;  //4sï¿½ï¿½ï¿½ï¿½ï¿½ï¿½+d435i+t265+orin  
 	 Throttle_th=2800;
 
 #if ENABLE_MRAC_OUTPUT_INJECTION == 1
 	// Inject MRAC adaptive signals.
 	// u_total = u_nom + (u_ad * scaling_factor)
-	Throttle_out = Ctrler.Z_ratePID.U + Throttle_th + (mrac_state.z_rate.u_ad * mrac_config_z.mrac_to_mixer);
-	
-	u_gyrox = Ctrler.gyroxPID.U + (mrac_state.roll.u_ad * mrac_config_roll.mrac_to_mixer);
-	
-	// Motor mixer needs gyroy reversed
-	u_gyroy = -(Ctrler.gyroyPID.U + (mrac_state.pitch.u_ad * mrac_config_pitch.mrac_to_mixer)); 
-	
-	u_gyroz = Ctrler.gyrozPID.U + (mrac_state.yaw.u_ad * mrac_config_yaw.mrac_to_mixer);
+	// NaN/Inf guard: if u_ad is not finite (e.g. due to diverged adaptive weights),
+	// fall back to zero correction so the PID baseline always reaches the motors.
+	{
+		float mrac_z     = mrac_state.z_rate.u_ad * mrac_config_z.mrac_to_mixer;
+		float mrac_roll  = mrac_state.roll.u_ad  * mrac_config_roll.mrac_to_mixer;
+		float mrac_pitch = mrac_state.pitch.u_ad * mrac_config_pitch.mrac_to_mixer;
+		float mrac_yaw   = mrac_state.yaw.u_ad   * mrac_config_yaw.mrac_to_mixer;
+		if (!isfinite(mrac_z))     mrac_z     = 0.0f;
+		if (!isfinite(mrac_roll))  mrac_roll  = 0.0f;
+		if (!isfinite(mrac_pitch)) mrac_pitch = 0.0f;
+		if (!isfinite(mrac_yaw))   mrac_yaw   = 0.0f;
+		Throttle_out = Ctrler.Z_ratePID.U + Throttle_th + mrac_z;
+		u_gyrox      = Ctrler.gyroxPID.U  + mrac_roll;
+		u_gyroy      = -(Ctrler.gyroyPID.U + mrac_pitch); // Motor mixer needs gyroy reversed
+		u_gyroz      = Ctrler.gyrozPID.U  + mrac_yaw;
+	}
 #else
 	// Shadow mode: MRAC computes silently, but motors only see normal PID output.
     Throttle_out=Ctrler.Z_ratePID.U + Throttle_th;
@@ -333,9 +341,9 @@ void Compute_Motor(void)
 			
 }
 /*************************************************************************
-º¯ Êý Ãû£ºvoid Update_Des(unsigned char which_level);
-º¯Êý¹¦ÄÜ£º¸üÐÂÊý¾Ý
-±¸    ×¢£º
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void Update_Des(unsigned char which_level);
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+ï¿½ï¿½    ×¢ï¿½ï¿½
 *************************************************************************/
 float des_pitch = 0;
 float	des_roll = 0;
@@ -349,7 +357,7 @@ TWC.world_y = Ctrler.locyPID.FB;
 TWC.world_z = Ctrler.Z_posPID.FB;
 //TWC.execute = 0;
 //TWC.set_yaw = 0;
-TWC.real_yaw = Ctrler.yawPID.FB; //½á¹¹Ìå³ÉÔ±±äÁ¿³õÊ¼»¯Ò»¶¨ÒªÐ´ÔÚº¯ÊýÄÚ²¿£¬²»ÄÜÒ»¿ªÊ¼¾Í³õÊ¼»¯
+TWC.real_yaw = Ctrler.yawPID.FB; //ï¿½á¹¹ï¿½ï¿½ï¿½Ô±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½Ò»ï¿½ï¿½ÒªÐ´ï¿½Úºï¿½ï¿½ï¿½ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ê¼ï¿½Í³ï¿½Ê¼ï¿½ï¿½
 
 	if (TWC.execute == 1) {
 		float dx = Ctrler.locxPID.FB - TWC.target_x;
@@ -365,31 +373,31 @@ TWC.real_yaw = Ctrler.yawPID.FB; //½á¹¹Ìå³ÉÔ±±äÁ¿³õÊ¼»¯Ò»¶¨ÒªÐ´ÔÚº¯ÊýÄÚ²¿£¬²»ÄÜÒ
 	switch(which_level)
 	{
 		
-		//////////////////////¸ß¶ÈÊý¾Ý/////////////////////////////////////////////////////
+		//////////////////////ï¿½ß¶ï¿½ï¿½ï¿½ï¿½ï¿½/////////////////////////////////////////////////////
 		
-		case case_Update_height_Des://¸üÐÂ¸ß¶ÈÆÚÍû
+		case case_Update_height_Des://ï¿½ï¿½ï¿½Â¸ß¶ï¿½ï¿½ï¿½ï¿½ï¿½
 			
 			if(is_last_thr_valid && (!eff_thr_ch_valid()) )
 				Ctrler.Z_posPID.Des=  Ctrler.Z_posPID.FB;  
 
 			  is_last_thr_valid = eff_thr_ch_valid();
 			
-			if(TWC.execute == 1){Ctrler.Z_posPID.Des = TWC.target_z; }//ÏòÄ¿±êµã×ªÒÆ
+			if(TWC.execute == 1){Ctrler.Z_posPID.Des = TWC.target_z; }//ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½×ªï¿½ï¿½
 
        break;
 			
-		case case_Update_v_h_Des://¸üÐÂÊúÖ±ËÙ¶ÈÆÚÍû
+		case case_Update_v_h_Des://ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½Ù¶ï¿½ï¿½ï¿½ï¿½ï¿½
 			if(eff_thr_ch_valid())
  				Ctrler.Z_ratePID.Des =  ((eff_rc_thr()-3000.0f)/1000.0f)*gs_max_vertical_speed_mps ;
 			else
 				Ctrler.Z_ratePID.Des = Ctrler.Z_posPID.U;
        break;
 			
-		////////////////////Ë®Æ½Î»ÖÃÊý¾Ý////////////////////////////////////////////////////	
+		////////////////////Ë®Æ½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½////////////////////////////////////////////////////	
 			
-		case case_Update_loc_Des://¸üÐÂÎ»ÖÃÆÚÍû
+		case case_Update_loc_Des://ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 			
-			if( is_last_roll_valid && (!eff_ch_valid_roll()) )  //ÉÏÒ»´Î¶¯ÁË£¬ÏÖÔÚ»ØÖÐ
+			if( is_last_roll_valid && (!eff_ch_valid_roll()) )  //ï¿½ï¿½Ò»ï¿½Î¶ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ï¿½Ú»ï¿½ï¿½ï¿½
 			{
 				Ctrler.locxPID.Des = Ctrler.locxPID.FB;
 			}
@@ -400,33 +408,33 @@ TWC.real_yaw = Ctrler.yawPID.FB; //½á¹¹Ìå³ÉÔ±±äÁ¿³õÊ¼»¯Ò»¶¨ÒªÐ´ÔÚº¯ÊýÄÚ²¿£¬²»ÄÜÒ
 			
 			is_last_pitch_valid = eff_ch_valid_pitch();
 			is_last_roll_valid = eff_ch_valid_roll();
-			if(TWC.execute == 1){Ctrler.locxPID.Des = TWC.target_x;Ctrler.locyPID.Des = TWC.target_y;}//ÏòÄ¿±êµã×ªÒÆ
+			if(TWC.execute == 1){Ctrler.locxPID.Des = TWC.target_x;Ctrler.locyPID.Des = TWC.target_y;}//ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½×ªï¿½ï¿½
 			break;
 			
-    case case_Update_v_loc_Des://¸üÐÂË®Æ½ËÙ¶ÈÆÚÍû
+    case case_Update_v_loc_Des://ï¿½ï¿½ï¿½ï¿½Ë®Æ½ï¿½Ù¶ï¿½ï¿½ï¿½ï¿½ï¿½
 
-				if(eff_ch_valid_pitch())//´ò¸Ë¶ÔÓ¦ÆÚÍûË®Æ½ËÙ¶È
+				if(eff_ch_valid_pitch())//ï¿½ï¿½Ë¶ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ë®Æ½ï¿½Ù¶ï¿½
 					   Ctrler.locysPID.Des = -((eff_rc_pit()-3000.0f)/1000.0f)*(gs_max_horizontal_speed_mps * 100.0f);
 				else if (Ctrler.locyPID.U>120.0f)
 						Ctrler.locysPID.Des = 120.0f;
 				else if (Ctrler.locyPID.U< -120.0f)
 						Ctrler.locysPID.Des = -120.0f;
 				else
-					Ctrler.locysPID.Des = 	Ctrler.locyPID.U;//²»´ò¸Ë¾Í¶¨µã
+					Ctrler.locysPID.Des = 	Ctrler.locyPID.U;//ï¿½ï¿½ï¿½ï¿½Ë¾Í¶ï¿½ï¿½ï¿½
 					
-				if(eff_ch_valid_roll())//´ò¸Ë¶ÔÓ¦ÆÚÍûË®Æ½ËÙ¶È
+				if(eff_ch_valid_roll())//ï¿½ï¿½Ë¶ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ë®Æ½ï¿½Ù¶ï¿½
 					Ctrler.locxsPID.Des = -((eff_rc_rol()-3000.0f)/1000.0f)*(gs_max_horizontal_speed_mps * 100.0f);  
 				else if(Ctrler.locxPID.U>120.0f)
 					Ctrler.locxsPID.Des = 120.0f;
 				else if(Ctrler.locxPID.U< -120.0f)
 					Ctrler.locxsPID.Des = -120.0f;
 				else
-					Ctrler.locxsPID.Des = 	Ctrler.locxPID.U;//²»´ò¸Ë¾Í¶¨µã
+					Ctrler.locxsPID.Des = 	Ctrler.locxPID.U;//ï¿½ï¿½ï¿½ï¿½Ë¾Í¶ï¿½ï¿½ï¿½
 
        break;
-		////////////////////////×ËÌ¬Êý¾Ý////////////////////////////////////////////////////	
+		////////////////////////ï¿½ï¿½Ì¬ï¿½ï¿½ï¿½ï¿½////////////////////////////////////////////////////	
 		
-		case case_Update_pitrol_Des://¸üÐÂ pitch rollÆÚÍû
+		case case_Update_pitrol_Des://ï¿½ï¿½ï¿½ï¿½ pitch rollï¿½ï¿½ï¿½ï¿½
 			
 			des_pitch = (Ctrler.locysPID.U)*Cos_Yaw_01 + (Ctrler.locxsPID.U)*Sin_Yaw_01;
 		  des_roll = (Ctrler.locxsPID.U)*Cos_Yaw_01 - (Ctrler.locysPID.U)*Sin_Yaw_01;
@@ -436,17 +444,17 @@ TWC.real_yaw = Ctrler.yawPID.FB; //½á¹¹Ìå³ÉÔ±±äÁ¿³õÊ¼»¯Ò»¶¨ÒªÐ´ÔÚº¯ÊýÄÚ²¿£¬²»ÄÜÒ
 	
     break;
 			
-		case case_Update_yaw_Des://¸üÐÂyawÆÚÍû
+		case case_Update_yaw_Des://ï¿½ï¿½ï¿½ï¿½yawï¿½ï¿½ï¿½ï¿½
 			
 			if(is_last_yaw_valid && (!eff_ch_valid_yaw()) )
 			Ctrler.yawPID.Des = Ctrler.yawPID.FB;
-			//£¡£¡£¡yawdesÎªºÎ»áÆ®?Ê²Ã´¹í
+			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½yawdesÎªï¿½Î»ï¿½Æ®?Ê²Ã´ï¿½ï¿½
 			is_last_yaw_valid = eff_ch_valid_yaw();
 		
-			if(TWC.execute == 1){Ctrler.yawPID.Des = TWC.set_yaw; }//ÏòÄ¿±êµã×ªÒÆ
+			if(TWC.execute == 1){Ctrler.yawPID.Des = TWC.set_yaw; }//ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½×ªï¿½ï¿½
     break;
 			
-		case case_Update_gyro_Des://¸üÐÂ½ÇËÙ¶ÈÆÚÍû
+		case case_Update_gyro_Des://ï¿½ï¿½ï¿½Â½ï¿½ï¿½Ù¶ï¿½ï¿½ï¿½ï¿½ï¿½
 
 			Ctrler.gyroyPID.Des = Ctrler.pitchPID.U ;
 			Ctrler.gyroxPID.Des = Ctrler.rollPID.U ;
@@ -468,7 +476,7 @@ TWC.real_yaw = Ctrler.yawPID.FB; //½á¹¹Ìå³ÉÔ±±äÁ¿³õÊ¼»¯Ò»¶¨ÒªÐ´ÔÚº¯ÊýÄÚ²¿£¬²»ÄÜÒ
 
 
 
-/*********ÏÞ·ùº¯Êý*******/
+/*********ï¿½Þ·ï¿½ï¿½ï¿½ï¿½ï¿½*******/
 float Constrain_Float(float amt, float low, float high)
 {
   return ((amt)<(low)?(low):((amt)>(high)?(high):(amt)));
@@ -649,17 +657,17 @@ REAL fast_atan2(REAL y, REAL x)
 	return angle;
 }
 
-float voltage;    //²âÁ¿µçÑ¹Öµ(2.67-2.99)    
-float real_voltage;    //Êµ¼ÊµçÑ¹Öµ
+float voltage;    //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¹Öµ(2.67-2.99)    
+float real_voltage;    //Êµï¿½Êµï¿½Ñ¹Öµ
 uint16_t adc_value ;
-void Get_Voltage(void)     //Í¨¹ýADC¼ì²âµç³ØµçÑ¹
+void Get_Voltage(void)     //Í¨ï¿½ï¿½ADCï¿½ï¿½ï¿½ï¿½Øµï¿½Ñ¹
 {
 	adc_value = ADC_Read();
 	voltage = Voltage_Calculation(adc_value);
-	real_voltage = (voltage/2.85f)*16.8f;     //ÀíÂÛÉÏ2.99
+	real_voltage = (voltage/2.85f)*16.8f;     //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½2.99
 	if(real_voltage<15.0f)
 	{
-		SetBeep(1);//¾¯¸æÐÅºÅ
+		SetBeep(1);//ï¿½ï¿½ï¿½ï¿½ï¿½Åºï¿½
 		
 	}
 }

@@ -60,36 +60,41 @@ void remoter_task(void)
 
 void Check_Stick_Motion(void)
 {
-	if( is_Stick_MIN(Remoter.ThrCtrler) &&  is_Stick_MAX(Remoter.YawCtrler) )//  arm  сроб
+	float eff_thr = sbus_lost ? virtual_rc_sticks[0] : (float)Remoter.ThrCtrler;
+	float eff_pit = sbus_lost ? virtual_rc_sticks[1] : (float)Remoter.PitCtrler;
+	float eff_rol = sbus_lost ? virtual_rc_sticks[2] : (float)Remoter.RolCtrler;
+	float eff_yaw = sbus_lost ? virtual_rc_sticks[3] : (float)Remoter.YawCtrler;
+	
+	if( is_Stick_MIN(eff_thr) &&  is_Stick_MAX(eff_yaw) )//  arm  сроб
 		StickMotion.LeftStick_RightDown_cnt++;
 	else StickMotion.LeftStick_RightDown_cnt=0;
 	
-	if( is_Stick_MIN(Remoter.ThrCtrler) &&  is_Stick_MIN(Remoter.YawCtrler) )  // disarm
+	if( is_Stick_MIN(eff_thr) &&  is_Stick_MIN(eff_yaw) )  // disarm
 		StickMotion.LeftStick_LeftDown_cnt++;
 	else StickMotion.LeftStick_LeftDown_cnt=0;
 	
-	if( is_Stick_MAX(Remoter.ThrCtrler) &&  is_Stick_MIN(Remoter.YawCtrler) )  // adjust
+	if( is_Stick_MAX(eff_thr) &&  is_Stick_MIN(eff_yaw) )  // adjust
 		StickMotion.LeftStick_LeftUp_cnt++;
 	else StickMotion.LeftStick_LeftUp_cnt=0;
 
-	if( is_Stick_MAX(Remoter.ThrCtrler) &&  is_Stick_MAX(Remoter.YawCtrler) )  // debug
+	if( is_Stick_MAX(eff_thr) &&  is_Stick_MAX(eff_yaw) )  // debug
 		StickMotion.LeftStick_RightUp_cnt++;
 	else StickMotion.LeftStick_RightUp_cnt=0;
 	
 	
-	if( is_Stick_MIN(Remoter.PitCtrler) &&  is_Stick_MIN(Remoter.RolCtrler) )  // 
+	if( is_Stick_MIN(eff_pit) &&  is_Stick_MIN(eff_rol) )  // 
 		StickMotion.RightStick_LeftDown_cnt++;
 	else StickMotion.RightStick_LeftDown_cnt=0;
 	
-	if( is_Stick_MIN(Remoter.PitCtrler) &&  is_Stick_MAX(Remoter.RolCtrler) )  // 
+	if( is_Stick_MIN(eff_pit) &&  is_Stick_MAX(eff_rol) )  // 
 		StickMotion.RightStick_RightDown_cnt++;
 	else StickMotion.RightStick_RightDown_cnt=0;
 
-	if( is_Stick_MAX(Remoter.PitCtrler) &&  is_Stick_MIN(Remoter.RolCtrler) )  // 
+	if( is_Stick_MAX(eff_pit) &&  is_Stick_MIN(eff_rol) )  // 
 		StickMotion.RightStick_LeftUp_cnt++;
 	else StickMotion.RightStick_LeftUp_cnt=0;
 
-	if( is_Stick_MAX(Remoter.PitCtrler) &&  is_Stick_MAX(Remoter.RolCtrler) )  // 
+	if( is_Stick_MAX(eff_pit) &&  is_Stick_MAX(eff_rol) )  // 
 		StickMotion.RightStick_RightUp_cnt++;
 	else StickMotion.RightStick_RightUp_cnt=0;
 

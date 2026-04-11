@@ -108,8 +108,7 @@ void AutoflyTask(void)
 		AutoflyTask_RunSinusoid();
 	}
 
-	if (((sbus_channel[5] == 1800) && (sbus_channel[4] == 1800) && (sbus_lost == 0)) ||
-	    (GS_KeySDKflag != 0)) {
+	if (((sbus_channel[5] == 1800) && (sbus_channel[4] == 1800) && (sbus_lost == 0)) ) {
 		KeyPressedTimeMS += 5U;
 	} else {
 		KeyPressedTimeMS = 0U;

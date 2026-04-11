@@ -1,27 +1,28 @@
 #include "main.h"
 #include "creat_task.h"
+#include "mrac.h"
 
 // main() is the entry point of the program; execution starts here after reset and startup code runs
 int main(void)
 { 
     BSP_Init(); // Initialize Board Support Package (hardware peripherals: GPIO, timers, UART, etc.)
 
-  //´´½¨¿ªÊ¼ÈÎÎñ (chu¨¤ng ji¨¤n k¨¡i sh¨« r¨¨n w¨´) - "Create start task"
+  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ (chuï¿½ï¿½ng jiï¿½ï¿½n kï¿½ï¿½i shï¿½ï¿½ rï¿½ï¿½n wï¿½ï¿½) - "Create start task"
   // xTaskCreate() is a FreeRTOS function that creates a new task
-  xTaskCreate((TaskFunction_t )start_task,            //ÈÎÎñº¯Êý (r¨¨n w¨´ h¨¢n sh¨´) - "task function" - pointer to the function that will run as the task
-        (const char*    )"start_task",          //ÈÎÎñÃû³Æ (r¨¨n w¨´ m¨ªng ch¨¥ng) - "task name" - human-readable string for debugging
-        (uint16_t       )START_STK_SIZE,        //ÈÎÎñ¶ÑÕ»´óÐ¡ (r¨¨n w¨´ du¨© zh¨¤n d¨¤ xi¨£o) - "task stack size" - amount of memory (in words) reserved for this task's stack
-        (void*          )NULL,                  //´«µÝ¸øÈÎÎñº¯ÊýµÄ²ÎÊý (chu¨¢n d¨¬ g¨§i r¨¨n w¨´ h¨¢n sh¨´ de c¨¡n sh¨´) - "parameter passed to task function" - NULL means no parameter
-        (UBaseType_t    )START_TASK_PRIO,       //ÈÎÎñÓÅÏÈ¼¶ (r¨¨n w¨´ y¨­u xi¨¡n j¨ª) - "task priority" - higher number = higher priority
-        (TaskHandle_t*  )&StartTask_Handler);   //ÈÎÎñ¾ä±ú (r¨¨n w¨´ j¨´ b¨«ng) - "task handle" - a reference/ID to control this task later
-  vTaskStartScheduler();          //¿ªÆôÈÎÎñµ÷¶È (k¨¡i q¨« r¨¨n w¨´ di¨¤o d¨´) - "start task scheduler" - begins FreeRTOS multitasking; this function never returns
+  xTaskCreate((TaskFunction_t )start_task,            //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (rï¿½ï¿½n wï¿½ï¿½ hï¿½ï¿½n shï¿½ï¿½) - "task function" - pointer to the function that will run as the task
+        (const char*    )"start_task",          //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (rï¿½ï¿½n wï¿½ï¿½ mï¿½ï¿½ng chï¿½ï¿½ng) - "task name" - human-readable string for debugging
+        (uint16_t       )START_STK_SIZE,        //ï¿½ï¿½ï¿½ï¿½ï¿½Õ»ï¿½ï¿½Ð¡ (rï¿½ï¿½n wï¿½ï¿½ duï¿½ï¿½ zhï¿½ï¿½n dï¿½ï¿½ xiï¿½ï¿½o) - "task stack size" - amount of memory (in words) reserved for this task's stack
+        (void*          )NULL,                  //ï¿½ï¿½ï¿½Ý¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½ (chuï¿½ï¿½n dï¿½ï¿½ gï¿½ï¿½i rï¿½ï¿½n wï¿½ï¿½ hï¿½ï¿½n shï¿½ï¿½ de cï¿½ï¿½n shï¿½ï¿½) - "parameter passed to task function" - NULL means no parameter
+        (UBaseType_t    )START_TASK_PRIO,       //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½ (rï¿½ï¿½n wï¿½ï¿½ yï¿½ï¿½u xiï¿½ï¿½n jï¿½ï¿½) - "task priority" - higher number = higher priority
+        (TaskHandle_t*  )&StartTask_Handler);   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (rï¿½ï¿½n wï¿½ï¿½ jï¿½ï¿½ bï¿½ï¿½ng) - "task handle" - a reference/ID to control this task later
+  vTaskStartScheduler();          //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (kï¿½ï¿½i qï¿½ï¿½ rï¿½ï¿½n wï¿½ï¿½ diï¿½ï¿½o dï¿½ï¿½) - "start task scheduler" - begins FreeRTOS multitasking; this function never returns
 }
 
-//¿ªÊ¼ÈÎÎñÈÎÎñº¯Êý (k¨¡i sh¨« r¨¨n w¨´ r¨¨n w¨´ h¨¢n sh¨´) - "Start task function"
+//ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (kï¿½ï¿½i shï¿½ï¿½ rï¿½ï¿½n wï¿½ï¿½ rï¿½ï¿½n wï¿½ï¿½ hï¿½ï¿½n shï¿½ï¿½) - "Start task function"
 // This task's job is to create all other application tasks, then delete itself
 void start_task(void *pvParameters)
 {
-  taskENTER_CRITICAL();           //½øÈëÁÙ½çÇø (j¨¬n r¨´ l¨ªn ji¨¨ q¨±) - "enter critical section" - disables interrupts to protect the following code from being interrupted
+  taskENTER_CRITICAL();           //ï¿½ï¿½ï¿½ï¿½ï¿½Ù½ï¿½ï¿½ï¿½ (jï¿½ï¿½n rï¿½ï¿½ lï¿½ï¿½n jiï¿½ï¿½ qï¿½ï¿½) - "enter critical section" - disables interrupts to protect the following code from being interrupted
  
   // Create SystemMonitor_Task - runs at 1 Hz to check system health
   xTaskCreate((TaskFunction_t )SystemMonitor_Task,     
@@ -79,14 +80,14 @@ void start_task(void *pvParameters)
         (UBaseType_t    )SENDTASK_PRIO,
         (TaskHandle_t*  )&SendTask_Handler); 								
                 
-  vTaskDelete(StartTask_Handler); //É¾³ý¿ªÊ¼ÈÎÎñ (sh¨¡n ch¨² k¨¡i sh¨« r¨¨n w¨´) - "delete start task" - this task deletes itself since its job (creating other tasks) is done
-  taskEXIT_CRITICAL();            //ÍË³öÁÙ½çÇø (tu¨¬ ch¨± l¨ªn ji¨¨ q¨±) - "exit critical section" - re-enables interrupts (though this line never executes because task was deleted)
+  vTaskDelete(StartTask_Handler); //É¾ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ (shï¿½ï¿½n chï¿½ï¿½ kï¿½ï¿½i shï¿½ï¿½ rï¿½ï¿½n wï¿½ï¿½) - "delete start task" - this task deletes itself since its job (creating other tasks) is done
+  taskEXIT_CRITICAL();            //ï¿½Ë³ï¿½ï¿½Ù½ï¿½ï¿½ï¿½ (tuï¿½ï¿½ chï¿½ï¿½ lï¿½ï¿½n jiï¿½ï¿½ qï¿½ï¿½) - "exit critical section" - re-enables interrupts (though this line never executes because task was deleted)
 }
 
 
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º ÏµÍ³¼àÊÓÆ÷ (h¨¢n sh¨´ g¨­ng n¨¦ng: x¨¬ t¨¯ng ji¨¡n sh¨¬ q¨¬) - "Function: System monitor"
-Ö¡ÂÊ    £º  1 (zh¨¨n l¨¸: 1) - "Frame rate: 1 Hz" (runs once per second)
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ ÏµÍ³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: xï¿½ï¿½ tï¿½ï¿½ng jiï¿½ï¿½n shï¿½ï¿½ qï¿½ï¿½) - "Function: System monitor"
+Ö¡ï¿½ï¿½    ï¿½ï¿½  1 (zhï¿½ï¿½n lï¿½ï¿½: 1) - "Frame rate: 1 Hz" (runs once per second)
 ----------------------------------------------------------*/
 void SystemMonitor_Task(void *pvParameters)
 {
@@ -102,8 +103,8 @@ void SystemMonitor_Task(void *pvParameters)
 }
 
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º ÎÞÏß´®¿ÚÈÎÎñ (h¨¢n sh¨´ g¨­ng n¨¦ng: w¨² xi¨¤n chu¨¤n k¨¯u r¨¨n w¨´) - "Function: Wireless serial port task"
-Ö¡ÂÊ    £º  100 (zh¨¨n l¨¸: 100) - "Frame rate: 100 Hz" (runs 100 times per second)
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ ï¿½ï¿½ï¿½ß´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: wï¿½ï¿½ xiï¿½ï¿½n chuï¿½ï¿½n kï¿½ï¿½u rï¿½ï¿½n wï¿½ï¿½) - "Function: Wireless serial port task"
+Ö¡ï¿½ï¿½    ï¿½ï¿½  100 (zhï¿½ï¿½n lï¿½ï¿½: 100) - "Frame rate: 100 Hz" (runs 100 times per second)
 ----------------------------------------------------------*/
 void Send_Task(void *pvParameters)
 {
@@ -112,19 +113,20 @@ void Send_Task(void *pvParameters)
     PreviousWakeTime = xTaskGetTickCount();	
   while(1)
   {
-        ANO_Report_UserData1(); // Send telemetry data (ANO protocol - a common Chinese flight controller protocol)
+        // Keep UART5 stream clean for ground-station telemetry frames.
+        // ANO_Report_UserData1() also uses UART5 DMA stream and would interleave payloads.
         send_to_linux(); // Send data to Linux companion computer (if present)
         Send_Groundstation_Telemetry_UART4(); // Send telemetry to Ground Station
         Process_GroundStation_Command(); // Process received commands
-        usart3_send();//´®¿ÚÈý·¢ËÍÈÎÎñ (chu¨¤n k¨¯u s¨¡n f¨¡ s¨°ng r¨¨n w¨´) - "UART3 send task" - transmit data via UART3 peripheral
+        usart3_send();//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (chuï¿½ï¿½n kï¿½ï¿½u sï¿½ï¿½n fï¿½ï¿½ sï¿½ï¿½ng rï¿½ï¿½n wï¿½ï¿½) - "UART3 send task" - transmit data via UART3 peripheral
         system_monitor.USART2_task_cnt++; // Increment task execution counter (for monitoring task health)
         vTaskDelayUntil(&PreviousWakeTime, TimeIncrement );
   }
 }
 
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º ÍÓÂÝÒÇ¸üÐÂ (h¨¢n sh¨´ g¨­ng n¨¦ng: tu¨® lu¨® y¨ª g¨¥ng x¨©n) - "Function: Gyroscope update" (actually full IMU sensor fusion)
-Ö¡ÂÊ    £º 1000 (zh¨¨n l¨¸: 1000) - "Frame rate: 1000 Hz"
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç¸ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: tuï¿½ï¿½ luï¿½ï¿½ yï¿½ï¿½ gï¿½ï¿½ng xï¿½ï¿½n) - "Function: Gyroscope update" (actually full IMU sensor fusion)
+Ö¡ï¿½ï¿½    ï¿½ï¿½ 1000 (zhï¿½ï¿½n lï¿½ï¿½: 1000) - "Frame rate: 1000 Hz"
 ----------------------------------------------------------*/
 extern _imu_st imu_data; // 'extern' means this variable is defined in another file; we're just declaring we'll use it here
 
@@ -142,8 +144,8 @@ void IMU_DataDeal_Task(void *pvParameters)
 }
 
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º ÍÓÂÝÒÇ²ÉÑù (h¨¢n sh¨´ g¨­ng n¨¦ng: tu¨® lu¨® y¨ª c¨£i y¨¤ng) - "Function: Gyroscope sampling" (raw sensor reading)
-Ö¡ÂÊ    £º 1000 (zh¨¨n l¨¸: 1000) - "Frame rate: 1000 Hz"
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ç²ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: tuï¿½ï¿½ luï¿½ï¿½ yï¿½ï¿½ cï¿½ï¿½i yï¿½ï¿½ng) - "Function: Gyroscope sampling" (raw sensor reading)
+Ö¡ï¿½ï¿½    ï¿½ï¿½ 1000 (zhï¿½ï¿½n lï¿½ï¿½: 1000) - "Frame rate: 1000 Hz"
 ----------------------------------------------------------*/
 void IMUSample_Task(void *pvParameters)
 {
@@ -159,16 +161,20 @@ void IMUSample_Task(void *pvParameters)
   
 }
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º ¿ØÖÆ×ËÌ¬ÈÎÎñ (h¨¢n sh¨´ g¨­ng n¨¦ng: k¨°ng zh¨¬ z¨© t¨¤i r¨¨n w¨´) - "Function: Control attitude task" (stabilization/flight control)
-Ö¡ÂÊ    £º 200 (zh¨¨n l¨¸: 200) - "Frame rate: 200 Hz"
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¬ï¿½ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: kï¿½ï¿½ng zhï¿½ï¿½ zï¿½ï¿½ tï¿½ï¿½i rï¿½ï¿½n wï¿½ï¿½) - "Function: Control attitude task" (stabilization/flight control)
+Ö¡ï¿½ï¿½    ï¿½ï¿½ 200 (zhï¿½ï¿½n lï¿½ï¿½: 200) - "Frame rate: 200 Hz"
 ----------------------------------------------------------*/
 void Stabilizer_Task(void *pvParameters)
 {
     TickType_t PreviousWakeTime;
     const TickType_t TimeIncrement = pdMS_TO_TICKS(5); // 5ms = 200 Hz
-    PreviousWakeTime = xTaskGetTickCount();	
+    PreviousWakeTime = xTaskGetTickCount();
+    MRAC_Init(); // Must run once before the control loop: populates mrac_config_* gains,
+                 // mrac_to_mixer scalers, and axis_enable flags. Without this call all
+                 // configs stay zero-initialized, causing division-by-zero (u_nom = +/-inf)
+                 // and NaN in u_ad that corrupts the motor throttle channel.
   while(1)
-    {	
+    {
         stabilizer_Task(); // Run PID controllers and compute motor outputs to stabilize aircraft
 
         system_monitor.stabilizerTask_cnt++;
@@ -177,8 +183,8 @@ void Stabilizer_Task(void *pvParameters)
 }
 
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º Ò£¿ØÆ÷ÈÎÎñ (h¨¢n sh¨´ g¨­ng n¨¦ng: y¨¢o k¨°ng q¨¬ r¨¨n w¨´) - "Function: Remote controller task"
-Ö¡ÂÊ    £º 100 (zh¨¨n l¨¸: 100) - "Frame rate: 100 Hz"
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: yï¿½ï¿½o kï¿½ï¿½ng qï¿½ï¿½ rï¿½ï¿½n wï¿½ï¿½) - "Function: Remote controller task"
+Ö¡ï¿½ï¿½    ï¿½ï¿½ 100 (zhï¿½ï¿½n lï¿½ï¿½: 100) - "Frame rate: 100 Hz"
 ----------------------------------------------------------*/
 void Remoter_Task(void *pvParameters)
 {
@@ -194,8 +200,8 @@ void Remoter_Task(void *pvParameters)
 }
 
 /*--------------------------------------------------------
-º¯Êý¹¦ÄÜ£º ×ÔÖ÷·ÉÐÐÈÎÎñ (h¨¢n sh¨´ g¨­ng n¨¦ng: z¨¬ zh¨³ f¨¥i x¨ªng r¨¨n w¨´) - "Function: Autonomous flight task"
-Ö¡ÂÊ    £º 200 (zh¨¨n l¨¸: 200) - "Frame rate: 200 Hz"
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (hï¿½ï¿½n shï¿½ï¿½ gï¿½ï¿½ng nï¿½ï¿½ng: zï¿½ï¿½ zhï¿½ï¿½ fï¿½ï¿½i xï¿½ï¿½ng rï¿½ï¿½n wï¿½ï¿½) - "Function: Autonomous flight task"
+Ö¡ï¿½ï¿½    ï¿½ï¿½ 200 (zhï¿½ï¿½n lï¿½ï¿½: 200) - "Frame rate: 200 Hz"
 ----------------------------------------------------------*/
 void Autofly_Task(void *pvParameters)
 {

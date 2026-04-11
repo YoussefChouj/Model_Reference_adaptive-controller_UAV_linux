@@ -324,7 +324,17 @@ void UART5_IRQHandler(void)
 	{
 		Clear_IT = UART5->SR;
 		Clear_IT = UART5->DR;//先读SR后读DR清楚中断标志位
-		
+
+		extern USART_RX_TypeDef UART5_Rcr;
+		{
+			uint16_t rx_len = USART_Receive(&UART5_Rcr);
+			if(rx_len > 0)
+			{
+				extern void Handle_UART5_GroundStation_Command(void);
+				Handle_UART5_GroundStation_Command();
+				system_monitor.USART5_task_cnt++;
+			}
+		}
 	}
 }
 

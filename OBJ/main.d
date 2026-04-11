@@ -85,3 +85,4 @@
 ..\obj\main.o: ..\API\GPS.h
 ..\obj\main.o: ..\TASK\send_data.h
 ..\obj\main.o: ..\Global_file\creat_task.h
+..\obj\main.o: ..\API\mrac.h
