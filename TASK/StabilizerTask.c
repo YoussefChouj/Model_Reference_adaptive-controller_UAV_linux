@@ -3,6 +3,14 @@
 #include "pid.h"
 #include "ADC.h"
 #include "mrac.h"
+
+/**
+ * @module  StabilizerTask.c
+ * @subsystem  control
+ * @depends  StabilizerTask.h, pid.h, ADC.h, mrac.h
+ * @owns  state update, setpoint update, motor mixing, and arm-mode motor output gating
+ * @caution  mixer sign conventions and motor channel ordering are safety critical
+ */
 unsigned char cnt_h,cnt_loc,cnt_locs,cnt_yaw;
 float Throttle_out,u_gyrox,u_gyroy,u_gyroz;
 short Throttle_th = 2200;
@@ -18,6 +26,7 @@ TargetSet_WorldReal_Coordinate TWC;
 
 static float eff_rc_thr(void)
 {
+	// CONSTRAINT: virtual_rc_sticks[] ordering is [thr, pit, rol, yaw] (from CMD 0x06).
 	float v = sbus_lost ? virtual_rc_sticks[0] : (float)Remoter.ThrCtrler;
 	if (bench_mode_active) {
 		const float tmin = 2000.0f;
@@ -319,6 +328,8 @@ void Compute_Motor(void)
 		Throttle_out = Constrain_Float(Throttle_out, pwm_lo, pwm_hi);
 	}
 	
+	// CONSTRAINT: Keep these mixer signs in sync with the physical motor map and pwm.h channel mapping.
+	// WHY: Sign or channel drift here can invert closed-loop attitude response.
 	mymotor.motor1= Throttle_out
 									-u_gyroy//pitch
 									-u_gyrox//

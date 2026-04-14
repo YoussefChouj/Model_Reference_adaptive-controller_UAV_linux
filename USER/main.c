@@ -2,6 +2,14 @@
 #include "creat_task.h"
 #include "mrac.h"
 
+/**
+ * @module  main.c
+ * @subsystem  scheduler
+ * @depends  main.h, creat_task.h, mrac.h
+ * @owns  firmware entrypoint and FreeRTOS task cadence
+ * @caution  task periods must stay consistent with dt values used by control and estimation modules
+ */
+
 // main() is the entry point of the program; execution starts here after reset and startup code runs
 int main(void)
 { 
@@ -137,6 +145,8 @@ void IMU_DataDeal_Task(void *pvParameters)
     PreviousWakeTime = xTaskGetTickCount();	
   while(1)
   {
+        // CONSTRAINT: This 1 ms task period must match the dt argument passed below.
+        // WHY: Mahony integration and bias integral terms scale directly with dt.
         IMU_Update_Mahony(&imu_data,1e-3f); // Run Mahony filter algorithm to fuse gyro/accel into attitude estimate; 1e-3f = 0.001 = 1ms sample time
         system_monitor.IMUUpdateTask_cnt++; // Count executions for health monitoring
         vTaskDelayUntil(&PreviousWakeTime, TimeIncrement );
@@ -175,6 +185,7 @@ void Stabilizer_Task(void *pvParameters)
                  // and NaN in u_ad that corrupts the motor throttle channel.
   while(1)
     {
+                        // PERF: Keep fixed-period scheduling for control-loop determinism.
         stabilizer_Task(); // Run PID controllers and compute motor outputs to stabilize aircraft
 
         system_monitor.stabilizerTask_cnt++;

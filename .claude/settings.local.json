@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp -r /tmp/karpathy-wiki/karpathy-wiki ~/.claude/skills/wiki)",
+      "Bash(cp -r /tmp/karpathy-wiki/karpathy-project-wiki ~/.claude/skills/project-wiki)",
+      "Read(//tmp/**)",
+      "Bash(pip install:*)",
+      "Bash(python3 scripts/sync_obsidian.py)",
+      "Bash(ls ~/.claude/*.json)",
+      "Bash(python3 -c ':*)"
+    ]
+  }
+}

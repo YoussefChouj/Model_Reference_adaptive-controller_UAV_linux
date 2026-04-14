@@ -1,0 +1,27 @@
+{
+  "high_priority": [
+    "USER/main.c",
+    "TASK/StabilizerTask.c",
+    "TASK/send_data.c",
+    "TASK/AutoflyTask.c",
+    "BSP/usart4.c",
+    "BSP/usart5.c",
+    "BSP/pwm.c",
+    "Global_file/global_declare.h",
+    "Global_file/robot_types.h",
+    "API/imu_update.c",
+    "API/mrac.c",
+    "ground_station/comm/serial_bridge.py"
+  ],
+  "domain_queries": {
+    "examples": [
+      "where command id 0x06 virtual rc is parsed",
+      "where telemetry frame crc is computed and validated",
+      "motor mixer signs and channel mapping",
+      "where sbus_lost switches control authority",
+      "mrac output injection and fallback behavior",
+      "autofly path arbitration and active flags",
+      "task periods for 1khz and 200hz loops"
+    ]
+  }
+}

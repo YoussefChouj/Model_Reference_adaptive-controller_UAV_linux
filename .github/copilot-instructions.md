@@ -2,6 +2,10 @@ Purpose
 -------
 This file gives focused, actionable guidance for AI coding assistants working in this STM32 + FreeRTOS Keil project so they can be productive immediately.
 
+Model Selection Guide
+---------------------
+Note: These model tiers apply to direct-fix tasks (<=1 function, <=1 file) and to the planner/reviewer role. For multi-file tasks, use the /multiagent-workflow skill which delegates coding to free OpenRouter models.
+
 Quick start / build
 -------------------
 - Primary project file: `USER/JX_FLY.uvprojx` (Keil uVision). Open in Keil MDK-ARM and build.

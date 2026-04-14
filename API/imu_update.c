@@ -1,5 +1,13 @@
 #include "imu_update.h"
 
+/**
+ * @module  imu_update.c
+ * @subsystem  sensors
+ * @depends  imu_update.h
+ * @owns  Mahony attitude update and quaternion-to-Euler conversion
+ * @caution  gyroscope units and task-provided dt must remain consistent to avoid estimator drift
+ */
+
 _imu_st imu_data =  {1,0,0,0,0,0,
 					{0,0,0},
 					{0,0,0},
@@ -40,6 +48,8 @@ void IMU_Update_Mahony(_imu_st *imu,float dt)
 	float q0s, q1s, q2s, q3s;/*  */
 	static float R11,R21;/* (1,1),(2,1) */
 	static float vecxZ, vecyZ, veczZ;/* z(0,0,1)' */
+	// CONSTRAINT: dt is supplied by the 1 kHz task in USER/main.c and must match actual loop period.
+	// WHY: PI correction and quaternion propagation are both dt-scaled.
 	float half_T = 0.5f * dt;
 
 	float q0Last = q0;

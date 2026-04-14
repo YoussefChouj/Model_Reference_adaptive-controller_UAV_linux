@@ -1,5 +1,13 @@
 #include "usart5.h"
 
+/**
+ * @module  usart5.c
+ * @subsystem  comm
+ * @depends  usart5.h
+ * @owns  UART5 DMA setup and UART5 ground-station command ingress
+ * @caution  command frame parsing must stay byte-compatible with host serializer and UART4 ingress path
+ */
+
 //   rx pd2  
 //   tx pc12
 
@@ -111,6 +119,8 @@ extern volatile uint32_t gs_cmd_drop_count;
 
 void Handle_UART5_GroundStation_Command(void)
 {
+	// CONSTRAINT: Frame layout and XOR CRC must match serial_bridge.py _pack_command_frame().
+	// ARCH: Queue storage ownership is in BSP/usart4.c; this function is an additional ingress source.
 	// Format: [0xCC] [0xDD] [CMD_ID: uint8] [INDEX: uint8] [VALUE: float32 LE] [CRC8]
 	// Total frame length is 9 bytes.
 	if (UA5RxMailbox[0] == 0xCC && UA5RxMailbox[1] == 0xDD)

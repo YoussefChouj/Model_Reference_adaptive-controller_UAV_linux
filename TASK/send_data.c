@@ -4,6 +4,14 @@
 #include "robot_types.h"
 #include "global_declare.h"
 
+/**
+ * @module  send_data.c
+ * @subsystem  comm
+ * @depends  send_data.h, mrac.h, pid.h, robot_types.h, global_declare.h
+ * @owns  telemetry frame serialization and ground-station command dispatch
+ * @caution  command and telemetry byte layouts are shared contracts with ground_station/comm/serial_bridge.py
+ */
+
 _linux_flag stm32_to_linux_flag;
 /*************************************************************************
 º¯ Êý Ãû£ºvoid ANO_Report_UserData1(void)
@@ -419,6 +427,8 @@ void Send_Groundstation_Telemetry_UART4(void)
         }
     }
     
+    // CONSTRAINT: CRC coverage must match the host parser exactly.
+    // WHY: Any mismatch causes silent frame drops in serial_bridge.
     /* CRC8 XOR over all bytes after sync: frame type, 16-bit LEN, MAX_NUM_BASIS, payload (index 2 .. len-1) */
     crc = 0;
     for (i = 2; i < len; i++) {
@@ -446,6 +456,7 @@ extern volatile uint8_t gs_cmd_tail;
 /* Stop TWC / sinusoid / circle, neutral sticks, clear GS mission trigger, dangerous stop */
 static void GroundStation_AbortAllPaths(void)
 {
+    // ARCH: Centralized abort keeps all stop paths synchronized.
     TWC.execute = 0;
     sinusoid_path.active = 0U;
     circle_path.active = 0U;
@@ -508,6 +519,7 @@ void Process_GroundStation_Command(void)
             }
         }
 
+        // CONSTRAINT: idx mapping is [0]=thr, [1]=pit, [2]=rol, [3]=yaw across GS and StabilizerTask.
         // CMD 0x06 ¡ª virtual stick injection (only when SBUS lost + SDK mode; see StabilizerTask virtual_rc_sticks)
         else if (id == 0x06) {
             if (sbus_lost == 1 && DroneStatus.FlyMode == FlyMode_SDK && idx < 4) {

@@ -1,5 +1,13 @@
 #include "pwm.h"
 
+/**
+ * @module  pwm.c
+ * @subsystem  drivers
+ * @depends  pwm.h
+ * @owns  timer PWM initialization and final actuator compare-register writes
+ * @caution  CCR channel mapping must stay aligned with motor mixing assumptions in TASK/StabilizerTask.c
+ */
+
 //APB1   42m
 //APB2   84m
 //21分频到 84000000/21 = 4M   0.25us
@@ -261,6 +269,8 @@ void SetRollAngle(float angle)
 
 void Set_PWM_Motors(void)  //设置电机  
 {
+  // CONSTRAINT: Macro mapping M1/M4/M2/M3 in pwm.h is intentional and must not be reordered independently.
+  // ARCH: This layer clamps and forwards mixer outputs; it does not redefine axis signs.
 	value_limit( mymotor.motor1 , Motor_PWM_ZERO , Motor_PWM_MAX );		
 	M1=mymotor.motor1;
 	

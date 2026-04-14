@@ -1,0 +1,5 @@
+.agent_contracts/
+.agent_patches/
+.agent_reports/
+.agent_memory/
+.agent_scripts/__pycache__/

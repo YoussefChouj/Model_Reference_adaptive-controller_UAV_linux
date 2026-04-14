@@ -721,8 +721,22 @@ class SerialBridge:
 
     def _parse_and_handle_datagram(self, data: bytes) -> None:
         """
-        Parse one complete telemetry frame (as sent over UDP in simulate mode).
-        Layout: [0xAA][0xBB][type][LEN_high][LEN_low][MAX_NUM_BASIS][payload (16-bit LEN bytes)][CRC8]
+                Parse one complete telemetry datagram from the UDP simulation path.
+
+                Byte layout:
+                    [0xAA][0xBB][frame_type][LEN_high][LEN_low][MAX_NUM_BASIS][payload][CRC8]
+
+                Validation order:
+                    1) Minimum frame size (7 bytes).
+                    2) Sync bytes match self.SYNC_0/self.SYNC_1.
+                    3) Frame-type specific payload length is valid.
+                    4) Payload length bounds are within (0, 4096].
+                    5) Full datagram size matches header + payload + CRC.
+                    6) XOR CRC8 over [frame_type, LEN_high, LEN_low, MAX_NUM_BASIS, payload]
+                         equals trailing CRC byte.
+
+                If all checks pass, payload is forwarded to
+                self._handle_frame(frame_type, max_num_basis, payload).
         """
         if len(data) < 7:
             return
