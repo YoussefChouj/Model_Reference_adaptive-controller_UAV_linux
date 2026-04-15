@@ -11,6 +11,8 @@
 - [Control Loop Timing](concepts/control-loop-timing.md) — dt/period coupling across IMU, control, and paths
 - [MRAC Control Law](concepts/mrac-control-law.md) — Adaptive law structure, projection, and telemetry exposure
 - [Coordinate Conventions](concepts/coordinate-conventions.md) — Sign conventions for motors, sticks, world frame, body frame
+- [Adaptive Control Simulations](concepts/adaptive-control-simulations.md) — User-validated simulation notebook map and reuse workflow
+- [Adaptive Simulation Theory-to-Code Deep Dive](concepts/adaptive-simulation-theory-to-code-deep-dive.md) — Equations, implementation pipeline, and debugging/tuning logic
 
 ### Safety & Authority
 - [Virtual RC Authority](concepts/virtual-rc-authority.md) — SBUS-loss + SDK gating for host sticks
@@ -56,7 +58,22 @@
 - [Data Dictionary](entities/data-dictionary.md) — All shared structs and globals (PIDTypeDef, CtrlerTypeDef, etc.)
 - [Flash Memory](entities/flash-memory.md) — Current persistence status and flash integration gap
 
+## Theory (External Knowledge → Code Mapping)
+
+- [Mahony Filter Theory](theory/mahony-filter.md) — SO(3) complementary filter math → `imu_update.c` variables
+- [MRAC Theory](theory/mrac-theory.md) — Adaptive control law, projection, basis functions → `mrac.h` / `mrac_math.c`
+- [Cascaded PID Theory](theory/cascaded-pid.md) — 4-level cascade design rules, tuning order, anti-windup rationale
+- [Yucelen Lectures Digest](theory/yucelen-lectures.md) — Key videos from "Lectures on Adaptive Control and Learning" with code cross-references
+
+## Reference (Used-Subset Hardware/RTOS Docs)
+
+- [STM32F4 Peripherals](reference/stm32f4-peripherals.md) — Only-used peripherals from RM0090: TIM3/TIM5, USART+DMA, SPI, NVIC
+- [FreeRTOS Primitives Used](reference/freertos-used.md) — xTaskCreate, vTaskDelayUntil, critical sections — and what is deliberately NOT used
+
 ## Sources
 
 - [Architectural Decisions](sources/architectural-decisions.md) — docs/decisions.md (2026-04-13)
 - [Cross-Subsystem Interfaces](sources/cross-subsystem-interfaces.md) — docs/interfaces.md (2026-04-13)
+- [Direct MRAC + FF + Projection Notebook](sources/direct-mrac-ff-projection-simulation-notebook.md) — External simulation notebook digest (2026-04-14)
+- [Adaptive Control Tutorial Notebook](sources/adaptive-control-tutorial-notebook.md) — Progressive adaptive-control experiments (2026-04-14)
+- [Adaptive Control Tutorial 2 Notebook](sources/adaptive-control-tutorial-2-notebook.md) — Beginner-to-derivative-free simulation set (2026-04-14)

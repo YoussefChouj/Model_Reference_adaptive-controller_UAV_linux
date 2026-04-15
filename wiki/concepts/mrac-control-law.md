@@ -70,3 +70,5 @@ Inference-labeled:
 - [[StabilizerTask]]
 - [[Control Loop Timing]]
 - [[Ground-Station Binary Protocol]]
+- [[MRAC Theory]] — full theory-to-code mapping (adaptation law, projection, stability)
+- [[Yucelen Lectures Digest]] — video lecture summaries with code cross-references

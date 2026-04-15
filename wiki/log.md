@@ -47,3 +47,26 @@
 - Created: concepts/common-pitfalls.md (troubleshooting guide)
 - Enriched: overview.md (full architecture diagram, task table, file map, subsystem index)
 - Updated: index.md (reorganized with categories, 30 pages indexed)
+
+## [2026-04-14] enrich | External Knowledge Enrichment — 6 new theory/reference pages
+- Created: theory/mahony-filter.md (Mahony 2008 SO(3) observer → imu_update.c variable mapping)
+- Created: theory/mrac-theory.md (Yucelen papers → mrac.h/mrac_math.c architecture mapping)
+- Created: theory/cascaded-pid.md (Cascade design rules, tuning order, anti-windup → pid.c/StabilizerTask.c)
+- Created: theory/yucelen-lectures.md (Digest of key lectures with code cross-references)
+- Created: reference/stm32f4-peripherals.md (Used-only peripherals: TIM3/TIM5, USART+DMA, SPI, NVIC)
+- Created: reference/freertos-used.md (Used primitives + deliberate omissions and their consequences)
+- Updated: index.md (added Theory and Reference sections, 36 pages total)
+
+## [2026-04-14] ingest | Adaptive control simulation notebooks (external)
+- Created: concepts/adaptive-control-simulations.md
+- Created: sources/direct-mrac-ff-projection-simulation-notebook.md
+- Created: sources/adaptive-control-tutorial-notebook.md
+- Created: sources/adaptive-control-tutorial-2-notebook.md
+- Updated: index.md (added simulation concept page and 3 notebook source pages)
+- Notes: notebook code treated as validated baseline; markdown explanations marked as lower-confidence guidance
+
+## [2026-04-14] enrich | Simulation docs deepening (theory + diagrams + implementation)
+- Expanded: concepts/adaptive-control-simulations.md with control-loop, implementation, and experiment-loop diagrams
+- Created: concepts/adaptive-simulation-theory-to-code-deep-dive.md
+- Expanded: sources/direct-mrac-ff-projection-simulation-notebook.md with end-to-end architecture diagram and theory-to-code mapping
+- Updated: index.md (added deep-dive concept entry)

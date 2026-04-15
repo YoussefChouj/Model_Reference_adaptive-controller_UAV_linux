@@ -127,3 +127,4 @@ Ground-station CMD `0x01` updates individual PID gains by loop index and paramet
 - [[StabilizerTask]] — where PID loops are invoked
 - [[MRAC Control Law]] — adaptive augmentation layered on PID
 - [[Tuning Workflow]] — how to tune gains via dashboard
+- [[Cascaded PID Theory]] — design rules, tuning order, and anti-windup rationale

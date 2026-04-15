@@ -93,3 +93,4 @@ All DMA RX streams use circular mode for continuous reception without CPU interv
 - [[Ground-Station Binary Protocol]] — frame formats
 - [[Interrupt Map]] — ISR dispatch details
 - [[Ground Station Bridge]] — Python-side serial handling
+- [[STM32F4 Peripherals Reference]] — USART async+DMA configuration and DMA stream/channel mapping

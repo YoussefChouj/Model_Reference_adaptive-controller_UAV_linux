@@ -55,3 +55,4 @@ Estimator timing invariant is explicitly documented in code comments: dt must ma
 - [[Control Loop Timing]]
 - [[Multi-rate Task Partitioning]]
 - [[StabilizerTask]]
+- [[Mahony Filter Theory]] — SO(3) observer math mapped to this file's variables

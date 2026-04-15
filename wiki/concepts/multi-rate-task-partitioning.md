@@ -67,3 +67,5 @@ This is intentional for low latency, but it means temporal consistency depends o
 - [[StabilizerTask]]
 - [[IMU Update]]
 - [[AutoflyTask]]
+- [[FreeRTOS Primitives Used]] — exact API primitives, what's used and what's deliberately omitted
+- [[STM32F4 Peripherals Reference]] — timer and NVIC configuration underlying task scheduling

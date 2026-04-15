@@ -66,3 +66,4 @@ But motor propulsion path for quad ESC output is TIM3 + `M1..M4`.
 
 - [[Motor Mixer]]
 - [[Control Loop Timing]]
+- [[STM32F4 Peripherals Reference]] — TIM3/TIM4/TIM5 register-level details and clock derivation
