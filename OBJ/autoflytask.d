@@ -86,3 +86,4 @@
 ..\obj\autoflytask.o: ..\TASK\send_data.h
 ..\obj\autoflytask.o: ..\BSP\usart2.h
 ..\obj\autoflytask.o: ..\BSP\usart3.h
+..\obj\autoflytask.o: ..\API\flight_fsm.h

@@ -88,3 +88,5 @@
 ..\obj\stabilizertask.o: ..\API\Ano_OF.h
 ..\obj\stabilizertask.o: ..\USER\ADC.h
 ..\obj\stabilizertask.o: ..\API\mrac.h
+..\obj\stabilizertask.o: ..\API\rc_input.h
+..\obj\stabilizertask.o: ..\API\flight_fsm.h

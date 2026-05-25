@@ -15,13 +15,16 @@ This page catalogs the most common problems encountered when working with this c
 
 | Check | Expected | Fix |
 |-------|----------|-----|
-| `sbus_lost` | Must be `1` | Disconnect physical RC or wait 500 ms timeout |
-| `DroneStatus.FlyMode` | Must be `FlyMode_SDK (1)` | Send CMD `0x04 idx=1` |
-| `DroneStatus.ARM_Status` | Must be `Armed (1)` | Send CMD `0x0E idx=0 val=1.0` |
-| Throttle command | Must be above center (>3000) | Send CMD `0x06 idx=0 val=3500` |
+| RC mode switch (ch10) | Must be HIGH (>500) for ≥50 ms | Put physical RC mode switch in SDK position |
+| `DroneStatus.FlyMode` | Must be `FlyMode_SDK (1)` | Telemetry `flymode` field; fix with RC mode switch |
+| `DroneStatus.ARM_Status` | Must be `Armed (1)` | Click [SDK ARM REQ] or RC arm gesture |
+| PC authority | Must be `1` after GS arm | Confirmed by [SDK ARM REQ]; check heartbeat not timed out |
+| Throttle command | Must be above idle (> −0.85) | Raise throttle slider above minimum |
 | SDK altitude gate | Near-ground + low throttle → idle only | Increase throttle or altitude |
 
 The motor output path is layered: `Update_Motor()` checks armed → FlyMode → altitude/throttle → then `Set_PWM_Motors()` (`TASK/StabilizerTask.c:170-185`). Any failed gate routes to `Set_Zero_Motors()` or `Set_IDLE_Motors()`.
+
+> **Note (2026-05-22):** `sbus_lost` is no longer required to be `1` for VRC to work. The physical RC must remain ON. Authority is controlled by CMD `0x0E` via the [SDK ARM REQ] button. See [[Virtual RC Authority]].
 
 See [[SDK Arming State Machine]] for the full state diagram.
 
@@ -49,7 +52,7 @@ See [[SDK Arming State Machine]] for the full state diagram.
 | CRC mismatch | Use `_pack_command_frame()`, don't hand-build frames |
 | Command queue full on MCU | Reduce command rate; queue depth is 8 |
 | Wrong UART | Commands accepted on both UART4 and UART5 |
-| Virtual sticks gated | CMD `0x06` only works when `sbus_lost && FlyMode_SDK` |
+| Virtual sticks gated | CMD `0x06` only works when `FlyMode_SDK` and `s_authority==1` (set by [SDK ARM REQ]) |
 
 CRC coverage is bytes 2-7 (CMD_ID through VALUE), not including sync bytes. See [[Ground-Station Binary Protocol]].
 

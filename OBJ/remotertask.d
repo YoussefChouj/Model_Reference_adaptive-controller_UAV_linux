@@ -86,3 +86,5 @@
 ..\obj\remotertask.o: ..\TASK\send_data.h
 ..\obj\remotertask.o: ..\BSP\usart2.h
 ..\obj\remotertask.o: ..\BSP\usart3.h
+..\obj\remotertask.o: ..\API\rc_input.h
+..\obj\remotertask.o: ..\API\flight_fsm.h

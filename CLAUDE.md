@@ -1,7 +1,7 @@
 ## Session State
 
-**Last Updated**: 2026-04-11
-**Goal**: Investigate and fix why the drone motors do not move when commanded via Virtual RC / Paths in SDK Mode.
+**Last Updated**: 2026-05-23
+**Goal**: TWC (Target Waypoint Command) full-stack debugging and safety hardening — all core issues resolved. Firmware requires rebuild + reflash for session 2026-05-23 changes.
 
 ### Task Breakdown
 
@@ -10,7 +10,21 @@
 | 1 | Investigate arming logic for Virtual RC / SDK mode | ✅ |
 | 2 | Fix firmware to accept Virtual RC bounds for arming | ✅ |
 | 3 | Fix firmware to automatically arm when SDK ARM REQ is held | ✅ |
-| 4 | Explain to the user how to correctly take off in SDK mode | 🔄 |
+| 4 | Fix UART burst coalescing (multi-frame parser, buffer 128B) | ✅ |
+| 5 | Fix TWC_arrived mixed-unit bug (XY cm, Z m → ×0.01f) | ✅ |
+| 6 | Fix dashboard XY unit display (÷100 cm→m) and send (×100 m→cm) | ✅ |
+| 7 | Add Z setpoint rate limiter (0.005 m/cycle ≈ 0.5 m/s) | ✅ |
+| 8 | Add two-phase TWC safe liftoff (0.5 m intermediate + 1 s wait) | ✅ |
+| 9 | Add drone_mode SBUS ch5 (IDLE/FLY/LAND) | ✅ |
+| 10 | Add SBUS ch8 rising-edge TWC trigger | ✅ |
+| 11 | Update all codebase docs and memory | ✅ |
+
+### Known Remaining Issues / Next Steps
+
+- **Firmware must be rebuilt and reflashed** — changes from session 2026-05-23 (items 4-10) are in source but not yet in OBJ/. Rebuild in Keil5 and flash before testing.
+- **Optical flow XY drift** — `locxPID.FB` and `locyPID.FB` drift ~50 cm over short flights. This is expected OF sensor behaviour, not a firmware bug. TWC_arrived threshold (0.15 m) accounts for some drift but a tighter threshold may miss.
+- **ch5 / ch8 RC transmitter mapping** — must be physically assigned on transmitter. ch10 = kill switch (existing, unchanged).
+- **MRAC adaptive weights lost on power cycle** — no EEPROM persistence yet. Future work.
 
 
 ---

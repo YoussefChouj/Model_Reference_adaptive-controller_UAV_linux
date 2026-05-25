@@ -1,0 +1,1 @@
+{"nodes": [{"id": "semphr", "label": "semphr.h", "file_type": "code", "source_file": "FreeRTOS\\include\\semphr.h", "source_location": "L1"}], "edges": [{"source": "semphr", "target": "queue", "relation": "imports", "confidence": "EXTRACTED", "source_file": "FreeRTOS\\include\\semphr.h", "source_location": "L77", "weight": 1.0}]}

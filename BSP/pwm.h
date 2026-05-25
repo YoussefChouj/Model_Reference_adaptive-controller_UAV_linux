@@ -5,7 +5,7 @@
 #include "global_declare.h"
 #include "GlobalUse_Basic_Function.h"
 
-#define M1  TIM3->CCR1  //µç»ú
+#define M1  TIM3->CCR1  //ï¿½ï¿½ï¿½
 #define M4  TIM3->CCR2
 #define M2  TIM3->CCR3
 #define M3  TIM3->CCR4
@@ -16,7 +16,7 @@
 
 typedef struct
 {
-	short motor1;  //µç»ú
+	short motor1;  //ï¿½ï¿½ï¿½
 	short motor2;
 	short motor3;
 	short motor4;
@@ -31,7 +31,7 @@ void PWM_TIM4_Init (void);
 void SetPitchAngle(float angle);
 void SetRollAngle(float angle);
 
-void Set_PWM_Motors(void);  //ÉèÖÃµç»ú 
+void Set_PWM_Motors(void);  //ï¿½ï¿½ï¿½Ãµï¿½ï¿½ 
 void Set_Zero_Motors(void);
 void Set_IDLE_Motors(void);
 

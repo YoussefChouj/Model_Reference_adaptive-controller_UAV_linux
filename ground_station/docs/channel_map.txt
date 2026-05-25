@@ -36,7 +36,7 @@ JUSTFLOAT CHANNEL MAP - Frame B (20 Hz)  --  UDP vofa_port_b (default 1348)
 -------------------------------------------------------------------------------
 Frame B length depends on MAX_NUM_BASIS from the telemetry header.
 Wire format: 16-bit little-endian payload length = (4 * (MAX_NUM_BASIS + 2) + 36) * 4 + 22
-(float block + 22-byte path tail before CRC). Same header for Frame A (payload length 37).
+(float block + 22-byte path tail before CRC). Same header for Frame A (payload length 38, last byte = GS_PROTO_VERSION).
 
 Float block channel count: 4 * (MAX_NUM_BASIS + 2) + 36  (this part scales with N).
 Path tail is fixed 22 bytes (not MAX_NUM_BASIS-dependent); serial_bridge unpacks it to 7 extra

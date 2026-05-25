@@ -3,6 +3,8 @@
 #include "pid.h"
 #include "ADC.h"
 #include "mrac.h"
+#include "rc_input.h"
+#include "flight_fsm.h"
 
 /**
  * @module  StabilizerTask.c
@@ -14,6 +16,10 @@
 unsigned char cnt_h,cnt_loc,cnt_locs,cnt_yaw;
 float Throttle_out,u_gyrox,u_gyroy,u_gyroz;
 short Throttle_th = 2200;
+
+/* LAND ramp: 1.5 PWM/tick at 200 Hz = 300 PWM/s.
+ * From hover (~2950) to stop (2000) ≈ 3.2 seconds. */
+#define LAND_THR_RAMP_STEP  1.5f
 float Cos_Yaw_01= 0;
 float Sin_Yaw_01= 0;
 
@@ -23,54 +29,6 @@ float Sin_pitch_01= 0;
 float Cos_pitch_01= 0;
 //
 TargetSet_WorldReal_Coordinate TWC;
-
-static float eff_rc_thr(void)
-{
-	// CONSTRAINT: virtual_rc_sticks[] ordering is [thr, pit, rol, yaw] (from CMD 0x06).
-	float v = sbus_lost ? virtual_rc_sticks[0] : (float)Remoter.ThrCtrler;
-	if (bench_mode_active) {
-		const float tmin = 2000.0f;
-		const float tmax = 4000.0f;
-		float cap = tmin + 0.2f * (tmax - tmin);
-		if (v > cap) {
-			v = cap;
-		}
-	}
-	return v;
-}
-
-static float eff_rc_pit(void) { return sbus_lost ? virtual_rc_sticks[1] : (float)Remoter.PitCtrler; }
-static float eff_rc_rol(void) { return sbus_lost ? virtual_rc_sticks[2] : (float)Remoter.RolCtrler; }
-static float eff_rc_yaw(void) { return sbus_lost ? virtual_rc_sticks[3] : (float)Remoter.YawCtrler; }
-
-static int eff_thr_ch_valid(void)
-{
-	if (sbus_lost) {
-		return ABS((int)virtual_rc_sticks[0] - 3000) > SBUS_THR_OFFSET;
-	}
-	return SBUS_THR_CH_VALID(THR_CH);
-}
-static int eff_ch_valid_pitch(void)
-{
-	if (sbus_lost) {
-		return ABS((int)virtual_rc_sticks[1] - 3000) > SBUS_OFFSET;
-	}
-	return SBUS_CH_VALID(PITCH_CH);
-}
-static int eff_ch_valid_roll(void)
-{
-	if (sbus_lost) {
-		return ABS((int)virtual_rc_sticks[2] - 3000) > SBUS_OFFSET;
-	}
-	return SBUS_CH_VALID(ROLL_CH);
-}
-static int eff_ch_valid_yaw(void)
-{
-	if (sbus_lost) {
-		return ABS((int)virtual_rc_sticks[3] - 3000) > SBUS_OFFSET;
-	}
-	return SBUS_CH_VALID(YAW_CH);
-}
 
 //
 void stabilizer_Task(void)
@@ -167,42 +125,84 @@ void Update_Data(void)
 *************************************************************************/
 void Update_Motor(void)
 {
-		if(DroneStatus.ARM_Status==Armed)//������
-		{
-			
-       if( DroneStatus.FlyMode == FlyMode_SDK   )//SDKģʽ	
-			{			
-					if(Ctrler.Z_posPID.FB < 0.3f && eff_rc_thr()<2150.0f)
-				{
-					Set_IDLE_Motors();//��û��ɣ���ء����أ���������ͣ�����
-				}
-				else if(SDK_DelayWakeFlag==1)  //SDK_DelayWakeFlag�����־λΪ1��ʱ��ᵡ��
-				{
-					Set_IDLE_Motors();
-				}
-				else 
-				{
-					Set_PWM_Motors();
-				}			
-			}
-			else if(DroneStatus.FlyMode == FlyMode_DangerousStop )//ǿ��ͣ��
-			{
-				Set_Zero_Motors();
-				DroneStatus.ARM_Status = DisArmed;
-			}
-			else 
-			{
-				Set_Zero_Motors();
-				DroneStatus.ARM_Status = DisArmed;
-			}
-		}
-		else//����״̬�������ֵ�����ҵ�����Բ�ת
-		{
-		  SDK_StateMachine_Init();
-			Clear_Structure();
-			Set_Zero_Motors();
-			
-		}
+    static float   s_land_thr    = 0.0f;
+    static uint8_t s_land_active = 0U;
+
+    FlightState_t state = FlightFSM_GetState();
+    if (state == FLIGHT_STATE_ARMED)
+    {
+        if (drone_mode == 2U)
+        {
+            if (Ctrler.Z_posPID.FB > 0.3f && !s_land_active)
+            {
+                /* Stage 1: normal PID descent down to 0.3m */
+                Set_PWM_Motors();
+            }
+            else
+            {
+                /* Stage 2: direct throttle ramp below 0.3m, bypassing Z PID.
+                 * Attitude corrections still applied so the drone stays level. */
+                if (!s_land_active)
+                {
+                    s_land_thr    = Throttle_out;
+                    if (s_land_thr < 2100.0f) s_land_thr = 2100.0f;
+                    s_land_active = 1U;
+                }
+                if (s_land_thr > 2000.0f)
+                {
+                    s_land_thr -= LAND_THR_RAMP_STEP;
+                    if (s_land_thr < 2000.0f) s_land_thr = 2000.0f;
+                    mymotor.motor1 = s_land_thr - u_gyroy - u_gyrox + u_gyroz;
+                    mymotor.motor2 = s_land_thr + u_gyroy + u_gyrox + u_gyroz;
+                    mymotor.motor3 = s_land_thr - u_gyroy + u_gyrox - u_gyroz;
+                    mymotor.motor4 = s_land_thr + u_gyroy - u_gyrox - u_gyroz;
+                    Set_PWM_Motors();
+                }
+                else
+                {
+                    s_land_active = 0U;
+                    FlightFSM_Event(FLIGHT_EVENT_DISARM_REQUEST);
+                    Set_Zero_Motors();
+                }
+            }
+        }
+        else
+        {
+            s_land_active = 0U;
+            /* SDK IDLE lock: hold motors at idle when GS has authority and no TWC
+             * active. Gated on RCInput_GetAuthority() so manual RC flight still
+             * works when the pilot has control (authority=0, drone_mode=0). */
+            if (drone_mode == 0U && !TWC.execute && Ctrler.Z_posPID.FB < 0.3f
+                && RCInput_GetAuthority())
+            {
+                Set_IDLE_Motors();
+            }
+            else if (Ctrler.Z_posPID.FB < 0.3f && RCInput_Get(RC_AXIS_THR) < RC_IDLE_THR_THRESHOLD)
+            {
+                Set_IDLE_Motors();
+            }
+            else if (SDK_DelayWakeFlag == 1)
+            {
+                Set_IDLE_Motors();
+            }
+            else
+            {
+                Set_PWM_Motors();
+            }
+        }
+    }
+    else if (state == FLIGHT_STATE_EMERGENCY)
+    {
+        s_land_active = 0U;
+        Set_Zero_Motors();
+    }
+    else
+    {
+        s_land_active = 0U;
+        SDK_StateMachine_Init();
+        Clear_Structure();
+        Set_Zero_Motors();
+    }
 }
 //������У׼�������
 //   if( DroneStatus.FlyMode == FlyMode_SDK   )//SDKģʽ	
@@ -288,7 +288,7 @@ void Compute_Motor(void)
  
 
 	 //Throttle_th=2800+(16.70f-real_voltage)*105.5f;  //4s������+d435i+t265+orin  
-	 Throttle_th=2800;
+	 Throttle_th=2950;
 
 #if ENABLE_MRAC_OUTPUT_INJECTION == 1
 	// Inject MRAC adaptive signals.
@@ -371,9 +371,9 @@ TWC.world_z = Ctrler.Z_posPID.FB;
 TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ��Ҫд�ں����ڲ�������һ��ʼ�ͳ�ʼ��
 
 	if (TWC.execute == 1) {
-		float dx = Ctrler.locxPID.FB - TWC.target_x;
-		float dy = Ctrler.locyPID.FB - TWC.target_y;
-		float dz = Ctrler.Z_posPID.FB - TWC.target_z;
+		float dx = (Ctrler.locxPID.FB - TWC.target_x) * 0.01f; /* cm → m */
+		float dy = (Ctrler.locyPID.FB - TWC.target_y) * 0.01f; /* cm → m */
+		float dz = Ctrler.Z_posPID.FB - TWC.target_z;           /* already m */
 		float dist = sqrtf(dx * dx + dy * dy + dz * dz);
 		TWC_arrived = (dist < 0.15f) ? 1U : 0U;
 	} else {
@@ -387,19 +387,79 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 		//////////////////////�߶�����/////////////////////////////////////////////////////
 		
 		case case_Update_height_Des://���¸߶�����
-			
-			if(is_last_thr_valid && (!eff_thr_ch_valid()) )
-				Ctrler.Z_posPID.Des=  Ctrler.Z_posPID.FB;  
 
-			  is_last_thr_valid = eff_thr_ch_valid();
-			
-			if(TWC.execute == 1){Ctrler.Z_posPID.Des = TWC.target_z; }//��Ŀ���ת��
+			/* SBUS ch8 rising-edge preset-path trigger — handler to be added.
+			 * sbus_path_trigger is set by RemoterTask; clear it here for now. */
+			if (sbus_path_trigger)
+			{
+				/* TODO: launch preset path sequence */
+				sbus_path_trigger = 0U;
+			}
+
+			/* SBUS ch7 fly-up: release authority so physical RC takeover detection
+			 * works normally during flight. TWC.execute=1 gates the IDLE block. */
+			if (sbus_flyup_trigger)
+			{
+				sbus_flyup_trigger = 0U;
+				RCInput_SetAuthority(0U);   /* release IDLE throttle lock */
+				TWC.target_x = TWC.world_x;
+				TWC.target_y = TWC.world_y;
+				TWC.target_z = 0.5f;
+				TWC.execute  = 1U;
+			}
+
+			/* LAND mode: Stage 1: Z PID descent down to 0.3m. 
+			 * Stage 2: Freeze Z setpoint so Throttle_out is a stable baseline 
+			 * for the direct throttle ramp in Update_Motor. */
+			if (drone_mode == 2U)
+			{
+				TWC.execute = 0U;
+				if (Ctrler.Z_posPID.FB > 0.3f)
+				{
+					/* Descend at ~0.2 m/s (0.001 m/cycle at 200 Hz) */
+					if (Ctrler.Z_posPID.Des > 0.0f) {
+						Ctrler.Z_posPID.Des -= 0.001f;
+					}
+				}
+				else
+				{
+					Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
+				}
+				break;
+			}
+
+			/* IDLE ground lock: pin Z setpoint when GS has authority and no TWC
+			 * active. Gated on RCInput_GetAuthority() so manual RC flight falls
+			 * through to normal FLY logic when the pilot has control. */
+			if (drone_mode == 0U && !TWC.execute && RCInput_GetAuthority())
+			{
+				Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
+				break;
+			}
+
+			/* FLY mode (normal) */
+			if (is_last_thr_valid && (!RCInput_IsActive(RC_AXIS_THR)))
+				Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
+
+			is_last_thr_valid = RCInput_IsActive(RC_AXIS_THR);
+
+			if (TWC.execute == 1)
+			{
+				/* Rate-limit Z setpoint to 0.5 m/s (0.005 m/cycle at ~100 Hz)
+				 * to prevent overshoot when target is far above current altitude. */
+				float z_err = TWC.target_z - Ctrler.Z_posPID.Des;
+				if      (z_err >  0.005f) Ctrler.Z_posPID.Des += 0.005f;
+				else if (z_err < -0.005f) Ctrler.Z_posPID.Des -= 0.005f;
+				else                      Ctrler.Z_posPID.Des  = TWC.target_z;
+			}
 
        break;
 			
 		case case_Update_v_h_Des://������ֱ�ٶ�����
-			if(eff_thr_ch_valid())
- 				Ctrler.Z_ratePID.Des =  ((eff_rc_thr()-3000.0f)/1000.0f)*gs_max_vertical_speed_mps ;
+			if (drone_mode == 0U && !TWC.execute && RCInput_GetAuthority())
+				Ctrler.Z_ratePID.Des = 0.0f;
+			else if(RCInput_IsActive(RC_AXIS_THR))
+ 				Ctrler.Z_ratePID.Des = RCInput_Get(RC_AXIS_THR) * gs_max_vertical_speed_mps ;
 			else
 				Ctrler.Z_ratePID.Des = Ctrler.Z_posPID.U;
        break;
@@ -408,24 +468,24 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 			
 		case case_Update_loc_Des://����λ������
 			
-			if( is_last_roll_valid && (!eff_ch_valid_roll()) )  //��һ�ζ��ˣ����ڻ���
+			if( is_last_roll_valid && (!RCInput_IsActive(RC_AXIS_ROLL)) )
 			{
 				Ctrler.locxPID.Des = Ctrler.locxPID.FB;
 			}
-			if( is_last_pitch_valid && (!eff_ch_valid_pitch()) )
+			if( is_last_pitch_valid && (!RCInput_IsActive(RC_AXIS_PITCH)) )
 			{
 				Ctrler.locyPID.Des = Ctrler.locyPID.FB;
 			}
-			
-			is_last_pitch_valid = eff_ch_valid_pitch();
-			is_last_roll_valid = eff_ch_valid_roll();
+
+			is_last_pitch_valid = RCInput_IsActive(RC_AXIS_PITCH);
+			is_last_roll_valid = RCInput_IsActive(RC_AXIS_ROLL);
 			if(TWC.execute == 1){Ctrler.locxPID.Des = TWC.target_x;Ctrler.locyPID.Des = TWC.target_y;}//��Ŀ���ת��
 			break;
 			
     case case_Update_v_loc_Des://����ˮƽ�ٶ�����
 
-				if(eff_ch_valid_pitch())//��˶�Ӧ����ˮƽ�ٶ�
-					   Ctrler.locysPID.Des = -((eff_rc_pit()-3000.0f)/1000.0f)*(gs_max_horizontal_speed_mps * 100.0f);
+				if(RCInput_IsActive(RC_AXIS_PITCH))
+					   Ctrler.locysPID.Des = -RCInput_Get(RC_AXIS_PITCH) * (gs_max_horizontal_speed_mps * 100.0f);
 				else if (Ctrler.locyPID.U>120.0f)
 						Ctrler.locysPID.Des = 120.0f;
 				else if (Ctrler.locyPID.U< -120.0f)
@@ -433,8 +493,8 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 				else
 					Ctrler.locysPID.Des = 	Ctrler.locyPID.U;//����˾Ͷ���
 					
-				if(eff_ch_valid_roll())//��˶�Ӧ����ˮƽ�ٶ�
-					Ctrler.locxsPID.Des = -((eff_rc_rol()-3000.0f)/1000.0f)*(gs_max_horizontal_speed_mps * 100.0f);  
+				if(RCInput_IsActive(RC_AXIS_ROLL))
+					Ctrler.locxsPID.Des = -RCInput_Get(RC_AXIS_ROLL) * (gs_max_horizontal_speed_mps * 100.0f);
 				else if(Ctrler.locxPID.U>120.0f)
 					Ctrler.locxsPID.Des = 120.0f;
 				else if(Ctrler.locxPID.U< -120.0f)
@@ -457,10 +517,9 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 			
 		case case_Update_yaw_Des://����yaw����
 			
-			if(is_last_yaw_valid && (!eff_ch_valid_yaw()) )
+			if(is_last_yaw_valid && (!RCInput_IsActive(RC_AXIS_YAW)) )
 			Ctrler.yawPID.Des = Ctrler.yawPID.FB;
-			//������yawdesΪ�λ�Ʈ?ʲô��
-			is_last_yaw_valid = eff_ch_valid_yaw();
+			is_last_yaw_valid = RCInput_IsActive(RC_AXIS_YAW);
 		
 			if(TWC.execute == 1){Ctrler.yawPID.Des = TWC.set_yaw; }//��Ŀ���ת��
     break;
@@ -469,8 +528,8 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 
 			Ctrler.gyroyPID.Des = Ctrler.pitchPID.U ;
 			Ctrler.gyroxPID.Des = Ctrler.rollPID.U ;
-			if(eff_ch_valid_yaw())
-				Ctrler.gyrozPID.Des =  ((eff_rc_yaw()-3000.0f)/1000.0f)*Stick_to_MAX_GyroZ ;
+			if(RCInput_IsActive(RC_AXIS_YAW))
+				Ctrler.gyrozPID.Des = RCInput_Get(RC_AXIS_YAW) * Stick_to_MAX_GyroZ ;
 			else
 				if(Ctrler.yawPID.U>60.0f)
 					Ctrler.gyrozPID.Des  = 60.0f;

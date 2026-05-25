@@ -3,6 +3,11 @@
 #include "pid.h"
 #include "robot_types.h"
 #include "global_declare.h"
+#include "rc_input.h"
+#include "flight_fsm.h"
+#include "Ano_OF.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 /**
  * @module  send_data.c
@@ -14,11 +19,11 @@
 
 _linux_flag stm32_to_linux_flag;
 /*************************************************************************
-º¯ Êý Ãû£ºvoid ANO_Report_UserData1(void)
-º¯Êý¹¦ÄÜ£ºÎÞÏß´®¿Ú·¢ÊýÈÎÎñ
-±¸    ×¢£ºPA10(USART1_RX)
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void ANO_Report_UserData1(void)
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½ß´ï¿½ï¿½Ú·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+ï¿½ï¿½    ×¢ï¿½ï¿½PA10(USART1_RX)
 *************************************************************************/
-void ANO_Report_UserData1(void)  //´®¿Ú5
+void ANO_Report_UserData1(void)  //ï¿½ï¿½ï¿½ï¿½5
 {
 	Get_Voltage();
 	float senddata[16];
@@ -125,25 +130,25 @@ void ANO_Report_UserData1(void)  //´®¿Ú5
 	Custom_DataBuf[66]=  0x80 ;//    
 	Custom_DataBuf[67]=  0x7f ;// 
 	
-	/*--------------------------¿ªÆôDMA·¢ËÍ---------------------------*/
+	/*--------------------------ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½---------------------------*/
 	
-  while(DMA_GetCurrDataCounter(DMA1_Stream7));		   //µÈÖ®Ç°µÄ·¢Íê
-  DMA_ClearITPendingBit(DMA1_Stream7, DMA_IT_TCIF7); //¿ªÆôDMA_Mode_Normal,¼´±ãÃ»ÓÐÊ¹ÓÃÍê³ÉÖÐ¶ÏÒ²ÒªÈí¼þÇå³ý£¬·ñÔòÖ»·¢Ò»´Î
+  while(DMA_GetCurrDataCounter(DMA1_Stream7));		   //ï¿½ï¿½Ö®Ç°ï¿½Ä·ï¿½ï¿½ï¿½
+  DMA_ClearITPendingBit(DMA1_Stream7, DMA_IT_TCIF7); //ï¿½ï¿½ï¿½ï¿½DMA_Mode_Normal,ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½Ò²Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½Ò»ï¿½ï¿½
     
-  DMA_Cmd(DMA1_Stream7, DISABLE);				             //ÉèÖÃµ±Ç°¼ÆÊýÖµÇ°ÏÈ½ûÓÃDMA
-  DMA1_Stream7->M0AR = (uint32_t)&Custom_DataBuf;  //ÉèÖÃµ±Ç°´ý·¢Êý¾Ý»ùµØÖ·:Memory0 tARget
-  DMA1_Stream7->NDTR = 68;     //ÉèÖÃµ±Ç°´ý·¢µÄÊý¾ÝµÄÊýÁ¿:Number of Data units to be TRansferred
+  DMA_Cmd(DMA1_Stream7, DISABLE);				             //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ÖµÇ°ï¿½È½ï¿½ï¿½ï¿½DMA
+  DMA1_Stream7->M0AR = (uint32_t)&Custom_DataBuf;  //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý»ï¿½ï¿½ï¿½Ö·:Memory0 tARget
+  DMA1_Stream7->NDTR = 68;     //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ýµï¿½ï¿½ï¿½ï¿½ï¿½:Number of Data units to be TRansferred
   DMA_Cmd(DMA1_Stream7, ENABLE);		
-                                        //¿ªÆôDMA´«Êä 
-                                        //¿ªÆôDMA´«Êä 		
+                                        //ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½ 
+                                        //ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½ 		
 }
 
 UCHAR8 DataBuf_to_linux[52] = {0}; 
-void send_to_linux(void)    //´®¿Ú4
+void send_to_linux(void)    //ï¿½ï¿½ï¿½ï¿½4
 {
 	float senddata[13];
 
-	//senddata[0]  ×öÎªÖ¡Í·
+	//senddata[0]  ï¿½ï¿½ÎªÖ¡Í·
 	senddata[1] = real_voltage;
 	senddata[2] = Ctrler.Z_ratePID.U; 
 	senddata[3] =	3; 
@@ -155,8 +160,8 @@ void send_to_linux(void)    //´®¿Ú4
 	senddata[8] = 8; 
 	senddata[9] = 9; 
 	senddata[10]= 10; 
-	senddata[11]= 11;   //Ô¤Áô
-	senddata[12]= 12;   //Ô¤Áô
+	senddata[11]= 11;   //Ô¤ï¿½ï¿½
+	senddata[12]= 12;   //Ô¤ï¿½ï¿½
 
 	DataBuf_to_linux[0]= 0xAA ;  
 	DataBuf_to_linux[1]= 0xAA ; 
@@ -223,14 +228,14 @@ void send_to_linux(void)    //´®¿Ú4
 	DataBuf_to_linux[50]= BYTE2(senddata[12]) ;//    
 	DataBuf_to_linux[51]= BYTE3(senddata[12]) ;// 
 	
-  while(DMA_GetCurrDataCounter(DMA1_Stream4));		   //µÈÖ®Ç°µÄ·¢Íê
-  DMA_ClearITPendingBit(DMA1_Stream4, DMA_IT_TCIF4); //¿ªÆôDMA_Mode_Normal,¼´±ãÃ»ÓÐÊ¹ÓÃÍê³ÉÖÐ¶ÏÒ²ÒªÈí¼þÇå³ý£¬·ñÔòÖ»·¢Ò»´Î
+  while(DMA_GetCurrDataCounter(DMA1_Stream4));		   //ï¿½ï¿½Ö®Ç°ï¿½Ä·ï¿½ï¿½ï¿½
+  DMA_ClearITPendingBit(DMA1_Stream4, DMA_IT_TCIF4); //ï¿½ï¿½ï¿½ï¿½DMA_Mode_Normal,ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½Ò²Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½Ò»ï¿½ï¿½
     
-  DMA_Cmd(DMA1_Stream4, DISABLE);				             //ÉèÖÃµ±Ç°¼ÆÊýÖµÇ°ÏÈ½ûÓÃDMA
-  DMA1_Stream4->M0AR = (uint32_t)&DataBuf_to_linux;  //ÉèÖÃµ±Ç°´ý·¢Êý¾Ý»ùµØÖ·:Memory0 tARget
-  DMA1_Stream4->NDTR = 52;     //ÉèÖÃµ±Ç°´ý·¢µÄÊý¾ÝµÄÊýÁ¿:Number of Data units to be TRansferred
+  DMA_Cmd(DMA1_Stream4, DISABLE);				             //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ÖµÇ°ï¿½È½ï¿½ï¿½ï¿½DMA
+  DMA1_Stream4->M0AR = (uint32_t)&DataBuf_to_linux;  //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý»ï¿½ï¿½ï¿½Ö·:Memory0 tARget
+  DMA1_Stream4->NDTR = 52;     //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ýµï¿½ï¿½ï¿½ï¿½ï¿½:Number of Data units to be TRansferred
   DMA_Cmd(DMA1_Stream4, ENABLE);		
-                                        //¿ªÆôDMA´«Êä 		
+                                        //ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½ 		
 
 }
 void usart3_send(void)
@@ -264,15 +269,15 @@ void usart3_send(void)
 	str_USART[15] = 0x7f;
 	
 	
-  while(DMA_GetCurrDataCounter(DMA1_Stream3));		   //µÈÖ®Ç°µÄ·¢Íê
-  DMA_ClearITPendingBit(DMA1_Stream3, DMA_IT_TCIF3); //¿ªÆôDMA_Mode_Normal,¼´±ãÃ»ÓÐÊ¹ÓÃÍê³ÉÖÐ¶ÏÒ²ÒªÈí¼þÇå³ý£¬·ñÔòÖ»·¢Ò»´Î
+  while(DMA_GetCurrDataCounter(DMA1_Stream3));		   //ï¿½ï¿½Ö®Ç°ï¿½Ä·ï¿½ï¿½ï¿½
+  DMA_ClearITPendingBit(DMA1_Stream3, DMA_IT_TCIF3); //ï¿½ï¿½ï¿½ï¿½DMA_Mode_Normal,ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½Ò²Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½Ò»ï¿½ï¿½
     
-  DMA_Cmd(DMA1_Stream3, DISABLE);				             //ÉèÖÃµ±Ç°¼ÆÊýÖµÇ°ÏÈ½ûÓÃDMA
-  DMA1_Stream3->M0AR = (uint32_t)&str_USART;  //ÉèÖÃµ±Ç°´ý·¢Êý¾Ý»ùµØÖ·:Memory0 tARget
-  DMA1_Stream3->NDTR =16;     //ÉèÖÃµ±Ç°´ý·¢µÄÊý¾ÝµÄÊýÁ¿:Number of Data units to be TRansferred
+  DMA_Cmd(DMA1_Stream3, DISABLE);				             //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ÖµÇ°ï¿½È½ï¿½ï¿½ï¿½DMA
+  DMA1_Stream3->M0AR = (uint32_t)&str_USART;  //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý»ï¿½ï¿½ï¿½Ö·:Memory0 tARget
+  DMA1_Stream3->NDTR =16;     //ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ýµï¿½ï¿½ï¿½ï¿½ï¿½:Number of Data units to be TRansferred
   DMA_Cmd(DMA1_Stream3, ENABLE);		
-                                        //¿ªÆôDMA´«Êä 
-                                        //¿ªÆôDMA´«Êä 		
+                                        //ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½ 
+                                        //ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½ 		
 }
 
 /* Max frame: 6-byte header + payload + 1 CRC; Frame B payload up to ~326 bytes @ MAX_NUM_BASIS=8 */
@@ -290,9 +295,9 @@ void Send_Groundstation_Telemetry_UART4(void)
     
     if (frame_counter % 5 != 0) // 100Hz Frame A 
     {
-        // FRAME A ¡ª header: [type][LEN_hi][LEN_lo][MAX_NUM_BASIS], payload 37 bytes (16-bit LEN)
+        // FRAME A ï¿½ï¿½ header: [type][LEN_hi][LEN_lo][MAX_NUM_BASIS], payload 37 bytes (16-bit LEN)
         {
-            uint16_t payload_len = 37U;
+            uint16_t payload_len = 39U; /* +1 rc_authority +1 GS_PROTO_VERSION */
             Buf_Telemetry_UART4[2] = 0x01; // ID
             Buf_Telemetry_UART4[3] = (uint8_t)(payload_len >> 8);
             Buf_Telemetry_UART4[4] = (uint8_t)(payload_len & 0xFFU);
@@ -320,10 +325,12 @@ void Send_Groundstation_Telemetry_UART4(void)
         Buf_Telemetry_UART4[len++] = sbus_lost;
         Buf_Telemetry_UART4[len++] = (uint8_t)(TWC.execute != 0 ? 1 : 0);
         Buf_Telemetry_UART4[len++] = TWC_arrived;
+        Buf_Telemetry_UART4[len++] = RCInput_GetAuthority(); /* 1=PC authority, 0=RC */
+        Buf_Telemetry_UART4[len++] = GS_PROTO_VERSION; /* protocol version â€” must match serial_bridge.py */
     }
     else // 20Hz Frame B
     {
-        // FRAME B ¡ª same 16-bit payload LEN as Frame A
+        // FRAME B ï¿½ï¿½ same 16-bit payload LEN as Frame A
         // MRAC: 4 axes * (MAX_NUM_BASIS + 2) floats
         // PID: 12 loops * 3 floats = 36 floats
         // Tail: u8 + 3f + f + f + u8 = 22 bytes
@@ -449,7 +456,7 @@ void Send_Groundstation_Telemetry_UART4(void)
 }
 
 typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;
-extern volatile GS_Cmd_t gs_cmd_queue[8];
+extern volatile GS_Cmd_t gs_cmd_queue[16];
 extern volatile uint8_t gs_cmd_head;
 extern volatile uint8_t gs_cmd_tail;
 
@@ -460,12 +467,9 @@ static void GroundStation_AbortAllPaths(void)
     TWC.execute = 0;
     sinusoid_path.active = 0U;
     circle_path.active = 0U;
-    virtual_rc_sticks[0] = 3000.0f;
-    virtual_rc_sticks[1] = 3000.0f;
-    virtual_rc_sticks[2] = 3000.0f;
-    virtual_rc_sticks[3] = 3000.0f;
+    RCInput_SetAuthority(0U);
     GS_KeySDKflag = 0U;
-    DroneStatus.FlyMode = FlyMode_DangerousStop;
+    FlightFSM_Event(FLIGHT_EVENT_DANGEROUS_STOP);
 }
 
 void Process_GroundStation_Command(void)
@@ -476,9 +480,9 @@ void Process_GroundStation_Command(void)
         uint8_t idx = gs_cmd_queue[gs_cmd_tail].index;
         float val = gs_cmd_queue[gs_cmd_tail].value;
         
-        gs_cmd_tail = (gs_cmd_tail + 1) % 8;
+        gs_cmd_tail = (gs_cmd_tail + 1) % 16;
         
-        // CMD 0x01 ¡ª PID gain update
+        // CMD 0x01 ï¿½ï¿½ PID gain update
         // INDEX encodes axis+gain: (axis 0-6). (gain 0=Kp, 1=Ki, 2=Kd)
         if (id == 0x01) {
             uint8_t axis = idx / 3;
@@ -493,14 +497,14 @@ void Process_GroundStation_Command(void)
             pids[5] = &Ctrler.gyrozPID;
             pids[6] = &Ctrler.Z_ratePID;
                                    
-            if (axis < 7) {
+            if (axis < 7 && val >= 0.0f && val <= 200.0f) {
                 if (gain == 0) pids[axis]->Kp = val;
                 else if (gain == 1) pids[axis]->Ki = val;
                 else if (gain == 2) pids[axis]->Kd = val;
             }
         }
         
-        // CMD 0x02 / 0x05 / 0x08 ¡ª MRAC array element update (What_tol moved from 0x06 to 0x08; 0x06 = virtual RC)
+        // CMD 0x02 / 0x05 / 0x08 ï¿½ï¿½ MRAC array element update (What_tol moved from 0x06 to 0x08; 0x06 = virtual RC)
         // High nibble: axis (0-3). Low nibble: element index.
         else if (id == 0x02 || id == 0x05 || id == 0x08) {
             uint8_t axis = (idx >> 4) & 0x0F;
@@ -513,28 +517,32 @@ void Process_GroundStation_Command(void)
             configs[3] = &mrac_config_z;
             
             if (axis < 4 && elem < MAX_NUM_BASIS) {
-                if (id == 0x02) configs[axis]->gamma[elem] = val;
-                else if (id == 0x05) configs[axis]->What_limit[elem] = val;
-                else if (id == 0x08) configs[axis]->What_tol[elem] = val;
+                if      (id == 0x02 && val >  0.0f) configs[axis]->gamma[elem]      = val;
+                else if (id == 0x05 && val >= 0.0f) configs[axis]->What_limit[elem] = val;
+                else if (id == 0x08 && val >= 0.0f) configs[axis]->What_tol[elem]   = val;
             }
         }
 
-        // CONSTRAINT: idx mapping is [0]=thr, [1]=pit, [2]=rol, [3]=yaw across GS and StabilizerTask.
-        // CMD 0x06 ¡ª virtual stick injection (only when SBUS lost + SDK mode; see StabilizerTask virtual_rc_sticks)
+        // CMD 0x06 â€” virtual stick injection. val is normalised [-1.0, +1.0]. idx: [0]=thr,[1]=pitch,[2]=roll,[3]=yaw.
+        // Gate: FlyMode_SDK only (physical RC mode switch is still the hard kill via Check_Fly_Mode).
+        // sbus_lost is NOT checked: RC stays ON as emergency fallback; authority flag in RCInput routes the signal.
         else if (id == 0x06) {
-            if (sbus_lost == 1 && DroneStatus.FlyMode == FlyMode_SDK && idx < 4) {
-                virtual_rc_sticks[idx] = val;
+            if (DroneStatus.FlyMode == FlyMode_SDK && idx < 4) {
+                float v = val;
+                if (v >  1.0f) v =  1.0f;
+                if (v < -1.0f) v = -1.0f;
+                RCInput_SetVirtualStick((RC_Axis_t)idx, v);
             }
         }
 
-        // CMD 0x07 ¡ª bench test: index 0 value 1.0 enables throttle cap on virtual RC
+        // CMD 0x07 ï¿½ï¿½ bench test: index 0 value 1.0 enables throttle cap on virtual RC
         else if (id == 0x07) {
             if (idx == 0) {
                 bench_mode_active = (val >= 0.5f) ? 1U : 0U;
             }
         }
         
-        // CMD 0x03 ¡ª Mixer/saturation update
+        // CMD 0x03 ï¿½ï¿½ Mixer/saturation update
         else if (id == 0x03) {
             MRAC_AxisConfig_t* configs[4];
             configs[0] = &mrac_config_pitch;
@@ -552,7 +560,7 @@ void Process_GroundStation_Command(void)
             }
         }
 
-        // CMD 0x09 ¡ª velocity / angle safety limits (ground station)
+        // CMD 0x09 ï¿½ï¿½ velocity / angle safety limits (ground station)
         else if (id == 0x09) {
             if (idx == 0) {
                 if (val > 0.05f && val < 20.0f) gs_max_horizontal_speed_mps = val;
@@ -565,19 +573,17 @@ void Process_GroundStation_Command(void)
             }
         }
         
-        // CMD 0x04 ¡ª Flight mode (idx 0 = dangerous stop + path abort)
+        // CMD 0x04 ï¿½ï¿½ Flight mode (idx 0 = dangerous stop + path abort)
         else if (id == 0x04) {
             if (idx == 0) {
                 GroundStation_AbortAllPaths();
-                DroneStatus.ARM_Status = DisArmed;
-                DroneStatus.FlyMode = FlyMode_DangerousStop;
                 GS_KeySDKflag = 0U;
             } else if (idx == 1) {
-                DroneStatus.FlyMode = FlyMode_SDK;
+                FlightFSM_Event(FLIGHT_EVENT_RECOVER_SDK);
             }
         }
 
-        /* CMD 0x0A ¡ª TWC target (point-to-point); only in SDK mode */
+        /* CMD 0x0A ï¿½ï¿½ TWC target (point-to-point); only in SDK mode */
         else if (id == 0x0A) {
             if (DroneStatus.FlyMode != FlyMode_SDK) {
                 /* ignore */
@@ -594,7 +600,7 @@ void Process_GroundStation_Command(void)
             }
         }
 
-        /* CMD 0x0B ¡ª sinusoidal path parameters (FlyMode_SDK only) */
+        /* CMD 0x0B ï¿½ï¿½ sinusoidal path parameters (FlyMode_SDK only) */
         else if (id == 0x0B) {
             if (DroneStatus.FlyMode != FlyMode_SDK) {
                 /* ignore */
@@ -617,15 +623,17 @@ void Process_GroundStation_Command(void)
                 }
             } else if (idx == 7) {
                 if (((uint8_t)(val + 0.5f)) != 0) {
+                    taskENTER_CRITICAL();
                     sinusoid_path.active = 1U;
                     sinusoid_path.t_elapsed = 0.0f;
+                    taskEXIT_CRITICAL();
                 } else {
                     sinusoid_path.active = 0U;
                 }
             }
         }
 
-        /* CMD 0x0C ¡ª circle path (FlyMode_SDK only) */
+        /* CMD 0x0C ï¿½ï¿½ circle path (FlyMode_SDK only) */
         else if (id == 0x0C) {
             if (DroneStatus.FlyMode != FlyMode_SDK) {
                 /* ignore */
@@ -643,31 +651,88 @@ void Process_GroundStation_Command(void)
                 circle_path.duration = val;
             } else if (idx == 6) {
                 if (((uint8_t)(val + 0.5f)) != 0) {
+                    taskENTER_CRITICAL();
                     circle_path.active = 1U;
                     circle_path.theta = 0.0f;
                     circle_path.t_elapsed = 0.0f;
+                    taskEXIT_CRITICAL();
                 } else {
                     circle_path.active = 0U;
                 }
             }
         }
 
-        /* CMD 0x0D ¡ª abort all paths + neutral sticks + dangerous stop */
+        /* CMD 0x0D ï¿½ï¿½ abort all paths + neutral sticks + dangerous stop */
         else if (id == 0x0D) {
             if (idx == 0) {
                 GroundStation_AbortAllPaths();
             }
         }
 
-        /* CMD 0x0E ¡ª ground-station SDK arm switch */
+        /* CMD 0x0F - MRAC feature-flag runtime toggle (val >= 0.5 = ON, else OFF).
+         * idx: 0=adaptation_on  1=projection_on  2=deadzone_on  3=hard_freeze_on
+         *      4=tanh_saturation_on  5=e_modification_on  6=l1_filtering_on
+         *      7=axis_enable_pitch  8=axis_enable_roll  9=axis_enable_yaw        */
+        else if (id == 0x0F) {
+            uint8_t on = ((uint8_t)(val + 0.5f)) != 0U ? 1U : 0U;
+            switch (idx) {
+                case 0: mrac_flags.adaptation_on      = on; break;
+                case 1: mrac_flags.projection_on      = on; break;
+                case 2: mrac_flags.deadzone_on        = on; break;
+                case 3: mrac_flags.hard_freeze_on     = on; break;
+                case 4: mrac_flags.tanh_saturation_on = on; break;
+                case 5: mrac_flags.e_modification_on  = on; break;
+                case 6: mrac_flags.l1_filtering_on    = on; break;
+                case 7: mrac_flags.axis_enable_pitch  = on; break;
+                case 8: mrac_flags.axis_enable_roll   = on; break;
+                case 9: mrac_flags.axis_enable_yaw    = on; break;
+                default: break;
+            }
+        }
+
+        /* CMD 0x10 â€” reset world-frame optical flow origin.
+         * Zeros accumulated earth_x/y position so the drone's current location
+         * becomes the new (0, 0) world origin.  Also syncs position setpoints
+         * to avoid a sudden jump on the next control tick. */
+        else if (id == 0x10) {
+            if (idx == 0) {
+                ano_of.earth_x       = 0.0f;
+                ano_of.earth_y       = 0.0f;
+                ano_of.earth_x_ture  = 0.0f;
+                ano_of.earth_y_ture  = 0.0f;
+                ano_of.DISTANCE_X    = 0.0f;
+                ano_of.DISTANCE_Y    = 0.0f;
+                Ctrler.locxPID.FB    = 0.0f;
+                Ctrler.locyPID.FB    = 0.0f;
+                Ctrler.locxPID.Des   = 0.0f;
+                Ctrler.locyPID.Des   = 0.0f;
+                Ctrler.locxsPID.Des  = 0.0f;
+                Ctrler.locysPID.Des  = 0.0f;
+            }
+        }
+
+        /* CMD 0x0E - ground-station SDK arm switch */
         else if (id == 0x0E) {
             if (idx == 0) {
                 if (((uint8_t)(val + 0.5f)) != 0) {
                     GS_KeySDKflag = 1U;
-                    DroneStatus.ARM_Status = Armed;
+                    FlightFSM_Event(FLIGHT_EVENT_ARM_REQUEST);
+                    RCInput_SetAuthority(1U);
+                    /* If already airborne, override the -1.0f throttle floor that
+                     * SetAuthority just set.  Without this, the motor-idle guard
+                     * (Z_pos.FB < 0.3 && THR < -0.85) fires immediately and cuts
+                     * motors mid-flight.  On the ground the floor stays at -1.0f
+                     * so the pilot must raise the throttle slider deliberately. */
+                    if (Ctrler.Z_posPID.FB > 0.35f) {
+                        RCInput_SetVirtualStick(RC_AXIS_THR, 0.0f);
+                    }
                 } else {
+                    /* ARM REQ OFF: relinquish PC authority only â€” drone stays ARMED.
+                     * Physical RC resumes immediately so the pilot can land safely.
+                     * DISARM_REQUEST is intentionally omitted: firing it mid-air cuts
+                     * motors. Pilot disarms via RC stick gesture after landing. */
                     GS_KeySDKflag = 0U;
-                    DroneStatus.ARM_Status = DisArmed;
+                    RCInput_SetAuthority(0U);
                 }
             }
         }

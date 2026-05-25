@@ -1,21 +1,20 @@
 #include "global_declare.h"
 
 /*------------------------------------------------------
-ÈÎÎñ¹¦ÄÜ£º´æ·ÅÈ«¾Ö±äÁ¿
+ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½È«ï¿½Ö±ï¿½ï¿½ï¿½
 --------------------------------------------------------*/
 
 
-SYSTEM_MONITOR system_monitor  =  {0}; //ÏµÍ³¼àÊÓÆ÷
+SYSTEM_MONITOR system_monitor  =  {0}; //ÏµÍ³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-RemoterTypeDef  Remoter;               //Ò£¿ØÆ÷
+RemoterTypeDef  Remoter;               //Ò£ï¿½ï¿½ï¿½ï¿½
 
-DroneStatusTypeDef DroneStatus;        //ÎÞÈË»ú×´Ì¬
+DroneStatusTypeDef DroneStatus;        //ï¿½ï¿½ï¿½Ë»ï¿½×´Ì¬
 
-StickMotionTypeDef StickMotion;        //Ò£¿ØÆ÷²¦¸Ë
+StickMotionTypeDef StickMotion;        //Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 volatile uint8_t sbus_lost = 0;
 volatile uint32_t sbus_last_valid_tick = 0;
-float virtual_rc_sticks[4] = {3000.0f, 3000.0f, 3000.0f, 3000.0f};
 volatile uint8_t bench_mode_active = 0;
 
 float gs_max_horizontal_speed_mps = 1.0f;
@@ -26,6 +25,10 @@ float gs_throttle_min_pct = 0.0f;
 float gs_throttle_max_pct = 1.0f;
 
 volatile uint8_t TWC_arrived = 0;
+volatile uint8_t drone_mode = 1;      /* start in FLY mode */
+volatile uint8_t sbus_flyup_trigger = 0;
+
+volatile uint8_t sbus_path_trigger = 0;
 
 volatile SinusoidPath_t sinusoid_path = {0};
 

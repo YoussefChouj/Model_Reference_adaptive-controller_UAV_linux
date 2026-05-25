@@ -4,11 +4,11 @@
 #include "stm32f4xx.h"
 #include "main.h"
 
-/*´®¿Ú5Í¨ÐÅ»º³å³¤¶È*/
+/*ï¿½ï¿½ï¿½ï¿½5Í¨ï¿½Å»ï¿½ï¿½å³¤ï¿½ï¿½*/
 #define UART5_RX_STREAM         DMA1_Stream0
 #define UART5_TX_STREAM         DMA1_Stream7
-#define USART5_RXDMA_LEN           56
-#define USART5_RXMB_LEN            28
+#define USART5_RXDMA_LEN           128
+#define USART5_RXMB_LEN            128
 
 void UART5_Configuration(void);
 void Handle_UART5_GroundStation_Command(void);

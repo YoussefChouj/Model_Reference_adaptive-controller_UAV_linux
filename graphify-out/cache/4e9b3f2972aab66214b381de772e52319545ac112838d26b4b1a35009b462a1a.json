@@ -1,0 +1,1 @@
+{"nodes": [{"id": "croutine", "label": "croutine.h", "file_type": "code", "source_file": "FreeRTOS\\include\\croutine.h", "source_location": "L1"}], "edges": [{"source": "croutine", "target": "list", "relation": "imports", "confidence": "EXTRACTED", "source_file": "FreeRTOS\\include\\croutine.h", "source_location": "L77", "weight": 1.0}]}

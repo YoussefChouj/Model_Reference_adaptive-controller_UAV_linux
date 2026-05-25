@@ -14,51 +14,51 @@ void UART4_Configuration(void)
 	NVIC_InitTypeDef  nvic;
 	DMA_InitTypeDef   DMA_InitStructure;
 
-	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_DMA1,ENABLE);//Ê¹ÄÜPC¶Ë¿ÚÊ±ÖÓ
-	RCC_APB1PeriphClockCmd(RCC_APB1Periph_UART4,ENABLE);//Ê¹ÄÜUART4Ê±ÖÓ
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_DMA1,ENABLE);//Ê¹ï¿½ï¿½PCï¿½Ë¿ï¿½Ê±ï¿½ï¿½
+	RCC_APB1PeriphClockCmd(RCC_APB1Periph_UART4,ENABLE);//Ê¹ï¿½ï¿½UART4Ê±ï¿½ï¿½
 
 	GPIO_PinAFConfig(GPIOA,GPIO_PinSource0,GPIO_AF_UART4); 
 	GPIO_PinAFConfig(GPIOA,GPIO_PinSource1,GPIO_AF_UART4); 
 
 	gpio.GPIO_Pin = GPIO_Pin_0|GPIO_Pin_1;
-	gpio.GPIO_Mode = GPIO_Mode_AF;//¸´ÓÃÄ£Ê½
-	gpio.GPIO_OType = GPIO_OType_PP;//ÍÆÍìÊä³ö
-	gpio.GPIO_Speed = GPIO_Speed_100MHz;//IO¿ÚËÙ¶ÈÎª50MHz
-	gpio.GPIO_PuPd = GPIO_PuPd_UP;//ÉÏÀ­
-	GPIO_Init(GPIOA,&gpio);//¸ù¾ÝÉè¶¨²ÎÊý³õÊ¼»¯GPIOC
+	gpio.GPIO_Mode = GPIO_Mode_AF;//ï¿½ï¿½ï¿½ï¿½Ä£Ê½
+	gpio.GPIO_OType = GPIO_OType_PP;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	gpio.GPIO_Speed = GPIO_Speed_100MHz;//IOï¿½ï¿½ï¿½Ù¶ï¿½Îª50MHz
+	gpio.GPIO_PuPd = GPIO_PuPd_UP;//ï¿½ï¿½ï¿½ï¿½
+	GPIO_Init(GPIOA,&gpio);//ï¿½ï¿½ï¿½ï¿½ï¿½è¶¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½GPIOC
 
 	nvic.NVIC_IRQChannel = UART4_IRQn;
-	nvic.NVIC_IRQChannelPreemptionPriority = 0;//ÇÀÕ¼ÓÅÏÈ¼¶
-	nvic.NVIC_IRQChannelSubPriority = 0;//×ÓÓÅÏÈ¼¶
-	nvic.NVIC_IRQChannelCmd = ENABLE;//IRQÍ¨µÀÊ¹ÄÜ 
-	NVIC_Init(&nvic);//¸ù¾ÝÖ¸¶¨µÄ²ÎÊý³õÊ¼»¯VIC¼Ä´æÆ÷
+	nvic.NVIC_IRQChannelPreemptionPriority = 0;//ï¿½ï¿½Õ¼ï¿½ï¿½ï¿½È¼ï¿½
+	nvic.NVIC_IRQChannelSubPriority = 0;//ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
+	nvic.NVIC_IRQChannelCmd = ENABLE;//IRQÍ¨ï¿½ï¿½Ê¹ï¿½ï¿½ 
+	NVIC_Init(&nvic);//ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½VICï¿½Ä´ï¿½ï¿½ï¿½
 
-	uart4.USART_BaudRate = 115200;//²¨ÌØÂÊ
-	uart4.USART_WordLength = USART_WordLength_8b;//×Ö³¤Îª8Î»Êý¾Ý¸ñÊ½
-	uart4.USART_StopBits = USART_StopBits_1;//Ò»¸öÍ£Ö¹Î»
-	uart4.USART_Parity = USART_Parity_No;//ÎÞÆæÅ¼Ð£ÑéÎ»
-	uart4.USART_Mode = USART_Mode_Rx|USART_Mode_Tx;//½ö½ÓÊÕ
-	uart4.USART_HardwareFlowControl = USART_HardwareFlowControl_None;//ÎÞÓ²¼þÊý¾ÝÁ÷¿ØÖÆ
-	USART_Init(UART4,&uart4);//³õÊ¼»¯´®¿Ú
+	uart4.USART_BaudRate = 115200;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	uart4.USART_WordLength = USART_WordLength_8b;//ï¿½Ö³ï¿½Îª8Î»ï¿½ï¿½ï¿½Ý¸ï¿½Ê½
+	uart4.USART_StopBits = USART_StopBits_1;//Ò»ï¿½ï¿½Í£Ö¹Î»
+	uart4.USART_Parity = USART_Parity_No;//ï¿½ï¿½ï¿½ï¿½Å¼Ð£ï¿½ï¿½Î»
+	uart4.USART_Mode = USART_Mode_Rx|USART_Mode_Tx;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	uart4.USART_HardwareFlowControl = USART_HardwareFlowControl_None;//ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	USART_Init(UART4,&uart4);//ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 	USART_DMACmd(UART4,USART_DMAReq_Rx,ENABLE);
 	USART_DMACmd(UART4,USART_DMAReq_Tx,ENABLE);
-	USART_ITConfig(UART4,USART_IT_IDLE,ENABLE); //¿ªÆô¿ÕÏÐÖÐ¶Ï
+	USART_ITConfig(UART4,USART_IT_IDLE,ENABLE); //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½
 
-	USART_Cmd(UART4,ENABLE);//Ê¹ÄÜ´®¿Ú
+	USART_Cmd(UART4,ENABLE);//Ê¹ï¿½Ü´ï¿½ï¿½ï¿½
 
 	DMA_DeInit(DMA1_Stream2);
-	DMA_InitStructure.DMA_Channel= DMA_Channel_4;//Í¨µÀ
-	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(UART4->DR);//ÍâÉèµØÖ·
-	DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)UA4RxDMAbuf;//½«´®¿Ú4½ÓÊÕµ½µÄÊý¾ÝucRxData_DMA1_Stream2[]Àï£¬ÄÚ´æ»ùµØÖ·
-	DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralToMemory;//ÉèÖÃÊý¾Ý´«Êä·½Ïò
-	DMA_InitStructure.DMA_BufferSize = UART4_RXDMA_LEN;//ÉèÖÃDMAÒ»´Î´«ÊäÊý¾ÝÁ¿µÄ´óÐ¡
-	DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;//ÉèÖÃÍâÉèµØÖ·²»±ä
-	DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;	//ÉèÖÃÄÚ´æµØÖ·µÝÔö
-	DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;//ÉèÖÃÍâÉèµÄÊý¾Ý³¤¶ÈÎª×Ö½Ú£¨8bits£©
-	DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;//ÉèÖÃÄÚ´æµÄÊý¾Ý³¤¶ÈÎª×Ö½Ú£¨8bits£©
-	DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;//DMA_Mode_Normal;////ÉèÖÃDMAÄ£Ê½ÎªÑ­»·Ä£Ê½
-	DMA_InitStructure.DMA_Priority = DMA_Priority_VeryHigh;//DMA_Priority_Medium;//ÉèÖÃDMAÍ¨µÀµÄÓÅÏÈ¼¶Îª×î¸ßÓÅÏÈ¼¶
+	DMA_InitStructure.DMA_Channel= DMA_Channel_4;//Í¨ï¿½ï¿½
+	DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(UART4->DR);//ï¿½ï¿½ï¿½ï¿½ï¿½Ö·
+	DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)UA4RxDMAbuf;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½4ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ucRxData_DMA1_Stream2[]ï¿½ï£¬ï¿½Ú´ï¿½ï¿½ï¿½ï¿½Ö·
+	DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralToMemory;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý´ï¿½ï¿½ä·½ï¿½ï¿½
+	DMA_InitStructure.DMA_BufferSize = UART4_RXDMA_LEN;//ï¿½ï¿½ï¿½ï¿½DMAÒ»ï¿½Î´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä´ï¿½Ð¡
+	DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½
+	DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;	//ï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½
+	DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý³ï¿½ï¿½ï¿½Îªï¿½Ö½Ú£ï¿½8bitsï¿½ï¿½
+	DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_Byte;//ï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½Ý³ï¿½ï¿½ï¿½Îªï¿½Ö½Ú£ï¿½8bitsï¿½ï¿½
+	DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;//DMA_Mode_Normal;////ï¿½ï¿½ï¿½ï¿½DMAÄ£Ê½ÎªÑ­ï¿½ï¿½Ä£Ê½
+	DMA_InitStructure.DMA_Priority = DMA_Priority_VeryHigh;//DMA_Priority_Medium;//ï¿½ï¿½ï¿½ï¿½DMAÍ¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
 	DMA_InitStructure.DMA_FIFOMode = DMA_FIFOMode_Disable;
 	DMA_InitStructure.DMA_FIFOThreshold = DMA_FIFOThreshold_Full;
 	DMA_InitStructure.DMA_MemoryBurst = DMA_MemoryBurst_Single;
@@ -71,18 +71,18 @@ void UART4_Configuration(void)
 	/////////////////////////TX
 	DMA_InitTypeDef		dma;
 	DMA_DeInit(DMA1_Stream4);
-	while( DMA_GetCmdStatus(DMA1_Stream4) == ENABLE );			//µÈ´ýDMA¿ÉÅäÖÃ
+	while( DMA_GetCmdStatus(DMA1_Stream4) == ENABLE );			//ï¿½È´ï¿½DMAï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 	dma.DMA_Channel				=	DMA_Channel_4;
 	dma.DMA_PeripheralBaseAddr	=	(uint32_t)&(UART4->DR);
-	dma.DMA_Memory0BaseAddr		=	NULL;//ÔÝÎÞ
-	dma.DMA_DIR					=	DMA_DIR_MemoryToPeripheral;	//ÄÚ´æµ½ÍâÉè
-	dma.DMA_BufferSize			=	NULL;//ÔÝÎÞ
+	dma.DMA_Memory0BaseAddr		=	NULL;//ï¿½ï¿½ï¿½ï¿½
+	dma.DMA_DIR					=	DMA_DIR_MemoryToPeripheral;	//ï¿½Ú´æµ½ï¿½ï¿½ï¿½ï¿½
+	dma.DMA_BufferSize			=	NULL;//ï¿½ï¿½ï¿½ï¿½
 	dma.DMA_PeripheralInc		=	DMA_PeripheralInc_Disable;
 	dma.DMA_MemoryInc			=	DMA_MemoryInc_Enable;
 	dma.DMA_PeripheralDataSize	=	DMA_PeripheralDataSize_Byte;
 	dma.DMA_MemoryDataSize		=	DMA_MemoryDataSize_Byte;
-	dma.DMA_Mode				=	DMA_Mode_Normal;			//Õý³£·¢ËÍ
+	dma.DMA_Mode				=	DMA_Mode_Normal;			//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	dma.DMA_Priority			=	DMA_Priority_VeryHigh;
 	dma.DMA_FIFOMode			=	DMA_FIFOMode_Disable;
 	dma.DMA_FIFOThreshold		=	DMA_FIFOThreshold_1QuarterFull;
@@ -93,53 +93,61 @@ void UART4_Configuration(void)
 }
 
 typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;
-volatile GS_Cmd_t gs_cmd_queue[8];
+volatile GS_Cmd_t gs_cmd_queue[16];
 volatile uint8_t gs_cmd_head = 0, gs_cmd_tail = 0;
 volatile uint32_t gs_cmd_drop_count = 0;
 
 void Handle_UART4_GroundStation_Command(void)
 {
-    // The DMA mailbox has the latest data.
-    // Format: [0xCC] [0xDD] [CMD_ID: uint8] [INDEX: uint8] [VALUE: float32 LE] [CRC8]
-    // Total 9 bytes.
-    
-    // For 9 bytes, we only care if the first bytes match
-    if (UA4RxMailbox[0] == 0xCC && UA4RxMailbox[1] == 0xDD)
-    {
-        uint8_t cmd_id = UA4RxMailbox[2];
-        uint8_t index = UA4RxMailbox[3];
-        
-        union {
-            float f;
-            uint8_t b[4];
-        } val;
-        
-        val.b[0] = UA4RxMailbox[4];
-        val.b[1] = UA4RxMailbox[5];
-        val.b[2] = UA4RxMailbox[6];
-        val.b[3] = UA4RxMailbox[7];
-        
-        uint8_t crc = UA4RxMailbox[8];
-        uint8_t calc_crc = 0;
-        int i;
-        
-        for (i = 2; i < 8; i++) {
-            calc_crc ^= UA4RxMailbox[i];
-        }
-        
-		if (calc_crc == crc) {
-			uint8_t next_head = (uint8_t)((gs_cmd_head + 1U) % 8U);
-			if (next_head != gs_cmd_tail) {
-				gs_cmd_queue[gs_cmd_head].id = cmd_id;
-				gs_cmd_queue[gs_cmd_head].index = index;
-				gs_cmd_queue[gs_cmd_head].value = val.f;
+	// CONSTRAINT: Frame layout and XOR CRC must match serial_bridge.py _pack_command_frame().
+	// ARCH: Queue storage ownership is here; usart5.c is an additional ingress source.
+	// Format: [0xCC] [0xDD] [CMD_ID: uint8] [INDEX: uint8] [VALUE: float32 LE] [CRC8]
+	// Total frame length is 9 bytes.
+	// WHY loop: the PC serial bridge coalesces multiple rapid writes into one OS-level burst.
+	// IDLE fires once for the whole burst; parsing only mailbox[0..8] silently drops every
+	// frame after the first (e.g. the execute flag sent last in a TWC sequence).
+	uint16_t total = UART4_Rcr.rxSize;
+	uint16_t offset = 0;
+	while (offset + 9U <= total)
+	{
+		if (UA4RxMailbox[offset] == 0xCC && UA4RxMailbox[offset + 1U] == 0xDD)
+		{
+			uint8_t cmd_id = UA4RxMailbox[offset + 2U];
+			uint8_t index  = UA4RxMailbox[offset + 3U];
 
-				// Advance head (mod 8)
-				gs_cmd_head = next_head;
-			} else {
-				// Queue full: drop newest command to avoid clobbering unread data.
-				gs_cmd_drop_count++;
+			union {
+				float f;
+				uint8_t b[4];
+			} val;
+
+			val.b[0] = UA4RxMailbox[offset + 4U];
+			val.b[1] = UA4RxMailbox[offset + 5U];
+			val.b[2] = UA4RxMailbox[offset + 6U];
+			val.b[3] = UA4RxMailbox[offset + 7U];
+
+			uint8_t crc = UA4RxMailbox[offset + 8U];
+			uint8_t calc_crc = 0;
+			int i;
+			for (i = 2; i < 8; i++) {
+				calc_crc ^= UA4RxMailbox[offset + (uint16_t)i];
 			}
-        }
-    }
+
+			if (calc_crc == crc) {
+				uint8_t next_head = (uint8_t)((gs_cmd_head + 1U) % 16U);
+				if (next_head != gs_cmd_tail) {
+					gs_cmd_queue[gs_cmd_head].id    = cmd_id;
+					gs_cmd_queue[gs_cmd_head].index = index;
+					gs_cmd_queue[gs_cmd_head].value = val.f;
+					gs_cmd_head = next_head;
+				} else {
+					gs_cmd_drop_count++;
+				}
+			}
+			offset += 9U;
+		}
+		else
+		{
+			offset += 1U;
+		}
+	}
 }

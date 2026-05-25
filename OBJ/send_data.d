@@ -87,3 +87,5 @@
 ..\obj\send_data.o: ..\API\GPS.h
 ..\obj\send_data.o: ..\TASK\send_data.h
 ..\obj\send_data.o: ..\API\mrac.h
+..\obj\send_data.o: ..\API\rc_input.h
+..\obj\send_data.o: ..\API\flight_fsm.h

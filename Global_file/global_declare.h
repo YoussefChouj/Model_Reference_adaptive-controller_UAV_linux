@@ -13,26 +13,31 @@
 #define   SBUS_MAX       1800
 #define   SBUS_MIN       200
 
-//¾ÉÒ£¿ØÆ÷
+//ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½
 //#define   SBUS_MID       1024
 //#define   SBUS_MAX       1696
 //#define   SBUS_MIN       352
 #define   SBUS_CH_VALID(x)      ( ABS(x-SBUS_MID)>SBUS_OFFSET  )
 #define   SBUS_THR_CH_VALID(x)      ( ABS(x-SBUS_MID)>SBUS_THR_OFFSET  ) 
 
-#define Stick_to_MAX_Angle   18.0  //pitch roll Õý¸º15¶È
-#define Stick_to_MAX_Horizontal_Rate   100.0    //   cm/s
-#define Stick_to_MAX_GyroZ            200.0   //  deg/s
-#define Stick_to_MAX_V_height         1.0   //   m/s 
+#define Stick_to_MAX_Angle   18.0f
+#define Stick_to_MAX_Horizontal_Rate   100.0f   //   cm/s
+#define Stick_to_MAX_GyroZ            200.0f   //  deg/s
+#define Stick_to_MAX_V_height         1.0f   //   m/s
  
 #define   value_limit(x,small,big)   if(x<small)x=small;if(x>big)x=big;
 #define FlyMode_DangerousStop        0
 #define FlyMode_SDK                  1     //SDKÄ£Ê½
 
+/* Ground-station protocol version (uint8, appended as last byte of Frame A payload).
+ * Increment when the frame layout or CMD semantics change. Must match GS_PROTO_VERSION
+ * in ground_station/comm/serial_bridge.py. */
+#define GS_PROTO_VERSION             2U
+
 #define ARM_Delay_time  150
 #define DISARM_Delay_time  50// 50*20ms = 1s
-#define DisArmed    0    //ÎÞÈË»ú½âËø
-#define Armed       1    //ÎÞÈË»úÉÏËø
+#define DisArmed    0    //ï¿½ï¿½ï¿½Ë»ï¿½ï¿½ï¿½ï¿½ï¿½
+#define Armed       1    //ï¿½ï¿½ï¿½Ë»ï¿½ï¿½ï¿½ï¿½ï¿½
 
 #define   PI        3.14159f
 #define DEG2RAD (PI / 180.0f)
@@ -131,13 +136,15 @@ extern RemoterTypeDef  Remoter;
 extern DroneStatusTypeDef DroneStatus; 
 extern StickMotionTypeDef StickMotion;
 
-/* Hybrid RC / computer control (see RemoterTask, StabilizerTask, send_data) */
+/* Hybrid RC / computer control (see RemoterTask, rc_input) */
 extern volatile uint8_t sbus_lost;
 extern volatile uint32_t sbus_last_valid_tick;
-extern float virtual_rc_sticks[4];
 extern volatile uint8_t bench_mode_active;
 
-/* Ground-station safety limits (CMD 0x09, CMD 0x03 idx 8-9) */
+/* Ground-station safety limits.
+ * WRITTEN BY: send_data.c CMD 0x09 (speeds/angles) and CMD 0x03 idx 8-9 (throttle).
+ * READ BY: StabilizerTask (accel_to_lean_angles, Update_v_h_Des, PWM clamp).
+ * All are 32-bit floats â€” single stores are atomic on Cortex-M4; no critical section needed. */
 extern float gs_max_horizontal_speed_mps;
 extern float gs_max_vertical_speed_mps;
 extern float gs_max_pitch_deg;
@@ -148,7 +155,29 @@ extern float gs_throttle_max_pct;   /* 0..1 of PWM span above idle */
 /* TWC point-to-point: arrival flag (set in StabilizerTask Update_Des, sent in Frame A) */
 extern volatile uint8_t TWC_arrived;
 
-/* Sinusoidal path (CMD 0x0B, AutoflyTask_RunSinusoid) */
+/* Flight mode driven by SBUS channel 5 (sbus_channel[4]) 3-position switch.
+ * 0 = IDLE  : motors armed/spinning, position hold at ground, no TWC ascent.
+ * 1 = FLY   : normal position control.
+ * 2 = LAND  : smooth Z descent â†’ auto-disarm on touchdown.
+ * Written by RemoterTask, read by StabilizerTask. */
+extern volatile uint8_t drone_mode;
+
+/* Set by RemoterTask on SBUS ch7 rising edge to command fly-up to Z=0.5 m.
+ * Cleared by StabilizerTask after loading TWC target. */
+extern volatile uint8_t sbus_flyup_trigger;
+
+/* Set by RemoterTask on SBUS channel 8 rising edge to trigger preset path launch.
+ * Cleared by the path execution handler after processing. */
+extern volatile uint8_t sbus_path_trigger;
+
+/* Sinusoidal path parameters.
+ * WRITTEN BY: send_data.c CMD 0x0B handler (RemoterTask context).
+ *   Config fields (center_x/y/z, amplitude, frequency, duration, axis): single
+ *   float/uint8 writes â€” naturally atomic on Cortex-M4.
+ *   Activation (active=1 + t_elapsed=0): taskENTER_CRITICAL guard required
+ *   because AutoflyTask can preempt between the two stores.
+ * READ/MUTATED BY: AutoflyTask_RunSinusoid (t_elapsed, active), AutoflyTask_PathArbitrate (active).
+ * READ FOR TELEMETRY BY: send_data.c Frame B path tail (active, t_elapsed, theta). */
 typedef struct {
 	float center_x;
 	float center_y;
@@ -163,7 +192,12 @@ typedef struct {
 
 extern volatile SinusoidPath_t sinusoid_path;
 
-/* Circle path (CMD 0x0C, AutoflyTask_RunCircle); t_elapsed tracks time for duration limit */
+/* Circle path parameters.
+ * WRITTEN BY: send_data.c CMD 0x0C handler (RemoterTask context).
+ *   Config fields: naturally atomic. Activation (active=1 + theta=0 + t_elapsed=0):
+ *   taskENTER_CRITICAL guard required.
+ * READ/MUTATED BY: AutoflyTask_RunCircle (theta, t_elapsed, active), AutoflyTask_PathArbitrate (active).
+ * READ FOR TELEMETRY BY: send_data.c Frame B path tail (active, theta, t_elapsed). */
 typedef struct {
 	float center_x;
 	float center_y;

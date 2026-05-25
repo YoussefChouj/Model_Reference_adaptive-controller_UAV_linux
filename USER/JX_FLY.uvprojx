@@ -480,6 +480,16 @@
               <FilePath>..\API\mrac_math.c</FilePath>
             </File>
             <File>
+              <FileName>rc_input.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\API\rc_input.c</FilePath>
+            </File>
+            <File>
+              <FileName>flight_fsm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\API\flight_fsm.c</FilePath>
+            </File>
+            <File>
               <FileName>time_estimate.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\API\time_estimate.c</FilePath>

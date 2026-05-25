@@ -10,13 +10,13 @@
 
 //APB1   42m
 //APB2   84m
-//21·ÖÆµµ½ 84000000/21 = 4M   0.25us
+//21ï¿½ï¿½Æµï¿½ï¿½ 84000000/21 = 4M   0.25us
 
-/*³õÊ¼»¯¸ßµçÆ½Ê±¼ä1000us£¨4000·Ý£©*/
+/*ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ßµï¿½Æ½Ê±ï¿½ï¿½1000usï¿½ï¿½4000ï¿½Ý£ï¿½*/
 #define INIT_DUTY 3000 //u16(1000/0.25)
-/*ÆµÂÊ400hz*/
+/*Æµï¿½ï¿½400hz*/
 #define HZ        400
-/*¾«¶È10000£¬Ã¿·Ý0.25us*/
+/*ï¿½ï¿½ï¿½ï¿½10000ï¿½ï¿½Ã¿ï¿½ï¿½0.25us*/
 #define ACCURACY 10000 //u16(2500/0.25) //accuracy
 
 MOTORTypeDef mymotor;
@@ -33,7 +33,7 @@ void PWM_TIM3_Init (void) //300hz
     RCC_APB1PeriphClockCmd ( RCC_APB1Periph_TIM3, ENABLE );
     RCC_AHB1PeriphClockCmd ( RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_GPIOB, ENABLE );
 
-/////////////////////////////////////////////////////////////////////////////ÉèÖÃ¶æ»ú
+/////////////////////////////////////////////////////////////////////////////ï¿½ï¿½ï¿½Ã¶ï¿½ï¿½
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7 ;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
@@ -101,10 +101,10 @@ void PWM_TIM3_Init (void) //300hz
 		
 		Set_Zero_Motors();
 
-//  mymotor.motor1 = 2000; //×óÉÏ  Ë³
-//  mymotor.motor2 = 2000;  //ÓÒÏÂ Ë³
-//	mymotor.motor3 = 2000; //×óÏÂ  Äæ
-//	mymotor.motor4 = 2000;  //ÓÒÉÏ  Äæ
+//  mymotor.motor1 = 2000; //ï¿½ï¿½ï¿½ï¿½  Ë³
+//  mymotor.motor2 = 2000;  //ï¿½ï¿½ï¿½ï¿½ Ë³
+//	mymotor.motor3 = 2000; //ï¿½ï¿½ï¿½ï¿½  ï¿½ï¿½
+//	mymotor.motor4 = 2000;  //ï¿½ï¿½ï¿½ï¿½  ï¿½ï¿½
 	
 }
 void PWM_TIM2_Init (void) //300hz
@@ -121,7 +121,7 @@ void PWM_TIM2_Init (void) //300hz
     RCC_AHB1PeriphClockCmd ( RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_GPIOB, ENABLE );
 
 	
-/////////////////////////////////////////////////////////////////////////////ÉèÖÃµç»ú
+/////////////////////////////////////////////////////////////////////////////ï¿½ï¿½ï¿½Ãµï¿½ï¿½
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_5  ;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
@@ -191,7 +191,7 @@ void PWM_TIM2_Init (void) //300hz
 }
 
 
-void PWM_TIM4_Init (void) //300hz  ÉèÖÃ¶æ»ú
+void PWM_TIM4_Init (void) //300hz  ï¿½ï¿½ï¿½Ã¶ï¿½ï¿½
 {
     TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
     TIM_OCInitTypeDef  TIM_OCInitStructure;
@@ -204,7 +204,7 @@ void PWM_TIM4_Init (void) //300hz  ÉèÖÃ¶æ»ú
     RCC_APB1PeriphClockCmd ( RCC_APB1Periph_TIM4, ENABLE );
     RCC_AHB1PeriphClockCmd ( RCC_AHB1Periph_GPIOB, ENABLE );
 
-/////////////////////////////////////////////////////////////////////////////ÉèÖÃ¶æ»ú
+/////////////////////////////////////////////////////////////////////////////ï¿½ï¿½ï¿½Ã¶ï¿½ï¿½
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
@@ -216,8 +216,8 @@ void PWM_TIM4_Init (void) //300hz  ÉèÖÃ¶æ»ú
 		GPIO_PinAFConfig ( GPIOB, GPIO_PinSource7, GPIO_AF_TIM4 );  //TIM4 CH2
     
     /* Time base configuration */
-    TIM_TimeBaseStructure.TIM_Period = 20000-1;    //1M/20000 = 50HZ
-    TIM_TimeBaseStructure.TIM_Prescaler = 84-1;  //84M/84 =1M //1us
+    TIM_TimeBaseStructure.TIM_Period = 10000-1;    //2M/10000 = 200HZ
+    TIM_TimeBaseStructure.TIM_Prescaler = 42-1;  //84M/42 =2M
     TIM_TimeBaseStructure.TIM_ClockDivision = 0;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
     TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
@@ -233,7 +233,7 @@ void PWM_TIM4_Init (void) //300hz  ÉèÖÃ¶æ»ú
 
     /* PWM1 Mode configuration: Channel1 */
     TIM_OCInitStructure.TIM_OutputState = TIM_OutputState_Enable;
-    TIM_OCInitStructure.TIM_Pulse = INIT_DUTY;
+    TIM_OCInitStructure.TIM_Pulse = 0;
 		
     TIM_OC1Init ( TIM4, &TIM_OCInitStructure );
 		TIM_OC1PreloadConfig(TIM4, TIM_OCPreload_Enable);
@@ -245,29 +245,28 @@ void PWM_TIM4_Init (void) //300hz  ÉèÖÃ¶æ»ú
     TIM_ARRPreloadConfig ( TIM4, ENABLE );
     TIM_Cmd ( TIM4, ENABLE );
 		
-		SetPitchAngle(40); //±£³Ö³õÊ¼Î»ÖÃ£¬ÃâµÃ³é·ç
-		SetRollAngle(90);
+		Set_Zero_Motors();
 		//SetRollAngle(0);
 }
 
-//180¶È¶æ»ú£º  1us
-//0.5ms  ---0¶È     500
-//1.0ms ----45¶È   1000
-//1.5ms ----90¶È    1500
-//2.0ms -----135¶È  2000
-//2.5ms ----180¶È    2500
+//180ï¿½È¶ï¿½ï¿½ï¿½ï¿½  1us
+//0.5ms  ---0ï¿½ï¿½     500
+//1.0ms ----45ï¿½ï¿½   1000
+//1.5ms ----90ï¿½ï¿½    1500
+//2.0ms -----135ï¿½ï¿½  2000
+//2.5ms ----180ï¿½ï¿½    2500
 
 void SetPitchAngle(float angle)
 {	
-    TIM_SetCompare2(TIM4 , (2.5f + 10*angle/180)/100*20000);   // ÐÞ¸Ä TIM4_CCR1 À´¿ØÖÆÕ¼¿Õ±È
+    TIM_SetCompare2(TIM4 , (2.5f + 10*angle/180)/100*20000);   // ï¿½Þ¸ï¿½ TIM4_CCR1 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ¼ï¿½Õ±ï¿½
 }
 
 void SetRollAngle(float angle)
 {
-    TIM_SetCompare1(TIM4 , (2.5f + 10*angle/180)/100*20000);   // ÐÞ¸Ä TIM4_CCR1 À´¿ØÖÆÕ¼¿Õ±È
+    TIM_SetCompare1(TIM4 , (2.5f + 10*angle/180)/100*20000);   // ï¿½Þ¸ï¿½ TIM4_CCR1 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ¼ï¿½Õ±ï¿½
 }
 
-void Set_PWM_Motors(void)  //ÉèÖÃµç»ú  
+void Set_PWM_Motors(void)  //ï¿½ï¿½ï¿½Ãµï¿½ï¿½  
 {
   // CONSTRAINT: Macro mapping M1/M4/M2/M3 in pwm.h is intentional and must not be reordered independently.
   // ARCH: This layer clamps and forwards mixer outputs; it does not redefine axis signs.
@@ -305,8 +304,8 @@ void SetBeep(int B)
 {
 	if(B==0)
 	{
-		TIM_SetCompare3(TIM4 , 0);     //´ÓÓÒÍù×ó¿´µÚÈý¸ö    Ä¿Ç°ÊÇ·äÃùÆ÷
-    //0---->²»Ïì      1500----->ÖÐµÈÒôÁ¿
+		TIM_SetCompare3(TIM4 , 0);     //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ó¿´µï¿½ï¿½ï¿½ï¿½ï¿½    Ä¿Ç°ï¿½Ç·ï¿½ï¿½ï¿½ï¿½ï¿½
+    //0---->ï¿½ï¿½ï¿½ï¿½      1500----->ï¿½Ðµï¿½ï¿½ï¿½ï¿½ï¿½
 	}
 	else
 	{

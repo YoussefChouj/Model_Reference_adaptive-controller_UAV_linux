@@ -1,0 +1,1 @@
+{"nodes": [{"id": "global_declare", "label": "global_declare.c", "file_type": "code", "source_file": "Global_file\\global_declare.c", "source_location": "L1"}], "edges": [{"source": "global_declare", "target": "global_declare", "relation": "imports", "confidence": "EXTRACTED", "source_file": "Global_file\\global_declare.c", "source_location": "L1", "weight": 1.0}]}

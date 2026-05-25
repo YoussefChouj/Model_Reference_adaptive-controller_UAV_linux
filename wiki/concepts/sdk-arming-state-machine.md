@@ -62,21 +62,37 @@ Observed transition behavior from code:
 
 - `ARMED -> DISARMED`  
   Trigger A: left-down stick hold reaches `DISARM_Delay_time` (`TASK/RemoterTask.c:72-74,109-112`)  
-  Trigger B: GS command `0x0E idx0 val==0` (`TASK/send_data.c:668-671`)  
+  Trigger B: GS command `0x0E idx0 val==0` — revokes authority only (drone stays ARMED); pilot disarms via RC gesture  
   Trigger C: Dangerous stop / non-SDK path in motor updater (`TASK/StabilizerTask.c:188-197`)  
   Trigger D: SDK land completion (`TASK/AutoflyTask.c:258-264`)
+
+## Physical RC Prerequisite
+
+`Check_Fly_Mode()` reads `sbus_channel[9]` at 100 Hz. If the RC mode switch is never HIGH, `DangerousStop_cnt` immediately exceeds 10 → `DANGEROUS_STOP` fires continuously → FSM never leaves EMERGENCY → FlyMode_DangerousStop always.
+
+**The physical RC mode switch must be HIGH before arming.** Once a valid SBUS frame with channel[9] > 500 has been decoded, the value is held in `sbus_channel[9]` even if SBUS is later lost, so a brief SBUS dropout does not kill the mode.
+
+## Authority Handover on Arm
+
+CMD `0x0E` arm (`send_data.c:694-695`) calls both `FlightFSM_Event(ARM_REQUEST)` and `RCInput_SetAuthority(1)`. After this:
+- Physical RC sticks are suspended from the control loop
+- PC sliders (CMD `0x06`) are accepted and routed by `RCInput_Get()`
+- RC mode switch still works as hard kill (operates on FlyMode, not authority)
+
+CMD `0x0E` disarm (`send_data.c:698-701`) calls `RCInput_SetAuthority(0)` only. Physical RC resumes immediately; drone stays ARMED so the pilot can land safely. `FlightFSM_Event(DISARM_REQUEST)` is NOT sent — calling it mid-air cuts motors.
 
 ## Ambiguities Worth Tracking
 
 Two implementation details can surprise operators:
 
 1. **No explicit hold-time on GS arm request**  
-   GS arm command is immediate in current logic (`TASK/send_data.c:664-667`), unlike stick arming which is delay-gated.
+   GS arm command is immediate (`send_data.c:694`), unlike stick arming which is delay-gated at `ARM_Delay_time = 150` cycles.
 
 2. **Arm and mode are split authorities**  
-   Arming can be set while mode later flips to dangerous stop via RC channel (`TASK/RemoterTask.c:125-143`), causing immediate zero/disarm on next motor update cycle.
+   Arming can be set while mode later flips to dangerous stop via RC channel (`TASK/RemoterTask.c:125-143`), causing immediate zero/disarm on next motor update cycle. This is intentional: RC kill switch overrides everything.
 
-Documenting these ambiguities helps avoid diagnosing expected safety behavior as protocol or UI bugs.
+3. **Authority is not cleared by DANGEROUS_STOP**  
+   If the RC mode switch is flipped LOW (kill) then back HIGH, the FSM recovers to DISARMED but `s_authority` remains 1 until the GS clicks [ARM REQ OFF] or re-sends CMD `0x0E val=0`. Motors stay stopped (FSM DISARMED) but a new SDK ARM REQ restores full VRC without needing to reset authority.
 
 ## See Also
 

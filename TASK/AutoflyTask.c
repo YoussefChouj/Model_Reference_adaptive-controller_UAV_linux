@@ -1,5 +1,6 @@
 #include "AutoflyTask.h"
 #include "math.h"
+#include "flight_fsm.h"
 
 float x_test = 1;
 float y_test = 1;
@@ -132,32 +133,32 @@ void AutoflyTask(void)
 			SDK_StateMachine_Reset();
 		}
 }
-#define SDK_Cmd_TakeOff        0  //Æð·É
-#define SDK_Cmd_Land           1  //½µÂä
-#define SDK_Cmd_Search0        2  //Ô­µØ×ªÈ¦ËÑË÷
-#define SDK_Cmd_Search1        3  //¾ØÐÎÒÆ¶¯ËÑË÷
-#define SDK_Cmd_PosHold        4  //¶¨µã
-#define SDK_Cmd_Circle         5  //Æð·ÉµãµÄÔ²
-#define SDK_Cmd_FollowLine     6  //Ñ­Ïß
-#define SDK_Cmd_PowerLine      7  //Ñ­µçÏß    µçÈü×¨ÓÃ
-#define SDK_Cmd_Surround       8  //ÈÆ·É      µçÈü×¨ÓÃ
-#define SDK_Cmd_GetLine        9  //½øÏß    µçÈü×¨ÓÃ
-#define SDK_Cmd_GetClose       10 //¿¿½ü    µçÈü×¨ÓÃ
-#define SDK_Cmd_DelayWake      11  //ÑÓÊ±Æô¶¯
-#define SDK_Cmd_Pos1           12  //¿ª»·1
-#define SDK_Cmd_Pos2           13  //¿ª»·2
-#define SDK_Cmd_Pos3           14  //¿ª»·3   
-#define SDK_Cmd_Pos4           15  //¿ª»·4
-#define SDK_Cmd_SearchLand     16  //¿ª»·4
-#define SDK_Cmd_SearchLand_down 17  //¿ª»·4
-#define SDK_Cmd_Searchgan      18  //¿ª»·4
-#define SDK_Cmd_Pos5           19  //¿ª»·4
-#define SDK_Cmd_Pos6           20  //¿ª»·4
-#define SDK_Cmd_Pos7           21  //¿ª»·4
-#define SDK_Cmd_Pos8           22  //¿ª»·4
-#define SDK_Cmd_Pos9           23  //¿ª»·4
-#define SDK_Cmd_Pos10          24  //¿ª»·4
-#define  SDK_Cmd_go_to_land    25  //¿ª»·4
+#define SDK_Cmd_TakeOff        0  //ï¿½ï¿½ï¿½
+#define SDK_Cmd_Land           1  //ï¿½ï¿½ï¿½ï¿½
+#define SDK_Cmd_Search0        2  //Ô­ï¿½ï¿½×ªÈ¦ï¿½ï¿½ï¿½ï¿½
+#define SDK_Cmd_Search1        3  //ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½
+#define SDK_Cmd_PosHold        4  //ï¿½ï¿½ï¿½ï¿½
+#define SDK_Cmd_Circle         5  //ï¿½ï¿½Éµï¿½ï¿½Ô²
+#define SDK_Cmd_FollowLine     6  //Ñ­ï¿½ï¿½
+#define SDK_Cmd_PowerLine      7  //Ñ­ï¿½ï¿½ï¿½ï¿½    ï¿½ï¿½ï¿½ï¿½×¨ï¿½ï¿½
+#define SDK_Cmd_Surround       8  //ï¿½Æ·ï¿½      ï¿½ï¿½ï¿½ï¿½×¨ï¿½ï¿½
+#define SDK_Cmd_GetLine        9  //ï¿½ï¿½ï¿½ï¿½    ï¿½ï¿½ï¿½ï¿½×¨ï¿½ï¿½
+#define SDK_Cmd_GetClose       10 //ï¿½ï¿½ï¿½ï¿½    ï¿½ï¿½ï¿½ï¿½×¨ï¿½ï¿½
+#define SDK_Cmd_DelayWake      11  //ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½
+#define SDK_Cmd_Pos1           12  //ï¿½ï¿½ï¿½ï¿½1
+#define SDK_Cmd_Pos2           13  //ï¿½ï¿½ï¿½ï¿½2
+#define SDK_Cmd_Pos3           14  //ï¿½ï¿½ï¿½ï¿½3   
+#define SDK_Cmd_Pos4           15  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_SearchLand     16  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_SearchLand_down 17  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Searchgan      18  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Pos5           19  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Pos6           20  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Pos7           21  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Pos8           22  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Pos9           23  //ï¿½ï¿½ï¿½ï¿½4
+#define SDK_Cmd_Pos10          24  //ï¿½ï¿½ï¿½ï¿½4
+#define  SDK_Cmd_go_to_land    25  //ï¿½ï¿½ï¿½ï¿½4
 #define V_max `10
 
 void SDK_StateMachine_Init(void)
@@ -259,8 +260,7 @@ void SDK_StateMachine_Loop(void)
 			{
 					SDK_StateMachine[ CurrentSDKState +1 ]=0;
 					KeySDKflag=0;
-					DroneStatus.ARM_Status = DisArmed;
-					DroneStatus.FlyMode = FlyMode_DangerousStop;
+					FlightFSM_Event(FLIGHT_EVENT_DANGEROUS_STOP);
 			}
 			break;
 			
@@ -281,7 +281,7 @@ void SDK_StateMachine_Loop(void)
 void SDK_Set_V_Loc(void)
 {
 	
-/*********************************¿ØÖÆËÙ¶È·½°¸**********************************************/		
+/*********************************ï¿½ï¿½ï¿½ï¿½ï¿½Ù¶È·ï¿½ï¿½ï¿½**********************************************/		
 	if(
 		   SDK_StateMachine[ CurrentSDKState ]== SDK_Cmd_Search0
 	       || SDK_StateMachine[ CurrentSDKState ]==  SDK_Cmd_PosHold
@@ -299,11 +299,11 @@ void SDK_Set_V_Loc(void)
 													|| SDK_StateMachine[ CurrentSDKState ]== SDK_Cmd_SearchLand_down 
 		)
 	{
-		if(SBUS_CH_VALID(PITCH_CH))//´ò¸Ë¶ÔÓ¦ÆÚÍûË®Æ½ËÙ¶È
+		if(SBUS_CH_VALID(PITCH_CH))//ï¿½ï¿½Ë¶ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ë®Æ½ï¿½Ù¶ï¿½
 				Ctrler.locysPID.Des = -((Remoter.PitCtrler-3000)/1000.0)*Stick_to_MAX_Horizontal_Rate;
 		else if(temp_V_y== -1) 
 		{  
-			if(y_test ==0) //Ö»½øÈëÒ»´Î
+			if(y_test ==0) //Ö»ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½
 			{
 				Ctrler.locyPID.Des =Ctrler.locyPID.FB;
 				y_test=1;
@@ -341,11 +341,11 @@ void SDK_Set_V_Loc(void)
 			}
 		}
 		
-		if(SBUS_CH_VALID(ROLL_CH))//´ò¸Ë¶ÔÓ¦ÆÚÍûË®Æ½ËÙ¶È
+		if(SBUS_CH_VALID(ROLL_CH))//ï¿½ï¿½Ë¶ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ë®Æ½ï¿½Ù¶ï¿½
 				Ctrler.locxsPID.Des = -((Remoter.RolCtrler-3000)/1000.0)*Stick_to_MAX_Horizontal_Rate;  
 		else if(temp_V_x == -1)
 		{ 
-			if(x_test ==0) //Ö»½øÈëÒ»´Î
+			if(x_test ==0) //Ö»ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½
 			{
 				Ctrler.locxPID.Des =Ctrler.locxPID.FB;
 				x_test=1;	
@@ -408,7 +408,7 @@ void SDK_Set_Gyroz(void)
 			Ctrler.gyrozPID.Des =  ((Remoter.YawCtrler-3000)/1000.0)*Stick_to_MAX_GyroZ ;
 		else if(temp_Gyroz == 0)
 		{
-			if(yaw_test==0) //±êÖ¾Î»£¬Ö»½øÈëÒ»´Î
+			if(yaw_test==0) //ï¿½ï¿½Ö¾Î»ï¿½ï¿½Ö»ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½
 			{
 				Ctrler.yawPID.Des = Ctrler.yawPID.FB;
 				yaw_test =1;

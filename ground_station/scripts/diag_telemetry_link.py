@@ -99,12 +99,12 @@ def decode_stream(buf: bytearray, stats: FrameStats) -> None:
             continue
 
         if frame_type == 0x01:
-            if payload_len != 37:
+            if payload_len != 38:
                 stats.len_fail += 1
                 continue
             stats.frame_a_ok += 1
             try:
-                unpacked = struct.unpack("<8fBBBBB", payload)
+                unpacked = struct.unpack("<8fBBBBBB", payload)
                 stats.last_arm = int(unpacked[8])
                 stats.last_flymode = int(unpacked[9])
                 stats.last_sbus_lost = int(unpacked[10])

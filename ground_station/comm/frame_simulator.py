@@ -26,7 +26,7 @@ import threading
 import time
 from typing import List
 
-from ground_station.comm.serial_bridge import _xor_crc8, load_config
+from ground_station.comm.serial_bridge import _xor_crc8, load_config, GS_PROTO_VERSION
 
 SYNC = (0xAA, 0xBB)
 FRAME_A = 0x01
@@ -64,7 +64,7 @@ def _pack_telemetry_frame(frame_type: int, max_num_basis: int, payload: bytes) -
 
 
 def build_frame_a(max_num_basis: int, t_s: float) -> bytes:
-    """8 floats (sine, distinct Hz) + ARM + FlyMode + sbus_lost + TWC flags; LEN = 37."""
+    """8 floats (sine, distinct Hz) + ARM + FlyMode + sbus_lost + TWC flags + proto_version; LEN = 38."""
     freqs_hz = [0.31, 0.47, 0.59, 0.71, 0.83, 0.97, 1.09, 1.21]
     floats: List[float] = [math.sin(2.0 * math.pi * f * t_s) for f in freqs_hz]
     arm_u8 = 1 if int(t_s * 2) % 2 == 0 else 0
@@ -72,7 +72,12 @@ def build_frame_a(max_num_basis: int, t_s: float) -> bytes:
     sbus_lost_u8 = 0
     twc_execute_u8 = 0
     twc_arrived_u8 = 1 if int(t_s * 3) % 2 == 0 else 0
-    payload = struct.pack("<8fBBBBB", *floats, arm_u8, flymode_u8, sbus_lost_u8, twc_execute_u8, twc_arrived_u8)
+    payload = struct.pack(
+        "<8fBBBBBB",
+        *floats,
+        arm_u8, flymode_u8, sbus_lost_u8, twc_execute_u8, twc_arrived_u8,
+        GS_PROTO_VERSION,
+    )
     return _pack_telemetry_frame(FRAME_A, max_num_basis, payload)
 
 

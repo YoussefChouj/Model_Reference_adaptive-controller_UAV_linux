@@ -1,0 +1,10 @@
+﻿/no_think Do the following NOW without asking questions:
+
+1. Read the file BSP\Note.txt using your file tools
+2. Extract all entities (concepts, components, modules) and relationships mentioned in it
+3. Write ONLY valid JSON (no markdown, no explanation) to this exact path: C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\.agent_out\extractions\test_note_txt.json
+
+JSON schema to follow exactly:
+{"nodes":[{"id":"snake_case_id","label":"Human Label","file_type":"document","source_file":"BSP\Note.txt"}],"edges":[{"source":"id1","target":"id2","relation":"references","confidence":"EXTRACTED","confidence_score":0.9,"source_file":"BSP\Note.txt"}],"hyperedges":[]}
+
+Do not greet. Do not explain. Read the file and write the JSON now.

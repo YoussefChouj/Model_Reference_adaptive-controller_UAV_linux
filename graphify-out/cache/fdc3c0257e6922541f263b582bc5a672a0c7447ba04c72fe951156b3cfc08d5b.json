@@ -1,0 +1,1 @@
+{"nodes": [{"id": "rc_input", "label": "rc_input.h", "file_type": "code", "source_file": "API\\rc_input.h", "source_location": "L1"}], "edges": [{"source": "rc_input", "target": "stm32f4xx", "relation": "imports", "confidence": "EXTRACTED", "source_file": "API\\rc_input.h", "source_location": "L4", "weight": 1.0}]}

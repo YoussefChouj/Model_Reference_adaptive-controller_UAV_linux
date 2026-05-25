@@ -16,8 +16,13 @@
 #define  YAW_CH      sbus_channel[3]
 #define  THR_CH      sbus_channel[2]
 
+/* Auxiliary SBUS channels (0-indexed, raw 0-2000 range) */
+#define  MODE_CH      sbus_channel[4]  /* ch5: 2-state â€” mid(â‰ˆ1000)=IDLE, high(â‰ˆ1600)=LAND; low treated as IDLE */
+#define  FLYUP_CH     sbus_channel[6]  /* ch7: momentary â€” rising edge >500 commands fly-up to Z=0.5 m */
+#define  PATH_EXEC_CH sbus_channel[7]  /* ch8: momentary â€” rising edge >500 triggers preset path */
+
 /////////////////////////////////////////////////////////////////////////////////////
-//Êý¾Ý²ð·Öºê¶¨Òå£¬ÔÚ·¢ËÍ´óÓÚ1×Ö½ÚµÄÊý¾ÝÀàÐÍÊ±£¬±ÈÈçint16¡¢floatµÈ£¬ÐèÒª°ÑÊý¾Ý²ð·Ö³Éµ¥¶À×Ö½Ú½øÐÐ·¢ËÍ
+//ï¿½ï¿½ï¿½Ý²ï¿½Öºê¶¨ï¿½å£¬ï¿½Ú·ï¿½ï¿½Í´ï¿½ï¿½ï¿½1ï¿½Ö½Úµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½int16ï¿½ï¿½floatï¿½È£ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½ï¿½Ý²ï¿½Ö³Éµï¿½ï¿½ï¿½ï¿½Ö½Ú½ï¿½ï¿½Ð·ï¿½ï¿½ï¿½
 #define BYTE0(dwTemp)       ( *( (char *)(&dwTemp)      ) )
 #define BYTE1(dwTemp)       ( *( (char *)(&dwTemp) + 1) )
 #define BYTE2(dwTemp)       ( *( (char *)(&dwTemp) + 2) )

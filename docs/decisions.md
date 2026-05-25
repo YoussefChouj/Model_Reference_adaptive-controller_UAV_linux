@@ -31,3 +31,43 @@
 - **Rationale:** Prevents contradictory setpoint writers and simplifies safety reasoning for autonomous behavior.
 - **Files affected:** `TASK/AutoflyTask.c`, `TASK/send_data.c`, `Global_file/global_declare.h`.
 - **Constraints created:** Path activation flags must be mutually consistent, and abort logic must clear all path-active state.
+
+## 2026-05-23: Mixed-Unit XY/Z Coordinate Contract
+- **Problem:** `locxPID` and `locyPID` operate in centimetres; `Z_posPID` operates in metres. The TWC_arrived distance check combined these without conversion, causing the distance to be ~100× too large and TWC_arrived to never fire.
+- **Options considered:** Convert all PIDs to metres; convert all PIDs to cm; leave internal units and add explicit conversions at every boundary.
+- **Chosen:** Leave internal units unchanged. Add explicit ×0.01f conversion in `TWC_arrived` distance calculation. Add ×100 multiplier in ground station before sending XY targets. Add ÷100 in ground station before displaying XY.
+- **Rationale:** PID gains (Kp=0.8, EMin=30 cm, vel saturation=120 cm/s) are tuned for cm. Changing internal units would require re-tuning all gains and invalidate flight logs.
+- **Files affected:** `TASK/StabilizerTask.c` (distance calc), `ground_station/gui/dashboard.py` (send ×100, display ÷100).
+- **Constraints created:** Every sender of CMD 0x0A index 0/1 must multiply by 100. Every display of locxPID/locyPID must divide by 100.
+
+## 2026-05-23: UART RX Buffers Sized for Burst Coalescing
+- **Problem:** Python serial bridge coalesces multiple rapid CMD writes into one OS-level burst. If burst > RXMB_LEN, the firmware USART_Receive() skips the mailbox copy → commands silently lost. Old RXMB_LEN was 50 bytes (5 frames). A burst of 6+ frames caused drops.
+- **Options considered:** Slow down Python writes; increase buffer; add flow control.
+- **Chosen:** Increase `UART4_RXDMA_LEN` and `UART4_RXMB_LEN` to 128 bytes. Replace single-frame parser with a loop-based multi-frame parser.
+- **Rationale:** Flow control would require firmware-side handshaking. Slowing Python writes is fragile. Larger buffers with a robust parser are the simplest correct fix.
+- **Files affected:** `BSP/usart4.h`, `BSP/usart4.c`.
+- **Constraints created:** RXMB_LEN must be ≥ maximum expected burst size. Multi-frame parser assumes no partial frames span IDLE boundaries (safe given UART IDLE fires on line quiet).
+
+## 2026-05-23: Z Setpoint Rate Limiter for Ceiling Safety
+- **Problem:** When Execute TWC fires with a large Z target and the drone is on the ground, the full error is fed to the PID immediately → violent over-shoot → ceiling strike. Observed at 1.4 m target causing a 3 m ascent.
+- **Options considered:** Reduce PID Kp; add integral windup limit; rate-limit the setpoint; add altitude cap.
+- **Chosen:** Rate-limit `Z_posPID.Des` to ±0.005 m per control cycle (≈0.5 m/s max at 100 Hz) in `case_Update_height_Des`.
+- **Rationale:** PID gain tuning trades off response vs. oscillation for all scenarios; a setpoint rate limiter caps only the maximum acceleration without affecting small-error behaviour. It is the minimal intrusion.
+- **Files affected:** `TASK/StabilizerTask.c` (FLY branch of `case_Update_height_Des`).
+- **Constraints created:** Maximum commanded climb/descent rate is now bounded by both the rate limiter and `gs_max_vertical_speed_mps`. Both limits are active simultaneously.
+
+## 2026-05-23: Two-Phase TWC Safe Liftoff (Ground Station)
+- **Problem:** Sending a high-Z TWC target from the ground caused the drone to attempt the full ascent in one step, exacerbated by optical-flow XY drift causing simultaneous XY excursion. Result: ceiling strike + crash.
+- **Options considered:** Increase firmware rate limiter; add manual two-step UI; add automatic intermediate waypoint in software.
+- **Chosen:** Ground station implements a two-phase sequence automatically: (1) ascend to 0.5 m, (2) wait 1 s at 0.5 m after TWC_arrived fires, (3) then send final XY/Z target.
+- **Rationale:** The 0.5 m intermediate gives the closed-loop Z controller time to stabilize. The 1 s wait ensures horizontal drift has settled before XY setpoint is applied.
+- **Files affected:** `ground_station/gui/dashboard.py` (`_twc_phase_update`, `_twc_arrive_time` state).
+- **Constraints created:** TWC_arrived in firmware must correctly fire (unit contract above). The intermediate altitude (0.5 m) is hardcoded; if operational ceiling changes, this constant must be updated.
+
+## 2026-05-23: SBUS Channel-Based Flight Mode Switch
+- **Problem:** No mechanism existed to command a smooth landing or ground hold via the physical RC transmitter. Disarming mid-air via stick gesture caused instant motor cut.
+- **Options considered:** Add GS button for landing mode; use SBUS auxiliary channels; implement velocity control for landing.
+- **Chosen:** SBUS ch5 (3-position switch) → `drone_mode` global: 0=IDLE, 1=FLY, 2=LAND. SBUS ch8 (momentary) rising edge → `sbus_twc_trigger`. StabilizerTask reads both in `case_Update_height_Des`.
+- **Rationale:** SBUS channels are already decoded at 100 Hz in RemoterTask. A 3-position switch for IDLE/FLY/LAND covers all in-flight mode transitions without requiring ground station connectivity.
+- **Files affected:** `TASK/RemoterTask.h` (defines), `TASK/RemoterTask.c` (Check_Fly_Mode), `TASK/StabilizerTask.c` (mode branches), `Global_file/global_declare.h/.c` (drone_mode, sbus_twc_trigger).
+- **Constraints created:** ch5 and ch8 must be physically assigned on the RC transmitter. ch10 remains the unconditional kill switch (sbus_channel[9] ≤ 500 → DANGEROUS_STOP), independent of drone_mode.

@@ -1,7 +1,7 @@
 """
 Ground-station path follower: 10 Hz virtual stick commands (CMD 0x06).
 
-Firmware only applies CMD 0x06 when sbus_lost and FlyMode_SDK ¡ª plan bench /
+Firmware only applies CMD 0x06 when sbus_lost and FlyMode_SDK ï¿½ï¿½ plan bench /
 simulation accordingly.
 """
 from __future__ import annotations
@@ -26,8 +26,9 @@ class Waypoint:
     hold_s: float = 0.0
 
 
-def _stick_from_error(err_m: float, gain: float = 500.0) -> float:
-    return 3000.0 + max(-800.0, min(800.0, err_m * gain))
+def _stick_from_error(err_m: float, gain: float = 0.5) -> float:
+    """Return a normalised stick value in [-1.0, +1.0] for CMD 0x06."""
+    return max(-1.0, min(1.0, err_m * gain))
 
 
 class PathExecutor:
@@ -73,17 +74,15 @@ class PathExecutor:
             self._send_cmd(0x06, i, float(v))
 
     def _sim_integrate(self, thr: float, pit: float, rol: float, dt: float) -> None:
-        fx = (pit - 3000.0) / 1000.0
-        fy = (rol - 3000.0) / 1000.0
-        self._sim_xyz[0] += fx * 0.4 * dt
-        self._sim_xyz[1] += fy * 0.4 * dt
-        self._sim_xyz[2] += (thr - 3000.0) / 1000.0 * 0.15 * dt
+        self._sim_xyz[0] += pit * 0.4 * dt
+        self._sim_xyz[1] += rol * 0.4 * dt
+        self._sim_xyz[2] += thr * 0.15 * dt
 
     def _loop_body(self, src: str) -> None:
         dt = 0.1
         while not self._should_abort():
             px, py, pz = self._feedback(src)
-            # placeholder ¡ª subclasses set target via closure
+            # placeholder ï¿½ï¿½ subclasses set target via closure
             return
 
     def execute_point_to_point(
@@ -106,10 +105,10 @@ class PathExecutor:
                     ty = start[1] + (end[1] - start[1]) * u
                     tz = start[2] + (end[2] - start[2]) * u
                     px, py, pz = self._feedback(src)
-                    thr = _stick_from_error(tz - pz, 400.0)
-                    pit = _stick_from_error(-(tx - px), 350.0)
-                    rol = _stick_from_error(-(ty - py), 350.0)
-                    self._send_sticks(thr, pit, rol, 3000.0)
+                    thr = _stick_from_error(tz - pz, 0.4)
+                    pit = _stick_from_error(-(tx - px), 0.35)
+                    rol = _stick_from_error(-(ty - py), 0.35)
+                    self._send_sticks(thr, pit, rol, 0.0)
                     if src == "Simulation":
                         self._sim_integrate(thr, pit, rol, 0.1)
                     time.sleep(0.1)
@@ -150,7 +149,7 @@ class PathExecutor:
                         _stick_from_error(tz - pz),
                         _stick_from_error(-(tx - px)),
                         _stick_from_error(-(ty - py)),
-                        3000.0,
+                        0.0,
                     )
                     if src == "Simulation":
                         self._sim_integrate(
@@ -194,7 +193,7 @@ class PathExecutor:
                         _stick_from_error(tz - pz),
                         _stick_from_error(-(tx - px)),
                         _stick_from_error(-(ty - py)),
-                        3000.0,
+                        0.0,
                     )
                     if src == "Simulation":
                         self._sim_integrate(
@@ -228,7 +227,7 @@ class PathExecutor:
                             _stick_from_error(ez),
                             _stick_from_error(-ex),
                             _stick_from_error(-ey),
-                            3000.0,
+                            0.0,
                         )
                         if src == "Simulation":
                             self._sim_integrate(

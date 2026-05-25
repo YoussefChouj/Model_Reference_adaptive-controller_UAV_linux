@@ -4,8 +4,11 @@
       "Bash(ccc search*)",
       "Bash(ccc status*)",
       "Read",
+      "Write",
       "Grep",
-      "Glob"
+      "Glob",
+      "Bash(*)",
+      "PowerShell(*)"
     ]
   },
   "hooks": {

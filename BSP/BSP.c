@@ -6,20 +6,21 @@
 	 NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);
 
 	 LED_Init();
-	 PWM_TIM3_Init();  
-	 ADC1_Configuration();//Ç§Íò±ðÍüÁË³õÊ¼»¯£¡£¡·ñÔòÏµÍ³¿¨ËÀ
+	 PWM_TIM2_Init();
+	 PWM_TIM3_Init();
+	 ADC1_Configuration();//Ç§ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÏµÍ³ï¿½ï¿½ï¿½ï¿½
 	 delay_ms(2000);
 	 
 	 SPI_Configuration();
 	 bmi088_init();
-	 USART1_Configuration();  //Ò£¿ØÆ÷
+	 USART1_Configuration();  //Ò£ï¿½ï¿½ï¿½ï¿½
 	 USART2_Configuration();  //
-	 USART3_Configuration();//´®¿ÚÈý
-	 UART4_Configuration();   //»úÔØµçÄÔ
-	 UART5_Configuration();   //ÎÞÏß´®¿Ú
+	 USART3_Configuration();//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	 UART4_Configuration();   //ï¿½ï¿½ï¿½Øµï¿½ï¿½ï¿½
+	 UART5_Configuration();   //ï¿½ï¿½ï¿½ß´ï¿½ï¿½ï¿½
 	 
 	 BEEP_Init();
-	 GPIO_ResetBits(GPIOA,GPIO_Pin_11 ); //ÂÌÉ«
+	 GPIO_ResetBits(GPIOA,GPIO_Pin_11 ); //ï¿½ï¿½É«
 	 GPIO_SetBits(GPIOA,GPIO_Pin_12 );
 	 GPIO_SetBits(GPIOC,GPIO_Pin_8 );
    delay_ms(2000);

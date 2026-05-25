@@ -4,11 +4,11 @@
 #include "stm32f4xx.h"
 #include "main.h"
 
-/*´®¿Ú4Í¨ÐÅ»º³å³¤¶È*/
+/*ï¿½ï¿½ï¿½ï¿½4Í¨ï¿½Å»ï¿½ï¿½å³¤ï¿½ï¿½*/
 #define UART4_RX_STREAM         DMA1_Stream2
 #define UART4_TX_STREAM         DMA1_Stream4
-#define UART4_RXDMA_LEN          100
-#define UART4_RXMB_LEN           50
+#define UART4_RXDMA_LEN          128
+#define UART4_RXMB_LEN           128
 
 void UART4_Configuration(void);
 void Handle_UART4_GroundStation_Command(void);

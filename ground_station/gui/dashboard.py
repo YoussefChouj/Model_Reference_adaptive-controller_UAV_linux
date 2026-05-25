@@ -26,6 +26,9 @@ except ImportError as e:  # pragma: no cover
 from ground_station.comm.serial_bridge import SerialBridge, load_config
 
 from ground_station.scripts.flight_logger import FlightLogger
+from ground_station.gui._gui_utils import simple_yaml_kv_load as _simple_yaml_kv_load
+from ground_station.gui._gui_utils import simple_yaml_kv_write as _simple_yaml_kv_write
+from ground_station.gui.vofa_manager import VofaManager
 
 
 class UdpBridgeClient:
@@ -87,65 +90,13 @@ INNER_PID_AXIS_TO_PIDS = {
 }
 Z_RATE_PID_INDEX = 6  # Ctrler.Z_ratePID — sole PID block for Z tab sliders
 
-# Stick PWM units (RemoterTask / StabilizerTask): ~2000–4000, center 3000
-RC_THR_MIN = 2000
-RC_THR_MAX = 4000
-RC_STICK_MIN = 2000
-RC_STICK_MAX = 4000
-RC_STICK_MID = 3000
-# Bench mode: firmware clamps throttle to min + 20% of full range
-BENCH_THR_MAX = int(RC_THR_MIN + 0.2 * (RC_THR_MAX - RC_THR_MIN))
+# Normalised stick range for CMD 0x06 virtual sticks: [-1.0, +1.0], center 0.0.
+VRC_STICK_MIN = -1.0
+VRC_STICK_MAX = 1.0
+VRC_STICK_CENTER = 0.0
+# Bench mode UI cap: limits throttle to 20 % from bottom so drone cannot lift off.
+VRC_BENCH_THR_MAX = -0.6
 
-
-def _simple_yaml_kv_load(path: Path) -> Dict[str, Any]:
-    """
-    Load a config.yaml that is only flat 'key: value' entries.
-    This matches how serial_bridge.py reads config.yaml (no nesting).
-    """
-    if not path.exists():
-        return {}
-    out: Dict[str, Any] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        # Cast obvious numeric fields.
-        if re.fullmatch(r"-?\d+", value):
-            out[key] = int(value)
-        elif re.fullmatch(r"-?\d+\.\d*", value):
-            out[key] = float(value)
-        else:
-            out[key] = value
-    return out
-
-
-def _simple_yaml_kv_write(path: Path, cfg: Dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Keep deterministic ordering for readability.
-    preferred_order = [
-        "serial_port",
-        "baud_rate",
-        "vofa_host",
-        "vofa_port",
-        "vofa_port_a",
-        "vofa_port_b",
-        "vofa_executable",
-    ]
-    keys = list(cfg.keys())
-    keys.sort(key=lambda k: preferred_order.index(k) if k in preferred_order else len(preferred_order))
-    lines: List[str] = []
-    for k in keys:
-        v = cfg[k]
-        if isinstance(v, str):
-            lines.append(f"{k}: {v}")
-        else:
-            lines.append(f"{k}: {v}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _split_top_level(s: str, sep: str = ",") -> List[str]:
@@ -324,9 +275,6 @@ class Dashboard:
         self.repo_root = Path(__file__).resolve().parents[1]  # ground_station/
         self.presets_dir = self.repo_root / "presets"
         self.config_path = self.repo_root / "config.yaml"
-        self._vofa_runtime_root = self.repo_root / ".vofa_runtime"
-        self._vofa_procs: dict[str, Optional[subprocess.Popen]] = {"a": None, "b": None}
-
         self.bridge: Optional[SerialBridge] = None
         self._udp: Optional[UdpBridgeClient] = None
         self._remote_bridge = False
@@ -337,9 +285,13 @@ class Dashboard:
 
         self._debouncer = DebouncedSender(delay_s=0.05)
 
-        self._vofa_executable: Optional[str] = None
-        self._vofa_checked = False
         self._last_connect_error: str = ""
+        self.vofa = VofaManager(
+            self.repo_root,
+            self.config_path,
+            self._show_vofa_path_dialog,
+            self._infer_max_num_basis,
+        )
 
         # Slider tags for preset save/load.
         self.outer_pid: Dict[str, Dict[str, Any]] = {}
@@ -357,6 +309,9 @@ class Dashboard:
         self.mrac_slider_tags: List[Tuple[str, str, int, Any]] = []  # axis, kind, i, tag
 
         self.vrc_slider_tags: List[Any] = []
+        self._prev_rc_authority: Optional[int] = None
+        self._last_vrc_keepalive: float = 0.0
+        self._vrc_was_active: Dict[str, bool] = {}
         self._bench_mode_ui: bool = False
 
         self._flight_logger = FlightLogger()
@@ -373,8 +328,27 @@ class Dashboard:
         self._mon_pid_text_tags: Dict[str, Any] = {}
 
         self._last_paths_canvas_t: float = 0.0
-        self._path_exec_trace: List[Tuple[float, float]] = []
+        self._path_exec_trace: List[Tuple[float, float, float]] = []
         self._last_telem_rx_t: float = 0.0
+
+        # TWC two-phase state machine: 0=idle, 1=ascending to 0.5m, 2=tracking final
+        self._twc_phase: int = 0
+        self._twc_final: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+        self._twc_ascent_z: float = 0.0
+        self._twc_arrive_time: float = 0.0   # monotonic timestamp of 0.5m arrival
+
+        # XYZ position plots (time-series)
+        self._plot_paused: bool = False
+        self._plot_auto_y: bool = True
+        self._plot_max_s: float = 600.0   # buffer length in seconds (default 10 min)
+        self._plot_t0: float = 0.0
+        self._plot_t: List[float] = []
+        self._plot_x_fb: List[float] = []
+        self._plot_x_des: List[float] = []
+        self._plot_y_fb: List[float] = []
+        self._plot_y_des: List[float] = []
+        self._plot_z_fb: List[float] = []
+        self._plot_z_des: List[float] = []
 
         # Unified telemetry: UDP mirror (remote bridge) + direct copy when local SerialBridge in-process.
         self._telem: Dict[str, Any] = {"a": {}, "b": {}, "max_num_basis": 8}
@@ -667,13 +641,15 @@ class Dashboard:
 
     def _frame(self) -> None:
         self._drain_ui_calls()
+        self._vrc_spring_return()
         now = time.monotonic()
         self._sync_telemetry_from_bridge_if_local()
         
         # Smooth high-FPS updates
         if now - self._last_paths_canvas_t >= 0.1:
             self._last_paths_canvas_t = now
-            self._update_paths_canvas()
+            self._update_xyz_plots()
+        self._twc_phase_update()
             
         try:
             telem_fresh = self._telemetry_is_fresh()
@@ -747,34 +723,50 @@ class Dashboard:
             dpg.set_value(self.arm_value_tag, "ARM: ON" if arm_on else "ARM: OFF")
             dpg.configure_item(self.arm_value_tag, color=(0, 200, 0, 255) if arm_on else (220, 0, 0, 255))
 
-        sl: Optional[float] = None
-        if "status.sbus_lost" in a:
+        rc_auth: Optional[int] = None
+        if "status.rc_authority" in a:
             try:
-                sl = float(a["status.sbus_lost"])
+                rc_auth = int(round(float(a["status.rc_authority"])))
             except Exception:
-                sl = None
-        if sl is not None:
-            lost = int(round(sl)) != 0
-            dpg.set_value(
-                "vrc_source_text",
-                "COMPUTER CONTROL" if lost else "RC ACTIVE",
-            )
-            dpg.configure_item(
-                "vrc_source_text",
-                color=((80, 160, 255, 255) if lost else (0, 200, 0, 255)),
-            )
+                rc_auth = None
+        if rc_auth is not None:
+            pc_active = rc_auth != 0
+            _auth_label = "PC ACTIVE" if pc_active else "RC ACTIVE"
+            _auth_color = (80, 160, 255, 255) if pc_active else (0, 200, 0, 255)
+            dpg.set_value("vrc_source_text", _auth_label)
+            dpg.configure_item("vrc_source_text", color=_auth_color)
+            dpg.set_value("status_authority_sidebar", f"Ctrl: {_auth_label}")
+            dpg.configure_item("status_authority_sidebar", color=_auth_color)
             for tg in self.vrc_slider_tags:
-                dpg.configure_item(tg, enabled=lost)
-            if not lost:
-                dpg.set_value("vrc_thr_slider", float(RC_STICK_MID))
-                dpg.set_value("vrc_pit_slider", float(RC_STICK_MID))
-                dpg.set_value("vrc_rol_slider", float(RC_STICK_MID))
-                dpg.set_value("vrc_yaw_slider", float(RC_STICK_MID))
+                dpg.configure_item(tg, enabled=pc_active)
+            # Reset sliders only on authority loss (1→0), not every frame
+            if self._prev_rc_authority == 1 and rc_auth == 0:
+                dpg.set_value("vrc_thr_slider", VRC_STICK_CENTER)
+                dpg.set_value("vrc_pit_slider", VRC_STICK_CENTER)
+                dpg.set_value("vrc_rol_slider", VRC_STICK_CENTER)
+                dpg.set_value("vrc_yaw_slider", VRC_STICK_CENTER)
+            self._prev_rc_authority = rc_auth
         else:
             dpg.set_value("vrc_source_text", "— (no telemetry)")
             dpg.configure_item("vrc_source_text", color=(180, 180, 180, 255))
+            dpg.set_value("status_authority_sidebar", "Ctrl: ?")
+            dpg.configure_item("status_authority_sidebar", color=(180, 180, 180, 255))
             for tg in self.vrc_slider_tags:
                 dpg.configure_item(tg, enabled=False)
+
+        # VRC keepalive: resend slider values at 10 Hz while authority is held.
+        # Prevents the 500 ms heartbeat timeout from revoking authority when
+        # the user holds a slider still.
+        if rc_auth == 1:
+            _now = time.monotonic()
+            if _now - self._last_vrc_keepalive >= 0.02:
+                self._last_vrc_keepalive = _now
+                _vrc_tags = ("vrc_thr_slider", "vrc_pit_slider", "vrc_rol_slider", "vrc_yaw_slider")
+                for _i, _tag in enumerate(_vrc_tags):
+                    try:
+                        self._send_cmd(0x06, _i, float(dpg.get_value(_tag)))
+                    except Exception:
+                        pass
 
         mb = int(self._telem.get("max_num_basis", 8))
         if mb != self.max_num_basis:
@@ -853,134 +845,184 @@ class Dashboard:
             ok = src not in ("None", "")
             for tg in ("btn_path_twc_exec", "btn_path_sin_exec", "btn_path_circ_exec"):
                 dpg.configure_item(tg, enabled=ok)
+            try:
+                dpg.configure_item("paths_no_source_warn", show=not ok)
+            except Exception:
+                pass
         except Exception:
             pass
 
     def _paths_reset_on_connect(self) -> None:
         self._path_exec_trace.clear()
+        self._paths_clear_plots()
+
+    def _paths_clear_plots(self) -> None:
+        self._plot_t0 = 0.0
+        self._plot_t = []
+        self._plot_x_fb = [];  self._plot_x_des = []
+        self._plot_y_fb = [];  self._plot_y_des = []
+        self._plot_z_fb = [];  self._plot_z_des = []
+        # Clear always resumes so the next data fills in from scratch.
+        self._plot_paused = False
         try:
-            dpg.delete_item("paths_drawlist", children_only=True)
+            dpg.set_item_label("btn_plot_pause", "Pause Plotting")
+        except Exception:
+            pass
+        for tag in ("series_x_fb", "series_x_des",
+                    "series_y_fb", "series_y_des",
+                    "series_z_fb", "series_z_des"):
+            try:
+                dpg.set_value(tag, [[], []])
+            except Exception:
+                pass
+
+    def _paths_fit_plots(self) -> None:
+        for tag in ("plot_x_xax", "plot_y_xax", "plot_z_xax",
+                    "plot_x_yax", "plot_y_yax", "plot_z_yax"):
+            try:
+                dpg.fit_axis_data(tag)
+            except Exception:
+                pass
+
+    def _paths_toggle_plot_pause(self) -> None:
+        self._plot_paused = not self._plot_paused
+        label = "Start Plotting" if self._plot_paused else "Pause Plotting"
+        try:
+            dpg.set_item_label("btn_plot_pause", label)
         except Exception:
             pass
 
-    def _paths_world_to_screen(self, wx: float, wy: float) -> Tuple[float, float]:
-        # 1 pixel = 0.01 m (100 px/m); canvas center = world origin.
-        return (200.0 + wx * 100.0, 200.0 - wy * 100.0)
-
-    def _update_paths_canvas(self) -> None:
-        if not self.connected:
+    def _update_xyz_plots(self) -> None:
+        if self._plot_paused or not self.connected:
             return
         self._sync_telemetry_from_bridge_if_local()
         b: Dict[str, float] = dict(self._telem.get("b") or {})
         if not b:
             return
-        fbx = float(b.get("pid.locx.FB", 0.0))
-        fby = float(b.get("pid.locy.FB", 0.0))
-        self._path_exec_trace.append((fbx, fby))
-        if len(self._path_exec_trace) > 4000:
-            del self._path_exec_trace[: len(self._path_exec_trace) - 3000]
 
-        twc_tx = float(b.get("path.twc_target_x", 0.0))
-        twc_ty = float(b.get("path.twc_target_y", 0.0))
-        twc_arr = float(b.get("path.twc_arrived", 0.0))
-        mode = int(float(b.get("path.active_path_mode", 0.0)))
-        dist = math.hypot(fbx - twc_tx, fby - twc_ty)
+        now = time.monotonic()
+        if self._plot_t0 == 0.0:
+            self._plot_t0 = now
+        t = now - self._plot_t0
+
+        fbx  = float(b.get("pid.locx.FB",  0.0)) / 100.0  # cm → m
+        desx = float(b.get("pid.locx.Des", 0.0)) / 100.0  # cm → m
+        fby  = float(b.get("pid.locy.FB",  0.0)) / 100.0  # cm → m
+        desy = float(b.get("pid.locy.Des", 0.0)) / 100.0  # cm → m
+        fbz  = float(b.get("pid.z_pos.FB",  0.0))
+        desz = float(b.get("pid.z_pos.Des", 0.0))
+
+        self._plot_t.append(t)
+        self._plot_x_fb.append(fbx);  self._plot_x_des.append(desx)
+        self._plot_y_fb.append(fby);  self._plot_y_des.append(desy)
+        self._plot_z_fb.append(fbz);  self._plot_z_des.append(desz)
+
+        cap = max(1, int(self._plot_max_s * 10))   # 10 Hz sampling rate
+        if len(self._plot_t) > cap:
+            self._plot_t     = self._plot_t[-cap:]
+            self._plot_x_fb  = self._plot_x_fb[-cap:];  self._plot_x_des = self._plot_x_des[-cap:]
+            self._plot_y_fb  = self._plot_y_fb[-cap:];  self._plot_y_des = self._plot_y_des[-cap:]
+            self._plot_z_fb  = self._plot_z_fb[-cap:];  self._plot_z_des = self._plot_z_des[-cap:]
+
         try:
-            dpg.set_value("txt_path_twc_dist", f"Distance: {dist:.2f} m")
-            dpg.configure_item(
-                "txt_path_twc_dist",
-                color=(0, 200, 80, 255) if twc_arr >= 0.5 else (210, 210, 210, 255),
-            )
+            dpg.set_value("series_x_fb",  [self._plot_t, self._plot_x_fb])
+            dpg.set_value("series_x_des", [self._plot_t, self._plot_x_des])
+            dpg.set_value("series_y_fb",  [self._plot_t, self._plot_y_fb])
+            dpg.set_value("series_y_des", [self._plot_t, self._plot_y_des])
+            dpg.set_value("series_z_fb",  [self._plot_t, self._plot_z_fb])
+            dpg.set_value("series_z_des", [self._plot_t, self._plot_z_des])
+            dpg.fit_axis_data("plot_x_xax")
+            dpg.fit_axis_data("plot_y_xax")
+            dpg.fit_axis_data("plot_z_xax")
+            if self._plot_auto_y:
+                dpg.fit_axis_data("plot_x_yax")
+                dpg.fit_axis_data("plot_y_yax")
+                dpg.fit_axis_data("plot_z_yax")
         except Exception:
             pass
 
+        twc_tx  = float(b.get("path.twc_target_x", 0.0)) / 100.0  # cm → m
+        twc_ty  = float(b.get("path.twc_target_y", 0.0)) / 100.0  # cm → m
+        twc_tz  = float(b.get("path.twc_target_z", 0.0))
+        twc_arr = float(b.get("path.twc_arrived",  0.0))
+        dist = math.sqrt((fbx - twc_tx) ** 2 + (fby - twc_ty) ** 2 + (fbz - twc_tz) ** 2)
         try:
-            dpg.delete_item("paths_drawlist", children_only=True)
+            _phase_lbl = {0: "Idle", 1: "Ascending…", 2: "Tracking target"}.get(self._twc_phase, "")
+            dpg.set_value("txt_path_twc_dist",
+                          f"Dist 3D: {dist:.2f} m  |  Z: {fbz:.2f} → {twc_tz:.2f} m  |  {_phase_lbl}")
+            dpg.configure_item("txt_path_twc_dist",
+                               color=(0, 200, 80, 255) if twc_arr >= 0.5 else (210, 210, 210, 255))
         except Exception:
+            pass
+
+    def _twc_phase_update(self) -> None:
+        if self._twc_phase != 1:
             return
-
-        dl = "paths_drawlist"
-        grey = (140, 140, 150, 255)
-        dpg.draw_line((0.0, 200.0), (400.0, 200.0), color=grey, thickness=1, parent=dl)
-        dpg.draw_line((200.0, 0.0), (200.0, 400.0), color=grey, thickness=1, parent=dl)
-
-        def _blue_plan(pts: List[Tuple[float, float]]) -> None:
-            if len(pts) < 2:
-                return
-            for i in range(len(pts) - 1):
-                x1, y1 = self._paths_world_to_screen(pts[i][0], pts[i][1])
-                x2, y2 = self._paths_world_to_screen(pts[i + 1][0], pts[i + 1][1])
-                dpg.draw_line((x1, y1), (x2, y2), color=(80, 120, 255, 255), thickness=2, parent=dl)
-
-        try:
-            tcx = float(dpg.get_value("twc_tx"))
-            tcy = float(dpg.get_value("twc_ty"))
-            cxs = float(dpg.get_value("sin_cx"))
-            cys = float(dpg.get_value("sin_cy"))
-            amp = float(dpg.get_value("sin_amp"))
-            axs = int(float(dpg.get_value("sin_axis")))
-            crc = float(dpg.get_value("cir_cx"))
-            cry = float(dpg.get_value("cir_cy"))
-            crd = float(dpg.get_value("cir_r"))
-        except Exception:
-            tcx = tcy = cxs = cys = amp = crc = cry = crd = 0.0
-            axs = 0
-
-        nseg = 48
-        u = [2.0 * math.pi * i / (nseg - 1) for i in range(nseg)]
-        if mode == 0 or mode == 1:
-            _blue_plan([(fbx, fby), (tcx, tcy)])
-        if mode == 2:
-            pts: List[Tuple[float, float]] = []
-            for i in u:
-                si = amp * math.sin(i)
-                if axs == 0:
-                    pts.append((cxs + si, cys))
-                elif axs == 1:
-                    pts.append((cxs, cys + si))
-                else:
-                    pts.append((cxs + 0.15 * math.cos(i), cys + 0.15 * math.sin(i)))
-            _blue_plan(pts)
-        if mode == 3:
-            pts2: List[Tuple[float, float]] = []
-            for i in range(33):
-                ang = 2.0 * math.pi * i / 32.0
-                pts2.append((crc + crd * math.cos(ang), cry + crd * math.sin(ang)))
-            _blue_plan(pts2)
-
-        if len(self._path_exec_trace) >= 2:
-            for i in range(len(self._path_exec_trace) - 1):
-                x1, y1 = self._paths_world_to_screen(self._path_exec_trace[i][0], self._path_exec_trace[i][1])
-                x2, y2 = self._paths_world_to_screen(
-                    self._path_exec_trace[i + 1][0], self._path_exec_trace[i + 1][1]
-                )
-                dpg.draw_line((x1, y1), (x2, y2), color=(40, 220, 90, 200), thickness=2, parent=dl)
-
-        cx, cy = self._paths_world_to_screen(fbx, fby)
-        dpg.draw_circle((cx, cy), 6.0, color=(30, 200, 70, 255), fill=(30, 200, 70, 255), parent=dl)
-
-        if mode == 1 or abs(twc_tx) + abs(twc_ty) > 1e-6:
-            tx, ty = self._paths_world_to_screen(twc_tx, twc_ty)
-            s = 8.0
-            dpg.draw_line((tx - s, ty - s), (tx + s, ty + s), color=(255, 60, 60, 255), thickness=2, parent=dl)
-            dpg.draw_line((tx - s, ty + s), (tx + s, ty - s), color=(255, 60, 60, 255), thickness=2, parent=dl)
+        b: Dict[str, float] = dict(self._telem.get("b") or {})
+        twc_arr = float(b.get("path.twc_arrived", 0.0))
+        if twc_arr >= 0.5:
+            now = time.monotonic()
+            if self._twc_arrive_time == 0.0:
+                self._twc_arrive_time = now          # record first arrival at 0.5 m
+            elif now - self._twc_arrive_time >= 1.0: # 1-second stabilisation hold
+                self._twc_phase = 2
+                self._twc_arrive_time = 0.0
+                x, y, z, yaw = self._twc_final
+                self._send_cmd(0x0A, 0, x * 100.0)  # m → cm
+                self._send_cmd(0x0A, 1, y * 100.0)  # m → cm
+                self._send_cmd(0x0A, 2, z)
+                self._send_cmd(0x0A, 3, yaw)
+                self._send_cmd(0x0A, 4, 1.0)
+        else:
+            self._twc_arrive_time = 0.0              # left target zone — reset timer
 
     def _paths_cmd_twc(self) -> None:
         self._path_abort_flag[0] = False
         try:
-            x = float(dpg.get_value("twc_tx"))
-            y = float(dpg.get_value("twc_ty"))
-            z = float(dpg.get_value("twc_tz"))
+            x   = float(dpg.get_value("twc_tx"))
+            y   = float(dpg.get_value("twc_ty"))
+            z   = float(dpg.get_value("twc_tz"))
             yaw = float(dpg.get_value("twc_yaw"))
         except Exception:
             return
-        self._send_cmd(0x0A, 0, x)
-        self._send_cmd(0x0A, 1, y)
-        self._send_cmd(0x0A, 2, z)
-        self._send_cmd(0x0A, 3, yaw)
-        self._send_cmd(0x0A, 4, 1.0)
+
+        self._twc_final = (x, y, z, yaw)
+        a = dict(self._telem.get("a") or {})
+        b = dict(self._telem.get("b") or {})
+        current_z = float(b.get("pid.z_pos.FB", 0.0))
+        rc_authority = int(a.get("status.rc_authority", 1))
+
+        if current_z < 0.3:
+            # On ground: pre-ascend 0.4 m first, hold current XY.
+            # Request SDK authority so the position PID drives altitude.
+            self._send_cmd(0x0E, 0, 1.0)
+            ascent_z = 0.5          # safe intermediate altitude before final target
+            self._twc_ascent_z = ascent_z
+            self._twc_arrive_time = 0.0
+            self._twc_phase = 1
+            cur_x = float(b.get("pid.locx.FB", 0.0))
+            cur_y = float(b.get("pid.locy.FB", 0.0))
+            self._send_cmd(0x0A, 0, cur_x)
+            self._send_cmd(0x0A, 1, cur_y)
+            self._send_cmd(0x0A, 2, ascent_z)
+            self._send_cmd(0x0A, 3, yaw)
+            self._send_cmd(0x0A, 4, 1.0)
+        else:
+            # Already airborne: if still under physical RC authority, request SDK
+            # authority first so the RC throttle stick stops overriding the Z position
+            # PID output.  The firmware airborne override (FB > 0.35 m) sets virtual
+            # throttle to 0 immediately, keeping the drone stable during the handover.
+            if rc_authority == 0:
+                self._send_cmd(0x0E, 0, 1.0)
+            self._twc_phase = 2
+            self._send_cmd(0x0A, 0, x * 100.0)  # m → cm (locxPID operates in cm)
+            self._send_cmd(0x0A, 1, y * 100.0)  # m → cm (locyPID operates in cm)
+            self._send_cmd(0x0A, 2, z)           # Z_posPID operates in metres
+            self._send_cmd(0x0A, 3, yaw)
+            self._send_cmd(0x0A, 4, 1.0)
 
     def _paths_cmd_sinusoid(self) -> None:
+        self._path_exec_trace.clear()
         self._path_abort_flag[0] = False
         try:
             cx = float(dpg.get_value("sin_cx"))
@@ -1002,6 +1044,7 @@ class Dashboard:
         self._send_cmd(0x0B, 7, 1.0)
 
     def _paths_cmd_circle(self) -> None:
+        self._path_exec_trace.clear()
         self._path_abort_flag[0] = False
         try:
             cx = float(dpg.get_value("cir_cx"))
@@ -1022,10 +1065,7 @@ class Dashboard:
 
     def _paths_clear_trace(self) -> None:
         self._path_exec_trace.clear()
-        try:
-            dpg.delete_item("paths_drawlist", children_only=True)
-        except Exception:
-            pass
+        self._paths_clear_plots()
 
     def _update_mrac_visibility(self) -> None:
         # Hide sliders where i >= MAX_NUM_BASIS.
@@ -1054,6 +1094,8 @@ class Dashboard:
     def _emergency_stop(self) -> None:
         """Abort paths (0x0D) then dangerous stop (0x04), 50 ms apart."""
         self._path_abort_flag[0] = True
+        self._twc_phase = 0
+        self._twc_arrive_time = 0.0
         self._send_cmd(0x0D, 0, 1.0, force=True)
 
         def _late_stop() -> None:
@@ -1320,474 +1362,6 @@ class Dashboard:
             except Exception:
                 pass
 
-    def _persist_vofa_executable(self, path_str: str) -> None:
-        self._vofa_executable = path_str
-        try:
-            cfg = _simple_yaml_kv_load(self.config_path)
-            if str(cfg.get("vofa_executable", "")).strip() == path_str:
-                return
-            cfg["vofa_executable"] = path_str
-            _simple_yaml_kv_write(self.config_path, cfg)
-        except Exception:
-            return
-
-    def _discover_vofa_install_path(self) -> Optional[str]:
-        exe_names = [
-            "VOFA+.exe",
-            "vofa+.exe",
-            "VOFA.exe",
-            "vofa.exe",
-        ]
-
-        for cmd in ["vofa+", "VOFA+", "vofa", "VOFA"]:
-            found = shutil.which(cmd)
-            if found and Path(found).exists():
-                return str(Path(found).resolve())
-
-        roots: List[Path] = []
-        for env_name in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA", "APPDATA", "USERPROFILE"]:
-            raw = os.environ.get(env_name)
-            if raw:
-                roots.append(Path(raw))
-
-        home = Path.home()
-        roots.extend(
-            [
-                home,
-                home / "Desktop",
-                home / "Documents",
-                home / "Downloads",
-            ]
-        )
-
-        rel_dirs = [
-            Path("VOFA+"),
-            Path("VOFA"),
-            Path("Programs") / "VOFA+",
-            Path("Programs") / "VOFA",
-        ]
-
-        seen: set[str] = set()
-        for root in roots:
-            root_str = str(root)
-            if not root_str or root_str in seen:
-                continue
-            seen.add(root_str)
-            for rel in rel_dirs:
-                for exe_name in exe_names:
-                    p = root / rel / exe_name
-                    if p.exists():
-                        return str(p.resolve())
-        return None
-
-    def _ensure_vofa_executable(self) -> Optional[str]:
-        if self._vofa_executable and Path(self._vofa_executable).exists():
-            return self._vofa_executable
-
-        cfg = _simple_yaml_kv_load(self.config_path)
-        configured = cfg.get("vofa_executable")
-        if isinstance(configured, str) and configured and Path(configured).exists():
-            self._vofa_executable = configured
-            return configured
-
-        discovered = self._discover_vofa_install_path()
-        if discovered:
-            self._persist_vofa_executable(discovered)
-            return discovered
-
-        return None
-
-    def _resolve_vofa_workspace_path(self, workspace_rel: str) -> Path:
-        """Resolve VOFA workspace path across legacy .vofa and newer .tabviews.json formats."""
-        p = (self.repo_root / workspace_rel).resolve()
-        if p.exists():
-            return p
-
-        candidates: List[Path] = []
-        if p.suffix.lower() == ".vofa":
-            # VOFA 1.3+ saves layout files as tabviews JSON.
-            candidates.append(p.with_suffix(".tabviews.json"))
-            candidates.append(p.with_suffix(".json"))
-            # If user typed "name.vofa" in save dialog, VOFA may append ".tabviews.json".
-            candidates.append(p.with_name(p.name + ".tabviews.json"))
-
-        for c in candidates:
-            if c.exists():
-                return c
-        return p
-
-    def _get_vofa_stream_port(self, stream: str) -> int:
-        cfg = _simple_yaml_kv_load(self.config_path)
-        if stream.lower().strip() == "b":
-            raw = cfg.get("vofa_port_b", cfg.get("vofa_port", 1348))
-        else:
-            raw = cfg.get("vofa_port_a", cfg.get("vofa_port", 1347))
-        try:
-            return int(raw)
-        except Exception:
-            return 1348 if stream.lower().strip() == "b" else 1347
-
-    def _get_latest_vofa_context_file(
-        self, file_name: str, local_app_override: Optional[Path] = None
-    ) -> Optional[Path]:
-        if local_app_override is not None:
-            root = local_app_override / "vofa+"
-        else:
-            local_app = os.environ.get("LOCALAPPDATA")
-            if not local_app:
-                return None
-            root = Path(local_app) / "vofa+"
-        if not root.exists():
-            return None
-
-        candidates = list(root.glob(f"*/context/{file_name}"))
-        if not candidates:
-            return None
-
-        def _ver_key(p: Path) -> int:
-            try:
-                return int(p.parents[1].name)
-            except Exception:
-                return -1
-
-        candidates.sort(key=_ver_key, reverse=True)
-        return candidates[0]
-
-    def _get_vofa_context_config_path(self, local_app_override: Optional[Path] = None) -> Optional[Path]:
-        return self._get_latest_vofa_context_file("vofa+.config.json", local_app_override)
-
-    def _get_vofa_context_tabviews_path(self, local_app_override: Optional[Path] = None) -> Optional[Path]:
-        return self._get_latest_vofa_context_file("vofa+.tabviews.json", local_app_override)
-
-    def _get_vofa_context_dir(self, local_app_override: Optional[Path] = None) -> Optional[Path]:
-        if local_app_override is not None:
-            base = local_app_override
-        else:
-            local_app = os.environ.get("LOCALAPPDATA")
-            if not local_app:
-                return None
-            base = Path(local_app)
-
-        root = base / "vofa+"
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            return None
-
-        versions = [p for p in root.iterdir() if p.is_dir() and p.name.isdigit()]
-        if versions:
-            versions.sort(key=lambda p: int(p.name), reverse=True)
-            ver_dir = versions[0]
-        else:
-            ver_dir = root / "100"
-            try:
-                ver_dir.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                return None
-
-        context_dir = ver_dir / "context"
-        try:
-            context_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            return None
-        return context_dir
-
-    def _infer_stream_from_context_cfg(self, context_cfg: Optional[Path]) -> Optional[str]:
-        if context_cfg is None or not context_cfg.exists():
-            return None
-        try:
-            payload = json.loads(context_cfg.read_text(encoding="utf-8"))
-        except Exception:
-            return None
-
-        found_ports: set[int] = set()
-
-        def _walk(node: Any) -> None:
-            if isinstance(node, dict):
-                udp = node.get("udp")
-                if isinstance(udp, dict):
-                    try:
-                        found_ports.add(int(udp.get("local_port")))
-                    except Exception:
-                        pass
-                for v in node.values():
-                    _walk(v)
-            elif isinstance(node, list):
-                for v in node:
-                    _walk(v)
-
-        _walk(payload)
-        if not found_ports:
-            return None
-
-        port_a = self._get_vofa_stream_port("a")
-        port_b = self._get_vofa_stream_port("b")
-        has_a = port_a in found_ports
-        has_b = port_b in found_ports
-        if has_a and not has_b:
-            return "a"
-        if has_b and not has_a:
-            return "b"
-        return None
-
-    def _sync_system_context_to_stream_cache(self, stream: str) -> None:
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        cache_local_app = self._vofa_runtime_root / stream_key / "localappdata"
-        cache_context = self._get_vofa_context_dir(cache_local_app)
-        if cache_context is None:
-            return
-
-        system_cfg = self._get_vofa_context_config_path()
-        system_tabviews = self._get_vofa_context_tabviews_path()
-        if system_cfg is not None and system_cfg.exists():
-            try:
-                shutil.copy2(system_cfg, cache_context / "vofa+.config.json")
-            except Exception:
-                pass
-        if system_tabviews is not None and system_tabviews.exists():
-            try:
-                shutil.copy2(system_tabviews, cache_context / "vofa+.tabviews.json")
-            except Exception:
-                pass
-
-    def _stage_stream_cache_to_system_context(self, local_app_root: Path) -> None:
-        source_context = self._get_vofa_context_dir(local_app_root)
-        target_context = self._get_vofa_context_dir()
-        if target_context is None or source_context is None or not source_context.exists():
-            return
-
-        for name in ["vofa+.config.json", "vofa+.tabviews.json"]:
-            src = source_context / name
-            dst = target_context / name
-            if not src.exists():
-                continue
-            try:
-                shutil.copy2(src, dst)
-            except Exception:
-                continue
-
-    def _ensure_vofa_stream_context(
-        self, stream: str, workspace_path: Path, manual_mode: bool
-    ) -> Path:
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        local_app_root = self._vofa_runtime_root / stream_key / "localappdata"
-        context_dir = self._get_vofa_context_dir(local_app_root)
-        if context_dir is None:
-            return local_app_root
-
-        target_cfg = context_dir / "vofa+.config.json"
-        target_tabviews = context_dir / "vofa+.tabviews.json"
-
-        if not target_cfg.exists():
-            # Seed from immutable per-stream baseline — never from mutable system config.
-            baseline = self.repo_root / "presets" / "vofa" / f"baseline_{stream_key}.config.json"
-            if baseline.exists():
-                shutil.copy2(baseline, target_cfg)
-            else:
-                target_cfg.write_text("{}", encoding="utf-8")
-
-        # Contamination guard: repair settings_ctx schema if it belongs to the wrong stream.
-        baseline = self.repo_root / "presets" / "vofa" / f"baseline_{stream_key}.config.json"
-        if target_cfg.exists() and baseline.exists():
-            try:
-                payload = json.loads(target_cfg.read_text(encoding="utf-8"))
-                sp = payload["ctx"]["wave_view"]["ctx"]["settingsPanel"]["ctx"]["."]
-                first_name = (sp.get("settings_ctx") or [{}])[0].get("name", "")
-                a_fingerprint = first_name.startswith("mrac_pitch_e") or first_name.startswith("mrac_roll_e")
-                b_fingerprint = first_name.startswith("mrac_pitch_theta") or first_name.startswith("mrac_roll_theta")
-                contaminated = (stream_key == "a" and b_fingerprint) or (stream_key == "b" and a_fingerprint)
-                if contaminated:
-                    # Repair settings_ctx from baseline; keep tabviews untouched.
-                    bl = json.loads(baseline.read_text(encoding="utf-8"))
-                    sp["settings_ctx"] = bl["ctx"]["wave_view"]["ctx"]["settingsPanel"]["ctx"]["."]["settings_ctx"]
-                    target_cfg.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
-
-        if not target_tabviews.exists():
-            if workspace_path.exists():
-                target_tabviews.write_text(workspace_path.read_text(encoding="utf-8"), encoding="utf-8")
-            else:
-                src_tabviews = self._get_vofa_context_tabviews_path()
-                if src_tabviews is not None and src_tabviews.exists():
-                    shutil.copy2(src_tabviews, target_tabviews)
-                else:
-                    target_tabviews.write_text("{}", encoding="utf-8")
-
-        if not manual_mode and workspace_path.exists():
-            target_tabviews.write_text(workspace_path.read_text(encoding="utf-8"), encoding="utf-8")
-
-        return local_app_root
-
-    def _prepare_vofa_runtime(self, local_port: int, context_cfg: Optional[Path] = None) -> None:
-        if context_cfg is None:
-            context_cfg = self._get_vofa_context_config_path()
-        if context_cfg is None or not context_cfg.exists():
-            return
-
-        try:
-            payload = json.loads(context_cfg.read_text(encoding="utf-8"))
-        except Exception:
-            return
-
-        cfg = _simple_yaml_kv_load(self.config_path)
-        vofa_host = str(cfg.get("vofa_host", "127.0.0.1"))
-
-        # VOFA can keep multiple profile trees in one config; patch all of them.
-        touched = False
-
-        def _walk(node: Any) -> None:
-            nonlocal touched
-            if isinstance(node, dict):
-                udp = node.get("udp")
-                if isinstance(udp, dict):
-                    udp["remote_ip"] = vofa_host
-                    udp["local_port"] = str(int(local_port))
-                    udp["remote_port"] = str(int(local_port))
-                    touched = True
-
-                if "protocol_combo" in node:
-                    node["protocol_combo"] = "JustFloat"
-                    touched = True
-                if "link_type_combo" in node:
-                    node["link_type_combo"] = 1
-                    touched = True
-
-                for v in node.values():
-                    _walk(v)
-            elif isinstance(node, list):
-                for v in node:
-                    _walk(v)
-
-        _walk(payload)
-
-        if not touched:
-            return
-
-        try:
-            context_cfg.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            return
-
-    def _apply_vofa_workspace_to_context(
-        self, workspace_path: Path, context_tabviews: Optional[Path] = None
-    ) -> bool:
-        if not workspace_path.exists():
-            return False
-        if context_tabviews is None:
-            context_tabviews = self._get_vofa_context_tabviews_path()
-        if context_tabviews is None:
-            return False
-        try:
-            # VOFA 1.3.x restores layout from this context file on startup.
-            context_tabviews.write_text(workspace_path.read_text(encoding="utf-8"), encoding="utf-8")
-            return True
-        except Exception:
-            return False
-
-    def _build_frame_a_channel_names(self) -> List[str]:
-        return [
-            "mrac_pitch_e",
-            "mrac_pitch_u_ad",
-            "mrac_roll_e",
-            "mrac_roll_u_ad",
-            "mrac_yaw_e",
-            "mrac_yaw_u_ad",
-            "mrac_z_e",
-            "mrac_z_u_ad",
-            "status_arm",
-            "status_flymode",
-            "status_sbus_lost",
-            "status_twc_execute",
-            "status_twc_arrived",
-        ]
-
-    def _build_frame_b_channel_names(self, max_num_basis: int) -> List[str]:
-        mb = max(1, min(32, int(max_num_basis)))
-        names: List[str] = []
-        for axis in ["pitch", "roll", "yaw", "z"]:
-            for i in range(mb):
-                names.append(f"mrac_{axis}_theta_{i}")
-            names.append(f"mrac_{axis}_u_nom")
-            names.append(f"mrac_{axis}_xm")
-
-        pid_loops = [
-            "pitch",
-            "roll",
-            "yaw",
-            "gyrox",
-            "gyroy",
-            "gyroz",
-            "z_rate",
-            "locx",
-            "locy",
-            "z_pos",
-            "locxs",
-            "locys",
-        ]
-        for loop in pid_loops:
-            names.append(f"pid_{loop}_FB")
-            names.append(f"pid_{loop}_Des")
-            names.append(f"pid_{loop}_U")
-
-        names.extend(
-            [
-                "path_active_path_mode",
-                "path_twc_target_x",
-                "path_twc_target_y",
-                "path_twc_target_z",
-                "path_sinusoid_t_elapsed",
-                "path_circle_theta",
-                "path_twc_arrived",
-            ]
-        )
-        return names
-
-    def _extract_vofa_workspace_lines(self, workspace_path: Path) -> List[int]:
-        try:
-            payload = json.loads(workspace_path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-
-        out: set[int] = set()
-        roots = payload.get("ctx", [])
-        if not isinstance(roots, list):
-            return []
-
-        for root in roots:
-            if not isinstance(root, dict):
-                continue
-            tabs = root.get("tabs", [])
-            if not isinstance(tabs, list):
-                continue
-            for tab in tabs:
-                if not isinstance(tab, dict):
-                    continue
-                widgets = tab.get("widgets", [])
-                if not isinstance(widgets, list):
-                    continue
-                for widget in widgets:
-                    if not isinstance(widget, dict):
-                        continue
-                    wctx = widget.get("ctx", {})
-                    if not isinstance(wctx, dict):
-                        continue
-                    lines = (
-                        wctx.get("rbw", {})
-                        .get("ctx", {})
-                        .get(".", {})
-                        .get("lines", [])
-                    )
-                    if not isinstance(lines, list):
-                        continue
-                    for line_idx in lines:
-                        try:
-                            idx = int(line_idx)
-                        except Exception:
-                            continue
-                        if idx >= 0:
-                            out.add(idx)
-        return sorted(out)
 
     def _infer_max_num_basis(self) -> int:
         try:
@@ -1796,310 +1370,21 @@ class Dashboard:
             mb = 6
         return max(1, min(32, mb))
 
-    def _apply_vofa_channel_labels(
-        self, stream: str, workspace_path: Path, context_cfg: Optional[Path] = None
-    ) -> None:
-        if context_cfg is None:
-            context_cfg = self._get_vofa_context_config_path()
-        if context_cfg is None or not context_cfg.exists():
-            return
-
-        if stream.lower().strip() == "b":
-            names = self._build_frame_b_channel_names(self._infer_max_num_basis())
-        else:
-            names = self._build_frame_a_channel_names()
-
-        visible_lines = self._extract_vofa_workspace_lines(workspace_path)
-        line_set = set(visible_lines)
-
-        try:
-            payload = json.loads(context_cfg.read_text(encoding="utf-8"))
-        except Exception:
-            return
-
-        touched = False
-
-        def _walk(node: Any) -> None:
-            nonlocal touched
-            if isinstance(node, dict):
-                if isinstance(node.get("settings_ctx"), list):
-                    old_list = node.get("settings_ctx", [])
-                    if not isinstance(old_list, list):
-                        old_list = []
-                    max_idx = max(line_set) if line_set else (len(names) - 1)
-                    count = max(len(names), max_idx + 1, len(old_list))
-                    new_list: List[Dict[str, Any]] = []
-                    for i in range(count):
-                        old = old_list[i] if i < len(old_list) and isinstance(old_list[i], dict) else {}
-                        display_name = names[i] if i < len(names) else f"I{i}"
-                        new_list.append(
-                            {
-                                "is_draw": bool(i in line_set) if line_set else bool(old.get("is_draw", True)),
-                                "color": old.get("color", "#ffffff"),
-                                "scale": old.get("scale", 1),
-                                "yoffset": old.get("yoffset", 0),
-                                "xoffset": old.get("xoffset", 0),
-                                "decimal": old.get("decimal", -7),
-                                "value": old.get("value", 0),
-                                "name": display_name,
-                            }
-                        )
-                    node["settings_ctx"] = new_list
-                    touched = True
-
-                for v in node.values():
-                    _walk(v)
-            elif isinstance(node, list):
-                for v in node:
-                    _walk(v)
-
-        _walk(payload)
-        if not touched:
-            return
-
-        try:
-            context_cfg.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            return
-
-    def _terminate_vofa_stream(self, stream: str) -> None:
-        """Kill only the target stream's VOFA process, leaving the other stream alive."""
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        proc = self._vofa_procs.get(stream_key)
-        if proc is not None and proc.poll() is None:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-                proc.wait(timeout=3)
-            except Exception:
-                pass
-        self._vofa_procs[stream_key] = None
-        time.sleep(0.3)
-
-    def _terminate_vofa_instances(self, vofa_exe: str, force: bool = True) -> None:
-        exe_name = Path(vofa_exe).name
-        if not exe_name:
-            return
-
-        # Try graceful close first so VOFA can persist user edits.
-        try:
-            subprocess.run(
-                ["taskkill", "/T", "/IM", exe_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except Exception:
-            pass
-
-        time.sleep(0.4)
-
-        if force:
-            try:
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/IM", exe_name],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-            except Exception:
-                pass
-
-        self._vofa_procs["a"] = None
-        self._vofa_procs["b"] = None
-        # Give VOFA a brief moment to fully release UDP bind state.
-        time.sleep(0.25)
-
-    def _get_vofa_stream_preset_dir(self, stream: str) -> Path:
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        return self.repo_root / "presets" / "vofa" / f"stream_{stream_key}"
-
-    def _get_stream_expected_channel_names(self, stream: str) -> List[str]:
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        if stream_key == "b":
-            # Frame B presets are fixed for MAX_NUM_BASIS=6.
-            return self._build_frame_b_channel_names(6)
-        return self._build_frame_a_channel_names()
-
-    def _repair_stream_config_channel_names(self, stream: str, context_cfg: Path) -> None:
-        if not context_cfg.exists():
-            return
-
-        expected_names = self._get_stream_expected_channel_names(stream)
-
-        try:
-            payload = json.loads(context_cfg.read_text(encoding="utf-8"))
-        except Exception:
-            return
-
-        touched = False
-
-        def _walk(node: Any) -> None:
-            nonlocal touched
-            if isinstance(node, dict):
-                settings_ctx = node.get("settings_ctx")
-                if isinstance(settings_ctx, list):
-                    rebuilt: List[Dict[str, Any]] = []
-                    for i, display_name in enumerate(expected_names):
-                        old = settings_ctx[i] if i < len(settings_ctx) and isinstance(settings_ctx[i], dict) else {}
-                        rebuilt.append(
-                            {
-                                "is_draw": bool(old.get("is_draw", True)),
-                                "color": old.get("color", "#ffffff"),
-                                "scale": old.get("scale", 1),
-                                "yoffset": old.get("yoffset", 0),
-                                "xoffset": old.get("xoffset", 0),
-                                "decimal": old.get("decimal", -7),
-                                "value": old.get("value", 0),
-                                "name": display_name,
-                            }
-                        )
-                    if settings_ctx != rebuilt:
-                        node["settings_ctx"] = rebuilt
-                        touched = True
-
-                for v in node.values():
-                    _walk(v)
-            elif isinstance(node, list):
-                for v in node:
-                    _walk(v)
-
-        _walk(payload)
-        if not touched:
-            return
-
-        try:
-            context_cfg.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            return
-
-    def _stage_stream_preset_to_context(
-        self, preset_dir: Path, context_dir: Path, stream: str, target_port: int
-    ) -> bool:
-        # Copy required preset files into target context and patch stream-local runtime settings.
-        for fname in ("vofa+.config.json", "vofa+.tabviews.json"):
-            src = preset_dir / fname
-            dst = context_dir / fname
-            if not dst.exists() and src.exists():
-                shutil.copy2(src, dst)
-
-        context_cfg = context_dir / "vofa+.config.json"
-        if context_cfg.exists():
-            self._prepare_vofa_runtime(target_port, context_cfg)
-            self._repair_stream_config_channel_names(stream, context_cfg)
-        return True
-
-    def _open_plot(self, workspace_rel: str, stream: str = "a") -> None:
-        """Open VOFA for the given stream.
-
-        Isolated stream approach:
-          1. Kill any running VOFA (single-instance app — only one can be open).
-          2. Copy this stream's preset files (vofa+.config.json + vofa+.tabviews.json)
-             into this stream's isolated runtime context under .vofa_runtime/.
-          3. Patch the UDP port in the config.
-          4. Launch VOFA with stream-specific LOCALAPPDATA/APPDATA.
-
-        To save your current VOFA layout back to the preset, call
-        _capture_vofa_stream_preset(stream) before closing VOFA.
-        """
-        vofa = self._ensure_vofa_executable()
-        if vofa is None:
-            self._show_vofa_path_dialog()
-            return
-
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        target_port = self._get_vofa_stream_port(stream)
-        preset_dir = self._get_vofa_stream_preset_dir(stream)
-
-        # Kill just the target stream's VOFA
-        self._terminate_vofa_stream(stream)
-
-        # Resolve this stream's isolated VOFA context directory.
-        local_app_root = self._vofa_runtime_root / stream_key / "localappdata"
-        context_dir = self._get_vofa_context_dir(local_app_root)
-        if context_dir is None:
-            return
-
-        # Stage into isolated context first.
-        if not self._stage_stream_preset_to_context(preset_dir, context_dir, stream, target_port):
-            return
-
-        # Do NOT stage into system context to avoid cross-contamination.
-
-        runtime_appdata = self._vofa_runtime_root / stream_key / "appdata"
-        try:
-            runtime_appdata.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            return
-
-        launch_env = os.environ.copy()
-        launch_env["LOCALAPPDATA"] = str(local_app_root)
-        launch_env["APPDATA"] = str(runtime_appdata)
-        launch_env["USERPROFILE"] = str(local_app_root.parent)
-        launch_env["TEMP"] = str(runtime_appdata / "Temp")
-        launch_env["TMP"] = str(runtime_appdata / "Temp")
-
-        try:
-            proc = subprocess.Popen([vofa], cwd=str(self.repo_root), env=launch_env)
-            self._vofa_procs[stream_key] = proc
-        except FileNotFoundError:
-            self._show_vofa_path_dialog()
-        except Exception:
-            return
-
-    def _capture_vofa_stream_preset(self, stream: str) -> None:
-        """Copy this stream's VOFA runtime context back into its preset dir.
-
-        Call this after you've configured VOFA (renamed channels, organized tabs) and
-        closed VOFA normally so it has written its state to disk.
-        """
-        stream_key = "b" if stream.lower().strip() == "b" else "a"
-        preset_dir = self._get_vofa_stream_preset_dir(stream)
-        preset_dir.mkdir(parents=True, exist_ok=True)
-
-        local_app_root = self._vofa_runtime_root / stream_key / "localappdata"
-        context_dir = self._get_vofa_context_dir(local_app_root)
-        if context_dir is None:
-            return
-
-        # Hard lock: never capture from system %LOCALAPPDATA% context.
-        cfg_p = context_dir / "vofa+.config.json"
-        tab_p = context_dir / "vofa+.tabviews.json"
-        if not (cfg_p.exists() and tab_p.exists()):
-            return
-
-        for fname in ("vofa+.config.json", "vofa+.tabviews.json"):
-            src = context_dir / fname
-            dst = preset_dir / fname
-            if src.exists():
-                shutil.copy2(src, dst)
-
-        preset_cfg = preset_dir / "vofa+.config.json"
-        self._repair_stream_config_channel_names(stream, preset_cfg)
-
     def _show_vofa_path_dialog(self) -> None:
         dpg.configure_item("vofa_path_modal", show=True)
-
-        # Prefill input with current best guess.
-        vofa = self._ensure_vofa_executable()
+        vofa = self.vofa.ensure_executable()
         if vofa is not None:
             dpg.set_value("vofa_path_input", vofa)
 
     def _browse_vofa_executable(self) -> None:
-        # Uses tkinter file picker to locate the vofa+ executable.
         try:
             import tkinter as tk
             from tkinter import filedialog
-
             root = tk.Tk()
             root.withdraw()
             path = filedialog.askopenfilename(
                 title="Select VOFA+ executable",
-                initialdir="C:\\Program Files",
+                initialdir=r"C:\Program Files",
                 filetypes=[("Executables", "*.exe"), ("All files", "*.*")],
             )
             if not path:
@@ -2115,8 +1400,9 @@ class Dashboard:
         path_str = str(path).strip()
         if not path_str or not Path(path_str).exists():
             return
-        self._persist_vofa_executable(path_str)
+        self.vofa.persist_executable(path_str)
         dpg.configure_item("vofa_path_modal", show=False)
+
 
     def _stop_button(self) -> None:
         self._emergency_stop()
@@ -2126,7 +1412,29 @@ class Dashboard:
 
     def _on_vrc_slider(self, sender: Any, app_data: Any, user_data: Any) -> None:
         idx = int(user_data)
-        self._debouncer.call(f"vrc:{idx}", self._send_cmd, 0x06, idx, float(app_data))
+        self._send_cmd(0x06, idx, float(app_data))
+
+    _VRC_SPRING_SLIDERS = (
+        ("vrc_thr_slider", 0),
+        ("vrc_pit_slider", 1),
+        ("vrc_rol_slider", 2),
+        ("vrc_yaw_slider", 3),
+    )
+
+    def _vrc_spring_return(self) -> None:
+        """Snap every VRC slider to centre the frame its mouse drag ends.
+        Sends an immediate CMD 0x06 so the firmware gets the neutral command
+        before the next keepalive cycle."""
+        for tag, idx in self._VRC_SPRING_SLIDERS:
+            try:
+                active_now = dpg.is_item_active(tag)
+                was = self._vrc_was_active.get(tag, False)
+                self._vrc_was_active[tag] = active_now
+                if was and not active_now:
+                    dpg.set_value(tag, VRC_STICK_CENTER)
+                    self._send_cmd(0x06, idx, VRC_STICK_CENTER)
+            except Exception:
+                pass
 
     def _on_sdk_arm_request(self) -> None:
         self._send_cmd(0x0E, 0, 1.0)
@@ -2138,7 +1446,7 @@ class Dashboard:
         self._bench_mode_ui = bool(app_data)
         self._send_cmd(0x07, 0, 1.0 if self._bench_mode_ui else 0.0)
         try:
-            mx = float(BENCH_THR_MAX if self._bench_mode_ui else RC_THR_MAX)
+            mx = VRC_BENCH_THR_MAX if self._bench_mode_ui else VRC_STICK_MAX
             dpg.configure_item("vrc_thr_slider", max_value=mx)
             t = float(dpg.get_value("vrc_thr_slider"))
             if t > mx:
@@ -2151,15 +1459,28 @@ class Dashboard:
             pass
 
     def _build_virtual_rc_tab(self) -> None:
+        # ── HOW TO USE (always visible) ──────────────────────────────────────
+        dpg.add_text("HOW TO USE THIS TAB", color=(255, 200, 50, 255))
         dpg.add_text(
-            "CONTROL SOURCE",
-            color=(200, 200, 200, 255),
+            "Physical RC must be ON at all times (emergency fallback).\n"
+            "RC mode switch (ch10) HIGH = SDK mode  |  LOW = KILL (immediate motor cut).\n\n"
+            "Step 1  RC mode switch → HIGH (SDK position). Verify 'FlyMode=SDK' in telemetry.\n"
+            "Step 2  Click [SDK ARM REQ] to arm and transfer stick authority to the PC.\n"
+            "Step 3  Raise Throttle slider slowly. Use sliders to fly.\n"
+            "Step 4  To land: lower Throttle to bottom, click [ARM REQ OFF] → RC resumes.\n\n"
+            "Emergency at any time: RC mode switch → LOW → motors cut immediately.",
+            color=(190, 190, 190, 255),
+            wrap=700,
         )
+        dpg.add_separator()
+
+        # ── CONTROL SOURCE INDICATOR ─────────────────────────────────────────
+        dpg.add_text("CONTROL SOURCE", color=(200, 200, 200, 255))
         dpg.add_text("RC ACTIVE", tag="vrc_source_text", color=(0, 200, 0, 255))
         dpg.add_separator()
 
         dpg.add_checkbox(
-            label="Bench test mode (throttle capped)",
+            label="Bench test mode (throttle capped at 20%)",
             tag="vrc_bench_cb",
             default_value=False,
             callback=self._on_bench_toggle,
@@ -2172,26 +1493,40 @@ class Dashboard:
         )
         dpg.add_separator()
 
+        # ── RECOVERY / ABORT ROW ─────────────────────────────────────────────
         with dpg.group(horizontal=True):
             dpg.add_button(
-                label="SDK MODE",
+                label="Recover SDK",
                 tag="vrc_sdk_btn",
-                width=110,
+                width=120,
                 enabled=False,
                 callback=lambda: self._send_cmd(0x04, 1, 0.0),
             )
+            with dpg.tooltip(parent="vrc_sdk_btn"):
+                dpg.add_text(
+                    "Sends RECOVER_SDK event to the flight FSM.\n"
+                    "Use only if the FSM is stuck in EMERGENCY after a transient\n"
+                    "kill-switch event and the RC mode switch is already back HIGH."
+                )
             dpg.add_button(
-                label="Virtual RC mode",
-                width=135,
+                label="Abort All / Return to RC",
+                width=180,
                 callback=lambda: self._send_cmd(0x0D, 0, 1.0),
             )
-            dpg.add_button(
-                label="Paths (TWC) mode",
-                width=135,
-                callback=lambda: self._paths_cmd_twc(),
-            )
-        
-        dpg.add_text("SDK arm request (GS_KeySDKflag)", color=(180, 180, 180, 255))
+            with dpg.tooltip(parent=dpg.last_item()):
+                dpg.add_text(
+                    "Stops all autonomous paths, clears PC authority, and triggers\n"
+                    "a momentary DANGEROUS_STOP. If RC mode switch is HIGH the FSM\n"
+                    "recovers to DISARMED within one 10ms cycle and RC sticks resume."
+                )
+
+        dpg.add_separator()
+
+        # ── ARM / DISARM ROW ─────────────────────────────────────────────────
+        dpg.add_text(
+            "Step 2: Arm and take PC authority over sticks",
+            color=(180, 180, 180, 255),
+        )
         with dpg.group(horizontal=True):
             dpg.add_button(
                 label="SDK ARM REQ",
@@ -2199,51 +1534,63 @@ class Dashboard:
                 width=160,
                 callback=lambda: self._on_sdk_arm_request(),
             )
+            with dpg.tooltip(parent="vrc_arm_req_btn"):
+                dpg.add_text(
+                    "Arms the drone and transfers stick authority to PC.\n"
+                    "Physical RC sticks are suspended; only mode switch still works."
+                )
             dpg.add_button(
                 label="ARM REQ OFF",
                 tag="vrc_arm_off_btn",
                 width=160,
                 callback=lambda: self._on_sdk_arm_clear(),
             )
+            with dpg.tooltip(parent="vrc_arm_off_btn"):
+                dpg.add_text(
+                    "Returns stick authority to the physical RC — drone stays ARMED.\n"
+                    "Your RC throttle takes over immediately. Land normally, then\n"
+                    "disarm with RC stick gesture (left-stick left+down hold).\n"
+                    "Does NOT cut motors — safe to use in the air."
+                )
         dpg.add_separator()
 
         self.vrc_slider_tags = [
             dpg.add_slider_float(
-                label="Throttle (PWM)",
+                label="Throttle [-1..+1]",
                 tag="vrc_thr_slider",
-                min_value=float(RC_THR_MIN),
-                max_value=float(RC_THR_MAX),
-                default_value=float(RC_STICK_MID),
+                min_value=VRC_STICK_MIN,
+                max_value=VRC_STICK_MAX,
+                default_value=VRC_STICK_CENTER,
                 width=400,
                 callback=self._on_vrc_slider,
                 user_data=0,
             ),
             dpg.add_slider_float(
-                label="Pitch (PWM)",
+                label="Pitch [-1..+1]",
                 tag="vrc_pit_slider",
-                min_value=float(RC_STICK_MIN),
-                max_value=float(RC_STICK_MAX),
-                default_value=float(RC_STICK_MID),
+                min_value=VRC_STICK_MIN,
+                max_value=VRC_STICK_MAX,
+                default_value=VRC_STICK_CENTER,
                 width=400,
                 callback=self._on_vrc_slider,
                 user_data=1,
             ),
             dpg.add_slider_float(
-                label="Roll (PWM)",
+                label="Roll [-1..+1]",
                 tag="vrc_rol_slider",
-                min_value=float(RC_STICK_MIN),
-                max_value=float(RC_STICK_MAX),
-                default_value=float(RC_STICK_MID),
+                min_value=VRC_STICK_MIN,
+                max_value=VRC_STICK_MAX,
+                default_value=VRC_STICK_CENTER,
                 width=400,
                 callback=self._on_vrc_slider,
                 user_data=2,
             ),
             dpg.add_slider_float(
-                label="Yaw (PWM)",
+                label="Yaw [-1..+1]",
                 tag="vrc_yaw_slider",
-                min_value=float(RC_STICK_MIN),
-                max_value=float(RC_STICK_MAX),
-                default_value=float(RC_STICK_MID),
+                min_value=VRC_STICK_MIN,
+                max_value=VRC_STICK_MAX,
+                default_value=VRC_STICK_CENTER,
                 width=400,
                 callback=self._on_vrc_slider,
                 user_data=3,
@@ -2314,9 +1661,20 @@ class Dashboard:
                 pass
 
     def _build_paths_tab(self) -> None:
+        dpg.add_text("HOW TO USE THIS TAB", color=(255, 200, 50, 255))
         dpg.add_text(
-            "Paths send firmware CMDs only (0x0A/0x0B/0x0C). Requires FlyMode SDK (Virtual RC tab).",
-            color=(170, 170, 180, 255),
+            "Step 1  RC mode switch → HIGH (SDK position).\n"
+            "Step 2  Click [SDK ARM REQ] in the Virtual RC tab to arm.\n"
+            "Step 3  Select a Position Source below (Optical Flow or Simulation).\n"
+            "Step 4  Set target parameters and click an Execute button.\n"
+            "Step 5  To abort: click [Abort All / Return to RC] or put RC mode switch LOW.",
+            color=(190, 190, 190, 255),
+            wrap=900,
+        )
+        dpg.add_text(
+            "WARNING: Execute buttons are disabled until a Position Source is selected.",
+            tag="paths_no_source_warn",
+            color=(220, 120, 0, 255),
             wrap=900,
         )
         dpg.add_separator()
@@ -2357,6 +1715,18 @@ class Dashboard:
                     callback=lambda: self._send_cmd(0x0D, 0, 1.0),
                 )
                 dpg.add_separator()
+                dpg.add_button(
+                    label="Reset World Origin",
+                    width=200,
+                    callback=lambda: self._send_cmd(0x10, 0, 1.0),
+                )
+                with dpg.tooltip(parent=dpg.last_item()):
+                    dpg.add_text(
+                        "Zeros the optical-flow accumulated position.\n"
+                        "The drone's current location becomes (0, 0).\n"
+                        "Use when landing and re-arming for a fresh run."
+                    )
+                dpg.add_separator()
                 dpg.add_text("Sinusoid (center m, axis 0=X 1=Y 2=Z)", color=(200, 200, 200, 255))
                 dpg.add_input_float(tag="sin_cx", label="cx", width=120, default_value=0.0)
                 dpg.add_input_float(tag="sin_cy", label="cy", width=120, default_value=0.0)
@@ -2388,9 +1758,39 @@ class Dashboard:
                     callback=lambda: self._paths_cmd_circle(),
                 )
             with dpg.child_window(width=-1, height=-1, border=True):
-                dpg.add_text("2D preview (XY, 1 px = 0.01 m) @ 10 Hz", color=(200, 200, 200, 255))
-                dpg.add_drawlist(tag="paths_drawlist", width=400, height=400)
-                dpg.add_button(label="Clear Trace", callback=lambda: self._paths_clear_trace())
+                dpg.add_text("Position tracking — world frame @ 10 Hz", color=(200, 200, 200, 255))
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Clear Plots", callback=lambda: self._paths_clear_plots())
+                    dpg.add_button(label="Pause Plotting", tag="btn_plot_pause",
+                                   callback=lambda: self._paths_toggle_plot_pause())
+                    dpg.add_button(label="Fit to Data", callback=lambda: self._paths_fit_plots())
+                    dpg.add_checkbox(label="Auto Y", tag="chk_plot_auto_y", default_value=True,
+                                     callback=lambda _, a: setattr(self, "_plot_auto_y", bool(a)))
+                    dpg.add_input_float(
+                        label="Buffer (min)", tag="inp_plot_buf_min",
+                        default_value=10.0, min_value=0.5, max_value=60.0,
+                        step=0.5, width=100,
+                        callback=lambda _, a: setattr(self, "_plot_max_s", float(a) * 60.0),
+                    )
+                    dpg.add_button(label="Reset World Origin", callback=lambda: self._send_cmd(0x10, 0, 1.0))
+                with dpg.plot(label="X (m)", width=-1, height=280, tag="plot_xyz_x", no_title=False):
+                    dpg.add_plot_legend()
+                    dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag="plot_x_xax")
+                    with dpg.plot_axis(dpg.mvYAxis, label="X (m)", tag="plot_x_yax"):
+                        dpg.add_line_series([], [], label="FB",  tag="series_x_fb")
+                        dpg.add_line_series([], [], label="Des", tag="series_x_des")
+                with dpg.plot(label="Y (m)", width=-1, height=280, tag="plot_xyz_y", no_title=False):
+                    dpg.add_plot_legend()
+                    dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag="plot_y_xax")
+                    with dpg.plot_axis(dpg.mvYAxis, label="Y (m)", tag="plot_y_yax"):
+                        dpg.add_line_series([], [], label="FB",  tag="series_y_fb")
+                        dpg.add_line_series([], [], label="Des", tag="series_y_des")
+                with dpg.plot(label="Z (m)", width=-1, height=280, tag="plot_xyz_z", no_title=False):
+                    dpg.add_plot_legend()
+                    dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag="plot_z_xax")
+                    with dpg.plot_axis(dpg.mvYAxis, label="Z (m)", tag="plot_z_yax"):
+                        dpg.add_line_series([], [], label="FB",  tag="series_z_fb")
+                        dpg.add_line_series([], [], label="Des", tag="series_z_des")
 
     def _build_safety_tab(self) -> None:
         dpg.add_checkbox(
@@ -2732,6 +2132,7 @@ class Dashboard:
                     dpg.add_text("FlyMode: ?", tag="status_fly_sidebar", color=(180, 180, 180, 255))
                     dpg.add_text("SBUS: ?", tag="status_sbus_sidebar", color=(180, 180, 180, 255))
                     dpg.add_text("Bench: OFF", tag="status_bench_sidebar", color=(180, 180, 180, 255))
+                    dpg.add_text("Ctrl: RC ACTIVE", tag="status_authority_sidebar", color=(0, 200, 0, 255))
                     dpg.add_separator()
                     
                     dpg.add_text("Flight Mode", color=(200, 200, 200, 255))
@@ -2764,12 +2165,12 @@ class Dashboard:
                     dpg.add_button(
                         label="Frame A Workspace",
                         width=-1,
-                        callback=lambda: self._open_plot("presets/vofa/full.tabviews.json", stream="a"),
+                        callback=lambda: self.vofa.open_plot("presets/vofa/full.tabviews.json", stream="a"),
                     )
                     dpg.add_button(
                         label="Frame B Workspace",
                         width=-1,
-                        callback=lambda: self._open_plot("presets/vofa/mrac_errors.tabviews.json", stream="b"),
+                        callback=lambda: self.vofa.open_plot("presets/vofa/mrac_errors.tabviews.json", stream="b"),
                     )
 
                 with dpg.child_window(width=-1, height=-1, border=False):
@@ -2799,6 +2200,8 @@ class Dashboard:
                                         self._build_mrac_axis_tab("yaw")
                                     with dpg.tab(label="Z"):
                                         self._build_mrac_axis_tab("z")
+                                    with dpg.tab(label="Flags"):
+                                        self._build_mrac_flags_tab()
                             with dpg.tab(label="Paths", tag="tab_paths"):
                                 self._build_paths_tab()
                             with dpg.tab(label="Safety", tag="tab_safety"):
@@ -3100,12 +2503,37 @@ class Dashboard:
     def _build_mrac_axis_tab(self, axis: str) -> None:
         self._build_mrac_blocks(axis)
 
+    def _build_mrac_flags_tab(self) -> None:
+        dpg.add_text("MRAC Feature Flags (CMD 0x0F)", color=(200, 200, 200, 255))
+        dpg.add_text("Changes take effect immediately. Resets on firmware power-cycle.", color=(150, 150, 150, 255))
+        dpg.add_separator()
+        flags = [
+            (0, "adaptation_on",      "Adaptation ON — master switch for weight updates"),
+            (1, "projection_on",      "Projection ON — bound weights to safe limits"),
+            (2, "deadzone_on",        "Deadzone ON — skip updates when error is tiny"),
+            (3, "hard_freeze_on",     "Hard Freeze ON — zero u_ad during large error spikes"),
+            (4, "tanh_saturation_on", "Tanh Saturation ON — soft-clip effective error"),
+            (5, "e_modification_on",  "e-Modification ON — extra leakage proportional to |e|"),
+            (6, "l1_filtering_on",    "L1 Filtering ON — low-pass filter on u_ad"),
+            (7, "axis_enable_pitch",  "Pitch axis enabled"),
+            (8, "axis_enable_roll",   "Roll axis enabled"),
+            (9, "axis_enable_yaw",    "Yaw axis enabled"),
+        ]
+        defaults = {0: True, 1: True, 2: True, 3: True, 4: True, 5: True, 6: False, 7: True, 8: True, 9: True}
+        for idx, tag_name, label in flags:
+            dpg.add_checkbox(
+                tag=f"mrac_flag_{tag_name}",
+                label=label,
+                default_value=defaults.get(idx, True),
+                callback=lambda s, a, u=idx: self._send_cmd(0x0F, u, 1.0 if a else 0.0),
+            )
+
     def run(self) -> None:
         try:
             # First launch: show VOFA path dialog if executable missing.
-            if not self._vofa_checked:
-                self._vofa_checked = True
-                if self._ensure_vofa_executable() is None:
+            if not self.vofa.checked:
+                self.vofa.checked = True
+                if self.vofa.ensure_executable() is None:
                     dpg.configure_item("vofa_path_modal", show=True)
 
             dpg.create_viewport(title="UAV Dashboard", width=1400, height=860)

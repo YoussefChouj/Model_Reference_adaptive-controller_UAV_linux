@@ -37,7 +37,16 @@ except ImportError:  # pragma: no cover
 #   0x0C circle path — FlyMode_SDK only:
 #        idx 0=center_x 1=center_y 2=center_z 3=radius_m 4=omega_rad_s 5=duration_s  6=active (1=start)
 #   0x0D abort all paths (GroundStation_AbortAllPaths) — idx 0 (value ignored; use 1.0)
-#   0x0E GS_KeySDKflag — idx 0: 1=enable parallel SDK mission trigger, 0=disable
+#   0x0E arm/disarm — idx 0: val>=0.5 = arm (GS_KeySDKflag=1, ARM_REQUEST, RCInput authority on),
+#                              val<0.5  = disarm (GS_KeySDKflag=0, DISARM_REQUEST, authority off)
+#   0x0F MRAC flags — idx: 0=adaptation_on 1=projection_on 2=deadzone_on 3=hard_freeze_on
+#                          4=tanh_saturation_on 5=e_modification_on 6=l1_filtering_on
+#                          7=axis_enable_pitch 8=axis_enable_roll 9=axis_enable_yaw
+#                          val>=0.5 = ON, val<0.5 = OFF
+# Must match GS_PROTO_VERSION in Global_file/global_declare.h.
+# Increment both when the telemetry frame layout or CMD semantics change.
+GS_PROTO_VERSION: int = 2
+
 cmd_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
 
 
@@ -210,6 +219,7 @@ class SerialBridge:
         self._last_arm: Optional[float] = None
         self._last_flymode: Optional[float] = None
         self._last_sbus_lost: Optional[float] = None
+        self._last_rc_authority: Optional[float] = None
         self._last_telemetry_a: Dict[str, float] = {}
         self._last_telemetry_b: Dict[str, float] = {}
         self._telemetry_lock = threading.Lock()
@@ -412,7 +422,7 @@ class SerialBridge:
         # I11 = status_twc_execute
         # I12 = status_twc_arrived
         #
-        # Payload layout (LEN=37):
+        # Payload layout (LEN=38):
         #   float pitch.e
         #   float pitch.u_ad
         #   float roll.e
@@ -426,9 +436,11 @@ class SerialBridge:
         #   uint8 status.sbus_lost
         #   uint8 status.twc_execute
         #   uint8 status.twc_arrived
-        if len(payload) != 37:
+        #   uint8 rc_authority   <- 1=PC authority, 0=RC (added in v2)
+        #   uint8 proto_version  <- GS_PROTO_VERSION
+        if len(payload) != 39:
             return []
-        fmt = "<8fBBBBB"
+        fmt = "<8fBBBBBBB"
         (
             p_e,
             p_u,
@@ -443,7 +455,15 @@ class SerialBridge:
             sbus_lost_u8,
             twc_exec_u8,
             twc_arr_u8,
+            rc_authority_u8,
+            proto_ver_u8,
         ) = struct.unpack(fmt, payload)
+        if proto_ver_u8 != GS_PROTO_VERSION:
+            print(
+                f"WARNING: firmware proto_version={proto_ver_u8} != expected {GS_PROTO_VERSION}. "
+                "Reflash firmware or update serial_bridge.py.",
+                flush=True,
+            )
 
         # Update GUI state for ARM / flymode and MRAC basis hiding.
         with self._state_lock:
@@ -451,6 +471,7 @@ class SerialBridge:
             self._last_arm = float(arm_u8)
             self._last_flymode = float(flymode_u8)
             self._last_sbus_lost = float(sbus_lost_u8)
+            self._last_rc_authority = float(rc_authority_u8)
 
         return [
             ("mrac.pitch.e", float(p_e)),
@@ -466,6 +487,7 @@ class SerialBridge:
             ("status.sbus_lost", float(sbus_lost_u8)),
             ("status.twc_execute", float(twc_exec_u8)),
             ("status.twc_arrived", float(twc_arr_u8)),
+            ("status.rc_authority", float(rc_authority_u8)),
         ]
 
     def _unpack_frame_b(self, max_num_basis: int, payload: bytes) -> List[Tuple[str, float]]:
@@ -749,7 +771,7 @@ class SerialBridge:
         max_num_basis = data[5]
 
         if frame_type == 0x01:
-            if len_payload != 37:
+            if len_payload != 39:
                 return
         elif frame_type == 0x02:
             total_floats = 4 * (max_num_basis + 2) + 36
@@ -829,7 +851,7 @@ class SerialBridge:
 
             # Basic header sanity checks to avoid blocking on corrupted LEN values.
             if frame_type == 0x01:
-                if len_payload != 37:
+                if len_payload != 39:
                     sync_seen = False
                     continue
             elif frame_type == 0x02:

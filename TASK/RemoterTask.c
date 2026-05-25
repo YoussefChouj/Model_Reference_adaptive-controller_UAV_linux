@@ -1,17 +1,19 @@
 #include "RemoterTask.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "rc_input.h"
+#include "flight_fsm.h"
 
 float channel[4];
 /*************************************************************************
-º¯ Êý Ãû£ºvoid remoter_task(void)
-º¯Êý¹¦ÄÜ£ºÒ£¿ØÆ÷ÈÎÎñ
-±¸    ×¢£º10msÖ´ÐÐÒ»´Î
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void remoter_task(void)
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½Ò£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+ï¿½ï¿½    ×¢ï¿½ï¿½10msÖ´ï¿½ï¿½Ò»ï¿½ï¿½
 *************************************************************************/
 void remoter_task(void)
 {
 	
-			// ¾ÉÒ£¿ØÆ÷
+			// ï¿½ï¿½Ò£ï¿½ï¿½ï¿½ï¿½
 //		channel[0]= (sbus_channel[0]-1024)/672.0*1000.0+3000.0; 
 //	  channel[1]= (sbus_channel[1]-1024)/672.0*1000.0+3000.0; 
 //	  channel[2]= (sbus_channel[2]-1024)/672.0*1000.0+3000.0; 
@@ -32,11 +34,11 @@ void remoter_task(void)
 		if(channel[1]<1800||channel[1]>4200)channel[1]=3000;
 		if(channel[2]<1800||channel[2]>4200)channel[2]=3000;
 		if(channel[3]<1800||channel[3]>4200)channel[3]=3000;
-				
+
 		Remoter.PitCtrler	= channel[1] ;
 		Remoter.RolCtrler = channel[0] ;
 		Remoter.ThrCtrler = channel[2] ;
-		Remoter.YawCtrler = channel[3] ;	
+		Remoter.YawCtrler = channel[3] ;
 
 	{
 		TickType_t now = xTaskGetTickCount();
@@ -52,20 +54,24 @@ void remoter_task(void)
 			}
 		}
 	}
+
+	RCInput_Update();
 }
 
-#define is_Stick_MAX(value)      ( value>3900 &&  value<4100)//4000
-#define is_Stick_MIN(value)      ( value>1900 &&  value<2100)//2000
-#define is_Stick_MID(value)      ( value>2900 &&  value<3100)//3000
+/* Stick gesture thresholds in normalised [-1, 1] units.
+ * Former raw thresholds: MAX ~4000, MIN ~2000, MID ~3000 on [2000,4000] scale. */
+#define is_Stick_MAX(value)      ( (value) >  0.75f )
+#define is_Stick_MIN(value)      ( (value) < -0.75f )
+#define is_Stick_MID(value)      ( (value) > -0.1f && (value) < 0.1f )
 
 void Check_Stick_Motion(void)
 {
-	float eff_thr = sbus_lost ? virtual_rc_sticks[0] : (float)Remoter.ThrCtrler;
-	float eff_pit = sbus_lost ? virtual_rc_sticks[1] : (float)Remoter.PitCtrler;
-	float eff_rol = sbus_lost ? virtual_rc_sticks[2] : (float)Remoter.RolCtrler;
-	float eff_yaw = sbus_lost ? virtual_rc_sticks[3] : (float)Remoter.YawCtrler;
+	float eff_thr = RCInput_Get(RC_AXIS_THR);
+	float eff_pit = RCInput_Get(RC_AXIS_PITCH);
+	float eff_rol = RCInput_Get(RC_AXIS_ROLL);
+	float eff_yaw = RCInput_Get(RC_AXIS_YAW);
 	
-	if( is_Stick_MIN(eff_thr) &&  is_Stick_MAX(eff_yaw) )//  arm  ÓÒÏÂ
+	if( is_Stick_MIN(eff_thr) &&  is_Stick_MAX(eff_yaw) )//  arm  ï¿½ï¿½ï¿½ï¿½
 		StickMotion.LeftStick_RightDown_cnt++;
 	else StickMotion.LeftStick_RightDown_cnt=0;
 	
@@ -102,43 +108,91 @@ void Check_Stick_Motion(void)
 
 	if(StickMotion.LeftStick_RightDown_cnt>=ARM_Delay_time)
 	{
-		DroneStatus.ARM_Status=Armed;//ÓÒÏÂ½âËø
-
+		FlightFSM_Event(FLIGHT_EVENT_ARM_REQUEST);
 		StickMotion.LeftStick_RightDown_cnt=0;StickMotion.LeftStick_LeftDown_cnt=0;
 	}
 	if(StickMotion.LeftStick_LeftDown_cnt>=DISARM_Delay_time)
 	{
-		DroneStatus.ARM_Status=DisArmed;//×óÏÂÉÏËø
+		FlightFSM_Event(FLIGHT_EVENT_DISARM_REQUEST);
 		StickMotion.LeftStick_RightDown_cnt=0;StickMotion.LeftStick_LeftDown_cnt=0;
 	}
 }
 /*************************************************************************
-º¯ Êý Ãû£ºvoid Check_Fly_Mode(void)
-º¯Êý¹¦ÄÜ£º¼ì²é·ÉÐÐ×´Ì¬
-±¸    ×¢£ºPA10(USART1_RX)
+ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½void Check_Fly_Mode(void)
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬
+ï¿½ï¿½    ×¢ï¿½ï¿½PA10(USART1_RX)
 *************************************************************************/
 void Check_Fly_Mode(void)
 {
 	static int DangerousStop_cnt = 0;
 	Check_Stick_Motion();
 	
-		if( sbus_channel[4] ==200 ) //²¦¸Ë²¦µ½ÁË×îÉÏ·½
-	{	
+		if( sbus_channel[9] <=500 ) //ï¿½ï¿½ï¿½Ë²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï·ï¿½
+	{
 			DangerousStop_cnt ++;
 	}
 	else
 	{
 		DangerousStop_cnt = 0;
 	}
-	
+
 	if(DangerousStop_cnt>10) //50ms
 	{
-		DroneStatus.FlyMode = FlyMode_DangerousStop;//½ô¼±Í£»ú
-		
-	}	
+		FlightFSM_Event(FLIGHT_EVENT_DANGEROUS_STOP);
+	}
 	else
 	{
-     DroneStatus.FlyMode = FlyMode_SDK ;
+		FlightFSM_Event(FLIGHT_EVENT_RECOVER_SDK);
+	}
+
+	/* --- SBUS ch5 (MODE_CH): 2-state switch -------------------------------------
+	 * Transmitter values: midâ‰ˆ1000, highâ‰ˆ1600. Low treated same as mid.
+	 * > 1300 â†’ LAND, everything else â†’ IDLE.
+	 * Authority is set once on transition. Physical RC takeover is only suppressed
+	 * while GS_KeySDKflag=1; ch5-only IDLE still allows physical RC override.  */
+	{
+		static uint8_t prev_mode = 0xFFU;
+		if (MODE_CH > 1300)  drone_mode = 2U;
+		else                 drone_mode = 0U;
+
+		if (drone_mode == 0U && prev_mode != 0U)
+			RCInput_SetAuthority(1U);   /* entering IDLE: lock throttle to idle */
+		else if (drone_mode != 0U && prev_mode == 0U)
+			RCInput_SetAuthority(0U);   /* leaving IDLE: restore pilot control */
+		prev_mode = drone_mode;
+	}
+
+	/* --- SBUS ch7 (FLYUP_CH): rising-edge fly-up to Z=0.5 m trigger -----------
+	 * Arms the drone if disarmed, then sets sbus_flyup_trigger.
+	 * Authority is released in StabilizerTask when the trigger is consumed.   */
+	{
+		static uint8_t ch6_prev = 0U;
+		uint8_t ch6_now = (FLYUP_CH > 500U) ? 1U : 0U;
+		if (ch6_now && !ch6_prev)
+		{
+			if (FlightFSM_GetState() == FLIGHT_STATE_DISARMED)
+				FlightFSM_Event(FLIGHT_EVENT_ARM_REQUEST);
+			sbus_flyup_trigger = 1U;
+		}
+		ch6_prev = ch6_now;
+	}
+
+	/* --- SBUS ch8 (PATH_EXEC_CH): rising-edge preset-path trigger --------------
+	 * Arms the drone (if needed) and sets sbus_path_trigger so the path
+	 * execution handler can launch the preset path loaded from the GS.         */
+	{
+		static uint8_t ch8_prev = 0U;
+		uint8_t ch8_now = (PATH_EXEC_CH > 500U) ? 1U : 0U;
+		if (ch8_now && !ch8_prev)
+		{
+			if (FlightFSM_GetState() == FLIGHT_STATE_DISARMED)
+			{
+				FlightFSM_Event(FLIGHT_EVENT_ARM_REQUEST);
+				RCInput_SetAuthority(1U);
+			}
+			sbus_path_trigger = 1U;
+		}
+		ch8_prev = ch8_now;
 	}
 }
 
