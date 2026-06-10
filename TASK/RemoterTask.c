@@ -66,10 +66,13 @@ void remoter_task(void)
 
 void Check_Stick_Motion(void)
 {
-	float eff_thr = RCInput_Get(RC_AXIS_THR);
-	float eff_pit = RCInput_Get(RC_AXIS_PITCH);
-	float eff_rol = RCInput_Get(RC_AXIS_ROLL);
-	float eff_yaw = RCInput_Get(RC_AXIS_YAW);
+	/* Gesture recognition must read physical sticks, never virtual ones.
+	 * When authority=1 (IDLE mode), RCInput_Get() returns virtual[]=0 which
+	 * makes is_Stick_MAX(yaw) always false → arm gesture never fires. */
+	float eff_thr = ((float)Remoter.ThrCtrler - 3000.0f) / 1000.0f;
+	float eff_pit = ((float)Remoter.PitCtrler - 3000.0f) / 1000.0f;
+	float eff_rol = ((float)Remoter.RolCtrler - 3000.0f) / 1000.0f;
+	float eff_yaw = ((float)Remoter.YawCtrler - 3000.0f) / 1000.0f;
 	
 	if( is_Stick_MIN(eff_thr) &&  is_Stick_MAX(eff_yaw) )//  arm  ����
 		StickMotion.LeftStick_RightDown_cnt++;
@@ -145,21 +148,18 @@ void Check_Fly_Mode(void)
 		FlightFSM_Event(FLIGHT_EVENT_RECOVER_SDK);
 	}
 
-	/* --- SBUS ch5 (MODE_CH): 2-state switch -------------------------------------
-	 * Transmitter values: mid≈1000, high≈1600. Low treated same as mid.
-	 * > 1300 → LAND, everything else → IDLE.
-	 * Authority is set once on transition. Physical RC takeover is only suppressed
-	 * while GS_KeySDKflag=1; ch5-only IDLE still allows physical RC override.  */
+	/* --- SBUS ch5 (MODE_CH): rising edge into LAND position triggers landing.
+	 * Only valid from FLYING phase — ignored when on ground (won't start ramp if not airborne).
+	 * ch5 no longer sets authority; authority is managed by CMD 0x0E only.       */
 	{
-		static uint8_t prev_mode = 0xFFU;
-		if (MODE_CH > 1300)  drone_mode = 2U;
-		else                 drone_mode = 0U;
-
-		if (drone_mode == 0U && prev_mode != 0U)
-			RCInput_SetAuthority(1U);   /* entering IDLE: lock throttle to idle */
-		else if (drone_mode != 0U && prev_mode == 0U)
-			RCInput_SetAuthority(0U);   /* leaving IDLE: restore pilot control */
-		prev_mode = drone_mode;
+		static uint8_t ch5_prev = 0U;
+		uint8_t ch5_now = (MODE_CH > 1300) ? 1U : 0U;
+		if (ch5_now && !ch5_prev && flight_phase == FLIGHT_PHASE_FLYING)
+		{
+			flight_phase = FLIGHT_PHASE_LANDING;
+			TWC.execute  = 0U;
+		}
+		ch5_prev = ch5_now;
 	}
 
 	/* --- SBUS ch7 (FLYUP_CH): rising-edge fly-up to Z=0.5 m trigger -----------

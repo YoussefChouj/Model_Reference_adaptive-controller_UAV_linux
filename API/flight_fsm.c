@@ -4,6 +4,7 @@
 #include "global_declare.h"
 
 static FlightState_t s_state = FLIGHT_STATE_DISARMED;
+volatile FlightPhase_t flight_phase = FLIGHT_PHASE_GROUND_IDLE;
 
 static void s_sync(FlightState_t st)
 {
@@ -36,12 +37,12 @@ void FlightFSM_Event(FlightEvent_t event)
         if (event == FLIGHT_EVENT_DANGEROUS_STOP) { s_state = FLIGHT_STATE_EMERGENCY; s_sync(s_state); }
         break;
     case FLIGHT_STATE_ARMED:
-        if (event == FLIGHT_EVENT_DISARM_REQUEST) { s_state = FLIGHT_STATE_DISARMED;  s_sync(s_state); }
-        if (event == FLIGHT_EVENT_DANGEROUS_STOP) { s_state = FLIGHT_STATE_EMERGENCY; s_sync(s_state); }
+        if (event == FLIGHT_EVENT_DISARM_REQUEST) { s_state = FLIGHT_STATE_DISARMED;  s_sync(s_state); flight_phase = FLIGHT_PHASE_GROUND_IDLE; }
+        if (event == FLIGHT_EVENT_DANGEROUS_STOP) { s_state = FLIGHT_STATE_EMERGENCY; s_sync(s_state); flight_phase = FLIGHT_PHASE_GROUND_IDLE; }
         break;
     case FLIGHT_STATE_EMERGENCY:
-        if (event == FLIGHT_EVENT_RECOVER_SDK)    { s_state = FLIGHT_STATE_DISARMED;  s_sync(s_state); }
-        if (event == FLIGHT_EVENT_DISARM_REQUEST) { s_state = FLIGHT_STATE_DISARMED;  s_sync(s_state); }
+        if (event == FLIGHT_EVENT_RECOVER_SDK)    { s_state = FLIGHT_STATE_DISARMED;  s_sync(s_state); flight_phase = FLIGHT_PHASE_GROUND_IDLE; }
+        if (event == FLIGHT_EVENT_DISARM_REQUEST) { s_state = FLIGHT_STATE_DISARMED;  s_sync(s_state); flight_phase = FLIGHT_PHASE_GROUND_IDLE; }
         break;
     default:
         break;

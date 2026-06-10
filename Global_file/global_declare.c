@@ -25,7 +25,6 @@ float gs_throttle_min_pct = 0.0f;
 float gs_throttle_max_pct = 1.0f;
 
 volatile uint8_t TWC_arrived = 0;
-volatile uint8_t drone_mode = 1;      /* start in FLY mode */
 volatile uint8_t sbus_flyup_trigger = 0;
 
 volatile uint8_t sbus_path_trigger = 0;

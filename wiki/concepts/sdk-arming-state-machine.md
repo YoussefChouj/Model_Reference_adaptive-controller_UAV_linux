@@ -1,101 +1,96 @@
 ---
 title: SDK Arming State Machine
 type: concept
-tags: [arming, sdk, safety, flymode]
+tags: [arming, sdk, safety, flymode, flight-phase]
 created: 2026-04-14
-updated: 2026-04-14
-sources: [TASK/RemoterTask.c, TASK/send_data.c, TASK/StabilizerTask.c, TASK/AutoflyTask.c]
-related_files: [TASK/RemoterTask.c, TASK/send_data.c, TASK/StabilizerTask.c, TASK/AutoflyTask.c]
+updated: 2026-05-27
+sources: [TASK/RemoterTask.c, TASK/StabilizerTask.c, API/flight_fsm.h, API/flight_fsm.c]
+related_files: [TASK/RemoterTask.c, TASK/StabilizerTask.c, API/flight_fsm.h, API/flight_fsm.c]
 ---
 
-The firmware uses a hybrid arming flow: stick-based arming logic remains active, but ground station can assert arming intent via command `0x0E` in SDK workflows. The practical state progression is `DISARMED -> ARMED` with mode guards and forced-disarm exits; there is no standalone enum for ARMING state, but counters/flags implement equivalent timing transitions.
+## Two Orthogonal State Variables
 
-## Inputs and Transition Signals
+| Variable | Type | Owner | Purpose |
+|---|---|---|---|
+| `FlightState_t` (in `flight_fsm.c`) | DISARMED / ARMED / EMERGENCY | `flight_fsm.c` | Arm/disarm/emergency |
+| `flight_phase` (in `flight_fsm.c`) | GROUND_IDLE / FLYING / LANDING / LANDED | RemoterTask + StabilizerTask | Sub-phase within ARMED |
 
-Primary arm signals:
-- Stick gesture detector `Check_Stick_Motion()` (`TASK/RemoterTask.c:61`)
-- GS arm request `CMD 0x0E` (`TASK/send_data.c:662-673`)
-- SDK mission trigger flags (`GS_KeySDKflag`, `KeySDKflag`) (`TASK/send_data.c:666`, `TASK/AutoflyTask.c:119,126`)
+`drone_mode` (old `uint8_t` global) has been removed. `flight_phase` replaces it with a proper FSM.
 
-Threshold timing constants:
-- `ARM_Delay_time 150` and `DISARM_Delay_time 50` (`Global_file/global_declare.h:32-33`)
-- At 100 Hz remoter task (`USER/main.c:203`), arm hold is ~1.5 s and disarm hold is ~0.5 s.
+---
 
-## State Interpretation
+## FlightState Transitions
 
-- **DISARMED**: `DroneStatus.ARM_Status = DisArmed` (`Global_file/global_declare.h:34`)
-- **ARMING** (implicit): stick counter rising toward threshold (`TASK/RemoterTask.c:68-70,103`)
-- **ARMED**: set by stick threshold or CMD `0x0E` (`TASK/RemoterTask.c:105`, `TASK/send_data.c:667`)
-- **FORCED DISARM**: dangerous-stop or invalid mode branches clear motors and set disarmed (`TASK/StabilizerTask.c:188-197`)
+```
+DISARMED → ARM_REQUEST  → ARMED
+ARMED    → DISARM_REQUEST → DISARMED
+ARMED    → DANGEROUS_STOP → EMERGENCY
+EMERGENCY → RECOVER_SDK / DISARM_REQUEST → DISARMED
+```
 
-## Motor Enable Sequence
+All transitions are under `taskENTER_CRITICAL()`. On any transition to DISARMED, `flight_phase` is automatically reset to `FLIGHT_PHASE_GROUND_IDLE`.
 
-Arming status alone does not guarantee full motor PWM. `Update_Motor()` applies layered guards:
-- Must be armed (`TASK/StabilizerTask.c:170`)
-- Must be in `FlyMode_SDK` to reach PWM branch (`TASK/StabilizerTask.c:173`)
-- Near-ground + low-throttle uses `Set_IDLE_Motors()` instead of full PWM (`TASK/StabilizerTask.c:175-178`)
-- `SDK_DelayWakeFlag` also holds idle (`TASK/StabilizerTask.c:179-182`)
+---
 
-Only after these guards pass does `Set_PWM_Motors()` run (`TASK/StabilizerTask.c:185`).
+## FlightPhase Transitions
 
-## Disarm Conditions
+```
+GROUND_IDLE → FLYING      : Z_posPID.FB > 0.2m (auto-detected in Update_Motor)
+FLYING      → LANDING     : ch5 rising edge > 1300 (Check_Fly_Mode — ONLY from FLYING)
+LANDING     → LANDED      : |Z_ratePID.FB| < 0.02 m/s for 50 ticks (0.25s at 200Hz)
+                             OR ramp fully expired (s_land_thr ≤ 2000)
+LANDED      → DISARMED    : auto FlightFSM_Event(DISARM_REQUEST) → resets to GROUND_IDLE
+```
 
-Disarm is triggered by:
-- Left-down stick hold (`TASK/RemoterTask.c:72-74,109-113`)
-- Ground station arm clear (`CMD 0x0E` value 0) (`TASK/send_data.c:668-671`)
-- Dangerous stop mode or non-SDK branch in `Update_Motor` (`TASK/StabilizerTask.c:188-197`)
-- Land-complete in SDK state machine (`TASK/AutoflyTask.c:258-264`)
+**ch5 in LAND position while GROUND_IDLE → ignored (Option A).** LAND only valid from FLYING.
 
-SBUS regain does not forcibly disarm by itself; it revokes virtual-stick authority via `sbus_lost` transitions, which can indirectly alter mission/arming behavior.
+---
 
-## FlyMode Coupling
+## IDLE Motor Gate (Update_Motor)
 
-Arming is functionally useful only in `FlyMode_SDK` (`Global_file/global_declare.h:30`) because motor update path rejects other modes and forces zero/disarm (`TASK/StabilizerTask.c:193-197`). `Check_Fly_Mode()` currently maps channel-based dangerous-stop vs SDK (`TASK/RemoterTask.c:120-143`), so FlyMode acts as a hard gate around arming outputs.
+```c
+if (flight_phase == FLIGHT_PHASE_GROUND_IDLE &&
+    !TWC.execute &&
+    RCInput_Get(RC_AXIS_THR) < 0.2f)
+    Set_IDLE_Motors();
+else if (SDK_DelayWakeFlag == 1)
+    Set_IDLE_Motors();
+else
+    Set_PWM_Motors();
+```
 
-## Operational Transition Table
+No altitude threshold. The `GROUND_IDLE` state eliminates the threshold-noise class of bugs. Once in `FLYING`, `Set_PWM_Motors()` is always called regardless of THR — PID holds altitude.
 
-Observed transition behavior from code:
+---
 
-- `DISARMED -> ARMED`  
-  Trigger A: right-down stick hold reaches `ARM_Delay_time` (`TASK/RemoterTask.c:68-70,103-106`)  
-  Trigger B: GS command `0x0E idx0 val!=0` sets armed immediately (`TASK/send_data.c:664-667`)
+## Authority Model
 
-- `ARMED -> DISARMED`  
-  Trigger A: left-down stick hold reaches `DISARM_Delay_time` (`TASK/RemoterTask.c:72-74,109-112`)  
-  Trigger B: GS command `0x0E idx0 val==0` — revokes authority only (drone stays ARMED); pilot disarms via RC gesture  
-  Trigger C: Dangerous stop / non-SDK path in motor updater (`TASK/StabilizerTask.c:188-197`)  
-  Trigger D: SDK land completion (`TASK/AutoflyTask.c:258-264`)
+Authority is **NOT** set by ch5. Only three sources set authority:
+- `CMD 0x0E` from GS → `RCInput_SetAuthority(1)` — VRC / policy mode
+- `ch8 rising edge` (PATH_EXEC_CH) → `RCInput_SetAuthority(1)` — preset path
+- Physical takeover detector (rate-of-change > RC_PHYSICAL_RATE_DELTA) → `RCInput_SetAuthority(0)`
+- Heartbeat watchdog (500ms without CMD 0x06) → `RCInput_SetAuthority(0)`
 
-## Physical RC Prerequisite
+**Physical takeover is always active**, including during policy execution. Moving any stick beyond the rate threshold immediately snaps authority back to 0.
 
-`Check_Fly_Mode()` reads `sbus_channel[9]` at 100 Hz. If the RC mode switch is never HIGH, `DangerousStop_cnt` immediately exceeds 10 → `DANGEROUS_STOP` fires continuously → FSM never leaves EMERGENCY → FlyMode_DangerousStop always.
+---
 
-**The physical RC mode switch must be HIGH before arming.** Once a valid SBUS frame with channel[9] > 500 has been decoded, the value is held in `sbus_channel[9]` even if SBUS is later lost, so a brief SBUS dropout does not kill the mode.
+## Arm Gesture
 
-## Authority Handover on Arm
+`Check_Stick_Motion()` reads physical `Remoter.*` directly (not `RCInput_Get`). No `drone_mode` or `flight_phase` guard on arm gesture — arming from any phase is safe because:
+- ch5 LAND while GROUND_IDLE → LAND event ignored
+- ch5 LAND while FLYING → LAND ramp starts, then LANDED auto-disarms
 
-CMD `0x0E` arm (`send_data.c:694-695`) calls both `FlightFSM_Event(ARM_REQUEST)` and `RCInput_SetAuthority(1)`. After this:
-- Physical RC sticks are suspended from the control loop
-- PC sliders (CMD `0x06`) are accepted and routed by `RCInput_Get()`
-- RC mode switch still works as hard kill (operates on FlyMode, not authority)
+---
 
-CMD `0x0E` disarm (`send_data.c:698-701`) calls `RCInput_SetAuthority(0)` only. Physical RC resumes immediately; drone stays ARMED so the pilot can land safely. `FlightFSM_Event(DISARM_REQUEST)` is NOT sent — calling it mid-air cuts motors.
+## LAND Ramp
 
-## Ambiguities Worth Tracking
+- Step: `LAND_THR_RAMP_STEP = 0.5f` per tick at 200Hz = 100 PWM/s, ~9.5s from hover
+- Snapshot capped at `Throttle_th` (2950) to prevent PID windup spike
+- TWC.execute cleared on LANDING entry
+- Terminates via LANDED detection (altitude rate) OR ramp expiry
 
-Two implementation details can surprise operators:
+---
 
-1. **No explicit hold-time on GS arm request**  
-   GS arm command is immediate (`send_data.c:694`), unlike stick arming which is delay-gated at `ARM_Delay_time = 150` cycles.
-
-2. **Arm and mode are split authorities**  
-   Arming can be set while mode later flips to dangerous stop via RC channel (`TASK/RemoterTask.c:125-143`), causing immediate zero/disarm on next motor update cycle. This is intentional: RC kill switch overrides everything.
-
-3. **Authority is not cleared by DANGEROUS_STOP**  
-   If the RC mode switch is flipped LOW (kill) then back HIGH, the FSM recovers to DISARMED but `s_authority` remains 1 until the GS clicks [ARM REQ OFF] or re-sends CMD `0x0E val=0`. Motors stay stopped (FSM DISARMED) but a new SDK ARM REQ restores full VRC without needing to reset authority.
-
-## See Also
-
-- [[Virtual RC Authority]]
-- [[StabilizerTask]]
-- [[Motor Mixer]]
+**Confidence:** implemented (2026-05-27), reflash pending.
+**Tags:** #arming #idle #land #authority #flight-phase #state-machine

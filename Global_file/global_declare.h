@@ -155,12 +155,6 @@ extern float gs_throttle_max_pct;   /* 0..1 of PWM span above idle */
 /* TWC point-to-point: arrival flag (set in StabilizerTask Update_Des, sent in Frame A) */
 extern volatile uint8_t TWC_arrived;
 
-/* Flight mode driven by SBUS channel 5 (sbus_channel[4]) 3-position switch.
- * 0 = IDLE  : motors armed/spinning, position hold at ground, no TWC ascent.
- * 1 = FLY   : normal position control.
- * 2 = LAND  : smooth Z descent → auto-disarm on touchdown.
- * Written by RemoterTask, read by StabilizerTask. */
-extern volatile uint8_t drone_mode;
 
 /* Set by RemoterTask on SBUS ch7 rising edge to command fly-up to Z=0.5 m.
  * Cleared by StabilizerTask after loading TWC target. */

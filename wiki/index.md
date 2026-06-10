@@ -33,6 +33,8 @@
 - [Tuning Workflow](concepts/tuning-workflow.md) — Step-by-step PID/MRAC tuning via dashboard and VOFA
 - [Adding a Command](concepts/adding-a-command.md) — End-to-end recipe for new CMD IDs
 - [Common Pitfalls](concepts/common-pitfalls.md) — Troubleshooting guide for frequent issues
+- [Graphify Doc Extraction Pattern](concepts/graphify-doc-extraction-pattern.md) — Pattern-based extractor replacing copilot-agent; root cause of JSON errors
+- [Knowledge Gate Enforcement](concepts/knowledge-gate-enforcement.md) — PreToolUse hook (exit 2) forcing knowledge stack before Grep/Glob; context watch turn counter
 
 ## Entities
 
@@ -45,6 +47,8 @@
 ### Control & Actuation
 - [PID Controller](entities/pid-controller.md) — PID algorithm, anti-windup, yaw wrapping, position rotation
 - [Motor Mixer](entities/motor-mixer.md) — Mixer arithmetic to TIM3 CCR outputs
+- [LAND Ramp Spike and IDLE Gate](entities/land-ramp-spike-idle-gate.md) — Two-phase LAND integrator windup spike + authority-gate IDLE failure and fixes
+- [RC Authority, Gesture and LAND Bug Cluster](entities/rc-authority-gesture-land-bugs.md) — TWC persist, virtual-stick gesture block, LAND-mode arm guard, IDLE threshold, ramp free-fall
 - [Timer & PWM Configuration](entities/timer-pwm-config.md) — TIM3 configuration and ESC output range
 
 ### Ground Station

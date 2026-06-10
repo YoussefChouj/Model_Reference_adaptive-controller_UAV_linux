@@ -3,6 +3,7 @@
     "allow": [
       "Bash(ccc search*)",
       "Bash(ccc status*)",
+      "Bash(python .agent_scripts/knowledge_gate.py*)",
       "Read",
       "Write",
       "Grep",
@@ -18,7 +19,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -f graphify-out/graph.json ] && echo 'graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md before searching raw files.' || true"
+            "command": "python .agent_scripts/knowledge_gate.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .agent_scripts/context_watch.py"
           }
         ]
       }

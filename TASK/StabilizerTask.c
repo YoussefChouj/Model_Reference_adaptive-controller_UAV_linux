@@ -17,9 +17,10 @@ unsigned char cnt_h,cnt_loc,cnt_locs,cnt_yaw;
 float Throttle_out,u_gyrox,u_gyroy,u_gyroz;
 short Throttle_th = 2200;
 
-/* LAND ramp: 1.5 PWM/tick at 200 Hz = 300 PWM/s.
- * From hover (~2950) to stop (2000) ≈ 3.2 seconds. */
-#define LAND_THR_RAMP_STEP  1.5f
+/* LAND ramp: 0.5 PWM/tick at 200 Hz = 100 PWM/s.
+ * From hover (~2950) to stop (2000) ≈ 9.5 seconds — gentle enough to
+ * prevent free-fall bounce.  1.5f caused near-free-fall descent. */
+#define LAND_THR_RAMP_STEP  0.5f
 float Cos_Yaw_01= 0;
 float Sin_Yaw_01= 0;
 
@@ -125,80 +126,80 @@ void Update_Data(void)
 *************************************************************************/
 void Update_Motor(void)
 {
-    static float   s_land_thr    = 0.0f;
-    static uint8_t s_land_active = 0U;
+    static float s_land_thr     = 0.0f;
+    static uint8_t s_land_init  = 0U;
+    static int s_stable_ticks   = 0;
 
     FlightState_t state = FlightFSM_GetState();
     if (state == FLIGHT_STATE_ARMED)
     {
-        if (drone_mode == 2U)
+        if (flight_phase == FLIGHT_PHASE_LANDING)
         {
-            if (Ctrler.Z_posPID.FB > 0.3f && !s_land_active)
+            /* Snapshot throttle on first entry — cap to prevent PID windup spike. */
+            if (!s_land_init)
             {
-                /* Stage 1: normal PID descent down to 0.3m */
+                s_land_thr = Throttle_out;
+                if (s_land_thr > (float)Throttle_th) s_land_thr = (float)Throttle_th;
+                if (s_land_thr < 2100.0f) s_land_thr = 2100.0f;
+                s_land_init = 1U;
+            }
+            /* Ramp throttle down */
+            if (s_land_thr > 2000.0f)
+            {
+                s_land_thr -= LAND_THR_RAMP_STEP;
+                if (s_land_thr < 2000.0f) s_land_thr = 2000.0f;
+                mymotor.motor1 = s_land_thr - u_gyroy - u_gyrox + u_gyroz;
+                mymotor.motor2 = s_land_thr + u_gyroy + u_gyrox + u_gyroz;
+                mymotor.motor3 = s_land_thr - u_gyroy + u_gyrox - u_gyroz;
+                mymotor.motor4 = s_land_thr + u_gyroy - u_gyrox - u_gyroz;
                 Set_PWM_Motors();
             }
+            /* LANDED detection: altitude rate stable < 0.02 m/s for 0.25 s (50 ticks at 200 Hz).
+             * Also triggers if ramp fully expires — belt-and-suspenders for no-OF setups. */
+            if (fabsf(Ctrler.Z_ratePID.FB) < 0.02f)
+                s_stable_ticks++;
             else
+                s_stable_ticks = 0;
+            if (s_stable_ticks >= 50 || s_land_thr <= 2000.0f)
             {
-                /* Stage 2: direct throttle ramp below 0.3m, bypassing Z PID.
-                 * Attitude corrections still applied so the drone stays level. */
-                if (!s_land_active)
-                {
-                    s_land_thr    = Throttle_out;
-                    if (s_land_thr < 2100.0f) s_land_thr = 2100.0f;
-                    s_land_active = 1U;
-                }
-                if (s_land_thr > 2000.0f)
-                {
-                    s_land_thr -= LAND_THR_RAMP_STEP;
-                    if (s_land_thr < 2000.0f) s_land_thr = 2000.0f;
-                    mymotor.motor1 = s_land_thr - u_gyroy - u_gyrox + u_gyroz;
-                    mymotor.motor2 = s_land_thr + u_gyroy + u_gyrox + u_gyroz;
-                    mymotor.motor3 = s_land_thr - u_gyroy + u_gyrox - u_gyroz;
-                    mymotor.motor4 = s_land_thr + u_gyroy - u_gyrox - u_gyroz;
-                    Set_PWM_Motors();
-                }
-                else
-                {
-                    s_land_active = 0U;
-                    FlightFSM_Event(FLIGHT_EVENT_DISARM_REQUEST);
-                    Set_Zero_Motors();
-                }
+                s_stable_ticks = 0;
+                s_land_init    = 0U;
+                flight_phase   = FLIGHT_PHASE_LANDED;
+                FlightFSM_Event(FLIGHT_EVENT_DISARM_REQUEST);
+                Set_Zero_Motors();
             }
         }
-        else
+        else if (flight_phase == FLIGHT_PHASE_GROUND_IDLE)
         {
-            s_land_active = 0U;
-            /* SDK IDLE lock: hold motors at idle when GS has authority and no TWC
-             * active. Gated on RCInput_GetAuthority() so manual RC flight still
-             * works when the pilot has control (authority=0, drone_mode=0). */
-            if (drone_mode == 0U && !TWC.execute && Ctrler.Z_posPID.FB < 0.3f
-                && RCInput_GetAuthority())
-            {
+            /* Auto-detect takeoff: transition to FLYING once airborne. */
+            if (Ctrler.Z_posPID.FB > 0.2f)
+                flight_phase = FLIGHT_PHASE_FLYING;
+
+            /* IDLE motors: hold until pilot or policy pushes THR above 20%. */
+            if (!TWC.execute && RCInput_Get(RC_AXIS_THR) < 0.2f)
                 Set_IDLE_Motors();
-            }
-            else if (Ctrler.Z_posPID.FB < 0.3f && RCInput_Get(RC_AXIS_THR) < RC_IDLE_THR_THRESHOLD)
-            {
-                Set_IDLE_Motors();
-            }
             else if (SDK_DelayWakeFlag == 1)
-            {
                 Set_IDLE_Motors();
-            }
             else
-            {
                 Set_PWM_Motors();
-            }
+        }
+        else   /* FLYING (or LANDED pending disarm next tick) */
+        {
+            Set_PWM_Motors();
         }
     }
     else if (state == FLIGHT_STATE_EMERGENCY)
     {
-        s_land_active = 0U;
+        s_land_init    = 0U;
+        s_stable_ticks = 0;
         Set_Zero_Motors();
     }
-    else
+    else   /* DISARMED */
     {
-        s_land_active = 0U;
+        s_land_init    = 0U;
+        s_stable_ticks = 0;
+        TWC.execute = 0U;
+        sbus_flyup_trigger = 0U;
         SDK_StateMachine_Init();
         Clear_Structure();
         Set_Zero_Motors();
@@ -408,30 +409,16 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 				TWC.execute  = 1U;
 			}
 
-			/* LAND mode: Stage 1: Z PID descent down to 0.3m. 
-			 * Stage 2: Freeze Z setpoint so Throttle_out is a stable baseline 
-			 * for the direct throttle ramp in Update_Motor. */
-			if (drone_mode == 2U)
+			/* LANDING/LANDED: freeze Z setpoint — Update_Motor owns throttle directly. */
+			if (flight_phase == FLIGHT_PHASE_LANDING || flight_phase == FLIGHT_PHASE_LANDED)
 			{
 				TWC.execute = 0U;
-				if (Ctrler.Z_posPID.FB > 0.3f)
-				{
-					/* Descend at ~0.2 m/s (0.001 m/cycle at 200 Hz) */
-					if (Ctrler.Z_posPID.Des > 0.0f) {
-						Ctrler.Z_posPID.Des -= 0.001f;
-					}
-				}
-				else
-				{
-					Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
-				}
+				Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
 				break;
 			}
 
-			/* IDLE ground lock: pin Z setpoint when GS has authority and no TWC
-			 * active. Gated on RCInput_GetAuthority() so manual RC flight falls
-			 * through to normal FLY logic when the pilot has control. */
-			if (drone_mode == 0U && !TWC.execute && RCInput_GetAuthority())
+			/* GROUND_IDLE hold: pin Z setpoint until pilot pushes THR above 20%. */
+			if (flight_phase == FLIGHT_PHASE_GROUND_IDLE && !TWC.execute && RCInput_Get(RC_AXIS_THR) < 0.2f)
 			{
 				Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
 				break;
@@ -456,7 +443,7 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
        break;
 			
 		case case_Update_v_h_Des://������ֱ�ٶ�����
-			if (drone_mode == 0U && !TWC.execute && RCInput_GetAuthority())
+			if (flight_phase == FLIGHT_PHASE_GROUND_IDLE && !TWC.execute && RCInput_Get(RC_AXIS_THR) < 0.2f)
 				Ctrler.Z_ratePID.Des = 0.0f;
 			else if(RCInput_IsActive(RC_AXIS_THR))
  				Ctrler.Z_ratePID.Des = RCInput_Get(RC_AXIS_THR) * gs_max_vertical_speed_mps ;

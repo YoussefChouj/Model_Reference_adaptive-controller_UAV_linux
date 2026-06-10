@@ -9,6 +9,20 @@ typedef enum {
     FLIGHT_STATE_EMERGENCY = 2
 } FlightState_t;
 
+/* Sub-phase within FLIGHT_STATE_ARMED.
+ * GROUND_IDLE : motors spinning at idle RPM, drone on ground before takeoff.
+ * FLYING      : drone is airborne, full PID active.
+ * LANDING     : ch5 LAND triggered, throttle ramp committing to touchdown.
+ * LANDED      : altitude stable, auto-disarm fired. */
+typedef enum {
+    FLIGHT_PHASE_GROUND_IDLE = 0,
+    FLIGHT_PHASE_FLYING      = 1,
+    FLIGHT_PHASE_LANDING     = 2,
+    FLIGHT_PHASE_LANDED      = 3
+} FlightPhase_t;
+
+extern volatile FlightPhase_t flight_phase;
+
 typedef enum {
     FLIGHT_EVENT_ARM_REQUEST    = 0,
     FLIGHT_EVENT_DISARM_REQUEST = 1,

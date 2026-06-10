@@ -1,1 +1,1 @@
-{"nodes": [{"id": "data_types", "label": "data_types.h", "file_type": "code", "source_file": "Global_file\\data_types.h", "source_location": "L1"}], "edges": []}
+{"nodes": [{"id": "data_types_h", "label": "data_types.h", "file_type": "file", "source_file": "Global_file/data_types.h"}], "edges": [], "hyperedges": []}
