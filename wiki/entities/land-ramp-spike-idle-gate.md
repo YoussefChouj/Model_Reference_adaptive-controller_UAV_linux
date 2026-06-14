@@ -1,22 +1,31 @@
-## [ENTRY] LAND Ramp Spike and IDLE Authority Gate
+## [ENTRY] LAND Mode — Pure PID Descent Design
+
 **Region**: `TASK/StabilizerTask.c` — `Update_Motor()`, `case_Update_height_Des`, `case_Update_v_h_Des`
-**Trigger**: Arises when testing LAND mode (ch5 high) near the ground (~0.3 m) or when the pilot arms via RC stick gesture and expects to fly manually in IDLE mode (ch5 mid/low).
+**Trigger**: Arises when testing LAND mode (ch5 high). Prior throttle-ramp approach caused upward spike at entry, bounces at touchdown, and unreliable LANDED detection.
 
-**Chain (LAND spike)**:
-Two-phase LAND design → Stage 1 runs Z PID with Des ramping toward 0 → Z rate PID integrator winds up against ground-effect aerodynamic cushion (natural lift increase below ~0.3 m) → Stage 2 triggers at FB < 0.3 m → `Throttle_out` snapshot is inflated by integrator → motors spike upward before ramp corrects → oscillation as motors wind down.
+**Final Architecture (pure PID — ArduPilot/PX4 style)**:
 
-**Chain (IDLE gate)**:
-IDLE gate used `RCInput_GetAuthority()` → after RC arm gesture (no GS involved), `s_authority = 0` → physical-RC takeover detector fired when pilot released gesture stick (rate-of-change of THR from −1.0 to 0.0 exceeded `RC_PHYSICAL_RATE_DELTA = 0.05/tick` after 100 ms grace) → authority never set by RC gesture path → all three IDLE gates permanently blocked → drone hovers or runs PID instead of holding ground idle.
+Landing is split across three places, each with one responsibility:
 
-**Resolution**:
-- **LAND**: Collapsed two-phase to single-phase. `case_Update_height_Des` LAND block sets `Des = FB` immediately (Z PID error → 0, `Throttle_out ≈ Throttle_th ≈ 2950`). `Update_Motor` LAND branch starts direct throttle ramp at any altitude without waiting for 0.3 m; snapshot capped at `Throttle_th` so PID integrator windup cannot inflate ramp start.
-- **IDLE**: Replaced `RCInput_GetAuthority()` with `RCInput_Get(RC_AXIS_THR) < 0.2f` in three locations (`Update_Motor` IDLE gate, `case_Update_height_Des` IDLE gate, `case_Update_v_h_Des` IDLE gate). THR at stick center (0.0) and GS virtual THR (−1.0) both satisfy < 0.2 → IDLE fires. Pilot pushes above 0.2 to escape IDLE and fly.
+1. **`case_Update_height_Des` (LANDING branch)**: Ramps `Z_posPID.Des` down at `LAND_DES_STEP = 0.0015 m/tick` (0.30 m/s at 200 Hz). On entry, snaps `Des = min(Des, FB)` so a setpoint above current altitude cannot pull the drone upward (case A fix). Clamps Des at 0.0f floor.
+
+2. **`case_Update_v_h_Des` (LANDING branch)**: Forces `Z_ratePID.Des = Z_posPID.U` — THR stick is blocked from overriding the PID cascade during landing.
+
+3. **`Update_Motor()` (LANDING branch)**: Calls `Set_PWM_Motors()` — PID drives motors directly, no throttle ramp. During descent the integrator winds negative so `Throttle_out` is already below hover at touchdown. Touchdown detection: `|Z_ratePID.FB| < 0.02 m/s` for 50 ticks (0.25 s) AND `Z_posPID.FB < 0.15 m`. Rate is ≈0.30 m/s during descent and drops to ~0 only on contact, so detection is reliable. Safety net: forced disarm after `LAND_MAX_TICKS = 2000` (10 s).
+
+4. **`Update_Motor()` else branch**: Changed `else` → `else if (FLYING)` so LANDED state does not accidentally call `Set_PWM_Motors()` with a stale high `Throttle_out` (case C micro-jump fix).
+
+**Why not throttle ramp**:
+- Ramp start was inflated by PID integrator → upward spike at entry (case A).
+- Below-0.20 m fast-ramp still caused bounces because residual thrust was wrong.
+- Rate-based LANDED detection was unreliable: drone was hovering at 0 m/s before ramp reached minimum → false fires when not at ground, or slow detection.
+- PID descent naturally produces: (a) nonzero rate during flight → reliable touchdown signal; (b) negative integrator at ground → `Throttle_out` below hover when LANDED fires → no spike.
 
 **Gotchas**:
-- `RC_IDLE_THR_THRESHOLD = -0.85f` (defined in `API/rc_input.h`). The second IDLE check in `Update_Motor` (`FB < 0.3 m && THR < −0.85`) was **not** the bug — it only fires when throttle is nearly at minimum. Misleading when tracing IDLE failures.
-- `Throttle_th` is declared `short` with default 2200 but set to 2950 every cycle in `Compute_Motor()`. Cast to `float` required in the cap comparison: `if (s_land_thr > (float)Throttle_th)`.
-- Execution order matters: `Compute_Motor()` → `Update_Motor()` within `stabilizer_Task()`. The `Des = FB` freeze in `case_Update_height_Des` must happen first so `Throttle_out` is stable when `Update_Motor` snapshots it.
-- The physical-RC takeover detector has a 100 ms grace period (`RC_AUTHORITY_GRACE_TICKS = 10` at 10 ms/tick) after authority is granted. This grace is irrelevant for arm-gesture arming because authority is never granted by that path.
+- `case_Update_height_Des` runs at 200 Hz (before `cnt_h` check); `LAND_DES_STEP = 0.0015 m/tick` gives exactly 0.30 m/s.
+- `LAND_MAX_TICKS = 2000` is the safety net; normal landings complete via rate detection well before 10 s.
+- The LANDED state in `case_Update_height_Des` sets `Des = 0.0f` and is only a one-tick holdover while disarm completes (FlightFSM_Event is synchronous via taskENTER_CRITICAL).
+- The physical-RC takeover detector has a 100 ms grace period (`RC_AUTHORITY_GRACE_TICKS = 10` at 10 ms/tick) after authority is granted. This is irrelevant for arm-gesture arming because authority is never granted by that path.
 
-**Tags**: #landing #idle #motor #pid #authority #rc #ground-effect #stabilizer
-**Confidence**: verified (root cause traced to code; fix applied; reflash pending)
+**Tags**: #landing #motor #pid #ground-effect #stabilizer #casea #casec
+**Confidence**: verified (all root causes traced to code; fix implemented; reflash pending)

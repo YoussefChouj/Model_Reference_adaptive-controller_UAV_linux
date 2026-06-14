@@ -17,10 +17,12 @@ unsigned char cnt_h,cnt_loc,cnt_locs,cnt_yaw;
 float Throttle_out,u_gyrox,u_gyroy,u_gyroz;
 short Throttle_th = 2200;
 
-/* LAND ramp: 0.5 PWM/tick at 200 Hz = 100 PWM/s.
- * From hover (~2950) to stop (2000) ≈ 9.5 seconds — gentle enough to
- * prevent free-fall bounce.  1.5f caused near-free-fall descent. */
-#define LAND_THR_RAMP_STEP  0.5f
+/* LAND setpoint ramp: 0.0015 m/tick at 200 Hz = 0.30 m/s descent rate.
+ * PID follows the setpoint to ground — no throttle ramp needed.
+ * Touchdown detected by Z_ratePID.FB → 0 on frame contact. */
+#define LAND_DES_STEP   0.0015f
+/* Safety net: 2000 ticks at 200 Hz = 10 s max landing time before forced disarm. */
+#define LAND_MAX_TICKS  2000U
 float Cos_Yaw_01= 0;
 float Sin_Yaw_01= 0;
 
@@ -30,6 +32,11 @@ float Sin_pitch_01= 0;
 float Cos_pitch_01= 0;
 //
 TargetSet_WorldReal_Coordinate TWC;
+
+/* Accumulated near-ground sink bias (m/s). Ramps up while drone is stuck against
+ * ground effect; adapts to battery voltage without needing voltage measurement.
+ * Reset on every landing exit so it starts fresh each attempt. */
+static float s_land_sink_bias = 0.0f;
 
 //
 void stabilizer_Task(void)
@@ -126,45 +133,51 @@ void Update_Data(void)
 *************************************************************************/
 void Update_Motor(void)
 {
-    static float s_land_thr     = 0.0f;
-    static uint8_t s_land_init  = 0U;
-    static int s_stable_ticks   = 0;
+    static uint8_t  s_land_init    = 0U;
+    static int      s_stable_ticks = 0;
+    static uint16_t s_land_timeout = 0U;
 
     FlightState_t state = FlightFSM_GetState();
     if (state == FLIGHT_STATE_ARMED)
     {
         if (flight_phase == FLIGHT_PHASE_LANDING)
         {
-            /* Snapshot throttle on first entry — cap to prevent PID windup spike. */
             if (!s_land_init)
             {
-                s_land_thr = Throttle_out;
-                if (s_land_thr > (float)Throttle_th) s_land_thr = (float)Throttle_th;
-                if (s_land_thr < 2100.0f) s_land_thr = 2100.0f;
-                s_land_init = 1U;
-            }
-            /* Ramp throttle down */
-            if (s_land_thr > 2000.0f)
-            {
-                s_land_thr -= LAND_THR_RAMP_STEP;
-                if (s_land_thr < 2000.0f) s_land_thr = 2000.0f;
-                mymotor.motor1 = s_land_thr - u_gyroy - u_gyrox + u_gyroz;
-                mymotor.motor2 = s_land_thr + u_gyroy + u_gyrox + u_gyroz;
-                mymotor.motor3 = s_land_thr - u_gyroy + u_gyrox - u_gyroz;
-                mymotor.motor4 = s_land_thr + u_gyroy - u_gyrox - u_gyroz;
-                Set_PWM_Motors();
-            }
-            /* LANDED detection: altitude rate stable < 0.02 m/s for 0.25 s (50 ticks at 200 Hz).
-             * Also triggers if ramp fully expires — belt-and-suspenders for no-OF setups. */
-            if (fabsf(Ctrler.Z_ratePID.FB) < 0.02f)
-                s_stable_ticks++;
-            else
                 s_stable_ticks = 0;
-            if (s_stable_ticks >= 50 || s_land_thr <= 2000.0f)
+                s_land_timeout = 0U;
+                s_land_init    = 1U;
+            }
+
+            /* PID-controlled descent: Z_posPID.Des ramps down in case_Update_height_Des
+             * at 0.30 m/s; rate cascade follows; Throttle_out drives motors to ground.
+             * Integrator winds negative during descent so Throttle_out is already below
+             * hover at touchdown — no motor spike when LANDED fires. */
+            Set_PWM_Motors();
+
+            /* Touchdown detection: rate stable for 0.25 s AND near ground.
+             * Below 0.20 m a 0.15 m/s sink bias is active, so widen threshold to
+             * 0.08 m/s — the drone decelerates through that on contact.
+             * Above 0.20 m keep tight (0.02 m/s) to avoid false triggers mid-descent.
+             * Safety net: force disarm after LAND_MAX_TICKS (10 s) regardless. */
             {
-                s_stable_ticks = 0;
-                s_land_init    = 0U;
-                flight_phase   = FLIGHT_PHASE_LANDED;
+                float rate_thr = (Ctrler.Z_posPID.FB < 0.20f) ? 0.08f : 0.02f;
+                if (fabsf(Ctrler.Z_ratePID.FB) < rate_thr)
+                    s_stable_ticks++;
+                else
+                    s_stable_ticks = 0;
+            }
+
+            s_land_timeout++;
+
+            if ((s_stable_ticks >= 10 && Ctrler.Z_posPID.FB < 0.15f) ||
+                s_land_timeout >= LAND_MAX_TICKS)
+            {
+                s_stable_ticks    = 0;
+                s_land_timeout    = 0U;
+                s_land_init       = 0U;
+                s_land_sink_bias  = 0.0f;
+                flight_phase      = FLIGHT_PHASE_LANDED;
                 FlightFSM_Event(FLIGHT_EVENT_DISARM_REQUEST);
                 Set_Zero_Motors();
             }
@@ -183,21 +196,27 @@ void Update_Motor(void)
             else
                 Set_PWM_Motors();
         }
-        else   /* FLYING (or LANDED pending disarm next tick) */
+        else if (flight_phase == FLIGHT_PHASE_FLYING)
         {
             Set_PWM_Motors();
         }
+        /* FLIGHT_PHASE_LANDED: disarm was issued this tick; do nothing — motors
+         * were already zeroed by the LANDING block that triggered this transition. */
     }
     else if (state == FLIGHT_STATE_EMERGENCY)
     {
-        s_land_init    = 0U;
-        s_stable_ticks = 0;
+        s_land_init      = 0U;
+        s_stable_ticks   = 0;
+        s_land_timeout   = 0U;
+        s_land_sink_bias = 0.0f;
         Set_Zero_Motors();
     }
     else   /* DISARMED */
     {
-        s_land_init    = 0U;
-        s_stable_ticks = 0;
+        s_land_init      = 0U;
+        s_stable_ticks   = 0;
+        s_land_timeout   = 0U;
+        s_land_sink_bias = 0.0f;
         TWC.execute = 0U;
         sbus_flyup_trigger = 0U;
         SDK_StateMachine_Init();
@@ -409,11 +428,23 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 				TWC.execute  = 1U;
 			}
 
-			/* LANDING/LANDED: freeze Z setpoint — Update_Motor owns throttle directly. */
-			if (flight_phase == FLIGHT_PHASE_LANDING || flight_phase == FLIGHT_PHASE_LANDED)
+			/* LANDING: ramp Z setpoint down at 0.30 m/s (LAND_DES_STEP at 200 Hz).
+			 * Snap Des = min(Des, FB) so a setpoint above current altitude cannot
+			 * pull the drone upward at landing entry (case A fix). */
+			if (flight_phase == FLIGHT_PHASE_LANDING)
 			{
 				TWC.execute = 0U;
-				Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
+				if (Ctrler.Z_posPID.Des > Ctrler.Z_posPID.FB)
+					Ctrler.Z_posPID.Des = Ctrler.Z_posPID.FB;
+				Ctrler.Z_posPID.Des -= LAND_DES_STEP;
+				if (Ctrler.Z_posPID.Des < 0.0f) Ctrler.Z_posPID.Des = 0.0f;
+				break;
+			}
+			/* LANDED: hold setpoint at zero while disarm completes this tick. */
+			if (flight_phase == FLIGHT_PHASE_LANDED)
+			{
+				TWC.execute = 0U;
+				Ctrler.Z_posPID.Des = 0.0f;
 				break;
 			}
 
@@ -443,7 +474,24 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
        break;
 			
 		case case_Update_v_h_Des://������ֱ�ٶ�����
-			if (flight_phase == FLIGHT_PHASE_GROUND_IDLE && !TWC.execute && RCInput_Get(RC_AXIS_THR) < 0.2f)
+			/* Landing: THR stick must not override PID cascade — rate setpoint
+			 * comes exclusively from Z_posPID.U throughout the descent. */
+			if (flight_phase == FLIGHT_PHASE_LANDING || flight_phase == FLIGHT_PHASE_LANDED)
+			{
+				Ctrler.Z_ratePID.Des = Ctrler.Z_posPID.U;
+				/* Progressive sink bias: once setpoint has reached the floor, ramp up
+				 * commanded sink rate while the drone is slow (stuck in ground effect).
+				 * 0.001 m/s per tick at 200 Hz → reaches 0.15 m/s in 0.75 s, max 0.40 m/s.
+				 * Adapts to any battery voltage — no altitude threshold needed. */
+				if (Ctrler.Z_posPID.Des <= 0.01f)
+				{
+					if (fabsf(Ctrler.Z_ratePID.FB) < 0.10f)
+						s_land_sink_bias += 0.001f;
+					if (s_land_sink_bias > 0.40f) s_land_sink_bias = 0.40f;
+					Ctrler.Z_ratePID.Des -= s_land_sink_bias;
+				}
+			}
+			else if (flight_phase == FLIGHT_PHASE_GROUND_IDLE && !TWC.execute && RCInput_Get(RC_AXIS_THR) < 0.2f)
 				Ctrler.Z_ratePID.Des = 0.0f;
 			else if(RCInput_IsActive(RC_AXIS_THR))
  				Ctrler.Z_ratePID.Des = RCInput_Get(RC_AXIS_THR) * gs_max_vertical_speed_mps ;
@@ -466,6 +514,10 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 
 			is_last_pitch_valid = RCInput_IsActive(RC_AXIS_PITCH);
 			is_last_roll_valid = RCInput_IsActive(RC_AXIS_ROLL);
+			/* Manual pitch/roll input cancels TWC XY target so the drone
+			 * does not snap back to the fly-up launch point after ch7. */
+			if (RCInput_IsActive(RC_AXIS_ROLL) || RCInput_IsActive(RC_AXIS_PITCH))
+				TWC.execute = 0U;
 			if(TWC.execute == 1){Ctrler.locxPID.Des = TWC.target_x;Ctrler.locyPID.Des = TWC.target_y;}//��Ŀ���ת��
 			break;
 			

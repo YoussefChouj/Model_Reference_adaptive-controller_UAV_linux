@@ -335,7 +335,13 @@ class Dashboard:
         self._twc_phase: int = 0
         self._twc_final: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
         self._twc_ascent_z: float = 0.0
-        self._twc_arrive_time: float = 0.0   # monotonic timestamp of 0.5m arrival
+        self._twc_arrive_time: float = 0.0       # monotonic timestamp of 0.5m arrival
+        self._twc_final_arrive_time: float = 0.0  # phase-2 final-target arrival timer
+
+        # Auto-recording: started by Execute buttons, stopped by timer / abort / TWC arrival
+        self._auto_log_label: str = ""
+        self._auto_log_params: Dict[str, Any] = {}
+        self._auto_log_timer: Optional[threading.Timer] = None
 
         # XYZ position plots (time-series)
         self._plot_paused: bool = False
@@ -956,25 +962,39 @@ class Dashboard:
             pass
 
     def _twc_phase_update(self) -> None:
-        if self._twc_phase != 1:
+        if self._twc_phase == 0:
             return
         b: Dict[str, float] = dict(self._telem.get("b") or {})
         twc_arr = float(b.get("path.twc_arrived", 0.0))
-        if twc_arr >= 0.5:
-            now = time.monotonic()
-            if self._twc_arrive_time == 0.0:
-                self._twc_arrive_time = now          # record first arrival at 0.5 m
-            elif now - self._twc_arrive_time >= 1.0: # 1-second stabilisation hold
-                self._twc_phase = 2
-                self._twc_arrive_time = 0.0
-                x, y, z, yaw = self._twc_final
-                self._send_cmd(0x0A, 0, x * 100.0)  # m → cm
-                self._send_cmd(0x0A, 1, y * 100.0)  # m → cm
-                self._send_cmd(0x0A, 2, z)
-                self._send_cmd(0x0A, 3, yaw)
-                self._send_cmd(0x0A, 4, 1.0)
-        else:
-            self._twc_arrive_time = 0.0              # left target zone — reset timer
+
+        if self._twc_phase == 1:
+            if twc_arr >= 0.5:
+                now = time.monotonic()
+                if self._twc_arrive_time == 0.0:
+                    self._twc_arrive_time = now          # record first arrival at 0.5 m
+                elif now - self._twc_arrive_time >= 1.0: # 1-second stabilisation hold
+                    self._twc_phase = 2
+                    self._twc_arrive_time = 0.0
+                    x, y, z, yaw = self._twc_final
+                    self._send_cmd(0x0A, 0, x * 100.0)  # m → cm
+                    self._send_cmd(0x0A, 1, y * 100.0)  # m → cm
+                    self._send_cmd(0x0A, 2, z)
+                    self._send_cmd(0x0A, 3, yaw)
+                    self._send_cmd(0x0A, 4, 1.0)
+            else:
+                self._twc_arrive_time = 0.0              # left target zone — reset timer
+        elif self._twc_phase == 2 and self._auto_log_label == "twc":
+            # Detect arrival at final target: twc_arrived high for 2 s → auto-finish log
+            if twc_arr >= 0.5:
+                now = time.monotonic()
+                if self._twc_final_arrive_time == 0.0:
+                    self._twc_final_arrive_time = now
+                elif now - self._twc_final_arrive_time >= 2.0:
+                    self._twc_final_arrive_time = 0.0
+                    self._twc_phase = 0
+                    self._auto_log_finish()
+            else:
+                self._twc_final_arrive_time = 0.0
 
     def _paths_cmd_twc(self) -> None:
         self._path_abort_flag[0] = False
@@ -1020,6 +1040,9 @@ class Dashboard:
             self._send_cmd(0x0A, 2, z)           # Z_posPID operates in metres
             self._send_cmd(0x0A, 3, yaw)
             self._send_cmd(0x0A, 4, 1.0)
+        params: Dict[str, Any] = {"target_x_m": x, "target_y_m": y, "target_z_m": z, "yaw_deg": yaw}
+        self._auto_log_start("twc", params)
+        self._twc_final_arrive_time = 0.0
 
     def _paths_cmd_sinusoid(self) -> None:
         self._path_exec_trace.clear()
@@ -1034,14 +1057,27 @@ class Dashboard:
             axis = float(dpg.get_value("sin_axis"))
         except Exception:
             return
-        self._send_cmd(0x0B, 0, cx)
-        self._send_cmd(0x0B, 1, cy)
+        # locxPID/locyPID operate in cm; Z_posPID operates in m.
+        axis_int = int(round(axis))
+        is_z = (axis_int == 2)
+        self._send_cmd(0x0B, 0, cx if is_z else cx * 100.0)
+        self._send_cmd(0x0B, 1, cy if is_z else cy * 100.0)
         self._send_cmd(0x0B, 2, cz)
-        self._send_cmd(0x0B, 3, amp)
+        self._send_cmd(0x0B, 3, amp if is_z else amp * 100.0)
         self._send_cmd(0x0B, 4, fq)
         self._send_cmd(0x0B, 5, dur)
         self._send_cmd(0x0B, 6, axis)
         self._send_cmd(0x0B, 7, 1.0)
+        params: Dict[str, Any] = {
+            "cx": cx, "cy": cy, "cz": cz,
+            "amplitude_m": amp, "freq_Hz": fq, "duration_s": dur, "axis": int(axis),
+        }
+        self._auto_log_start("sinusoid", params)
+        if self._auto_log_timer is not None:
+            self._auto_log_timer.cancel()
+        t = threading.Timer(dur + 1.0, lambda: self._post_ui_call(self._auto_log_finish))
+        self._auto_log_timer = t
+        t.start()
 
     def _paths_cmd_circle(self) -> None:
         self._path_exec_trace.clear()
@@ -1055,13 +1091,24 @@ class Dashboard:
             dur = float(dpg.get_value("cir_dur"))
         except Exception:
             return
-        self._send_cmd(0x0C, 0, cx)
-        self._send_cmd(0x0C, 1, cy)
+        # locxPID/locyPID operate in cm; center_z and duration are unitless/meters.
+        self._send_cmd(0x0C, 0, cx * 100.0)
+        self._send_cmd(0x0C, 1, cy * 100.0)
         self._send_cmd(0x0C, 2, cz)
-        self._send_cmd(0x0C, 3, r)
+        self._send_cmd(0x0C, 3, r * 100.0)
         self._send_cmd(0x0C, 4, om)
         self._send_cmd(0x0C, 5, dur)
         self._send_cmd(0x0C, 6, 1.0)
+        params: Dict[str, Any] = {
+            "cx": cx, "cy": cy, "cz": cz,
+            "radius_m": r, "omega_rad_s": om, "duration_s": dur,
+        }
+        self._auto_log_start("circle", params)
+        if self._auto_log_timer is not None:
+            self._auto_log_timer.cancel()
+        t = threading.Timer(dur + 1.0, lambda: self._post_ui_call(self._auto_log_finish))
+        self._auto_log_timer = t
+        t.start()
 
     def _paths_clear_trace(self) -> None:
         self._path_exec_trace.clear()
@@ -1096,6 +1143,10 @@ class Dashboard:
         self._path_abort_flag[0] = True
         self._twc_phase = 0
         self._twc_arrive_time = 0.0
+        if self._auto_log_timer is not None:
+            self._auto_log_timer.cancel()
+            self._auto_log_timer = None
+        self._auto_log_finish()
         self._send_cmd(0x0D, 0, 1.0, force=True)
 
         def _late_stop() -> None:
@@ -1511,7 +1562,7 @@ class Dashboard:
             dpg.add_button(
                 label="Abort All / Return to RC",
                 width=180,
-                callback=lambda: self._send_cmd(0x0D, 0, 1.0),
+                callback=self._paths_abort,
             )
             with dpg.tooltip(parent=dpg.last_item()):
                 dpg.add_text(
@@ -1712,7 +1763,7 @@ class Dashboard:
                 dpg.add_button(
                     label="Abort Path (Return to V-RC)",
                     width=200,
-                    callback=lambda: self._send_cmd(0x0D, 0, 1.0),
+                    callback=self._paths_abort,
                 )
                 dpg.add_separator()
                 dpg.add_button(
@@ -1946,7 +1997,7 @@ class Dashboard:
         
         if active_log and active_log.exists():
             def run_analysis():
-                script_path = self.repo_root / "ground_station" / "scripts" / "analyze_flight_log.py"
+                script_path = self.repo_root / "scripts" / "analyze_flight_log.py"
                 if not script_path.exists():
                     self._post_ui_call(dpg.set_value, "txt_diag_status", "Error: analyze_flight_log.py script missing.")
                     self._post_ui_call(dpg.configure_item, "txt_diag_status", color=(255, 50, 50, 255))
@@ -2033,6 +2084,118 @@ class Dashboard:
     def _flight_log_stop(self) -> None:
         self._flight_logger.stop()
         self._recording_flight = False
+
+    # ------------------------------------------------------------------
+    # Auto-recording helpers (triggered by Execute buttons)
+    # ------------------------------------------------------------------
+
+    def _auto_log_start(self, label: str, params: Dict[str, Any]) -> None:
+        """Start auto-recording with a descriptive filename. Stops any current recording first."""
+        if self._auto_log_timer is not None:
+            self._auto_log_timer.cancel()
+            self._auto_log_timer = None
+        if self._recording_flight:
+            self._auto_log_finish()
+        if not self.connected:
+            return
+        self._auto_log_label = label
+        self._auto_log_params = dict(params)
+        ts = int(time.time())
+        logs = self.repo_root / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        fn = logs / f"flight_{label}_{ts}.csv"
+        self._flight_logger.start(fn)
+        self._recording_flight = True
+
+    def _auto_log_finish(self) -> None:
+        """Stop auto-recording and trigger background analysis + summary MD."""
+        if not self._recording_flight:
+            return
+        label = self._auto_log_label
+        params = dict(self._auto_log_params)
+        active_log = self._flight_logger._path
+        self._flight_logger.stop()
+        self._recording_flight = False
+        self._auto_log_label = ""
+        self._auto_log_params = {}
+        if active_log and active_log.exists():
+            threading.Thread(
+                target=self._run_auto_analysis,
+                args=(active_log, label, params),
+                daemon=True,
+            ).start()
+
+    def _paths_abort(self) -> None:
+        """Abort active path (CMD 0x0D) and stop any auto-recording."""
+        self._send_cmd(0x0D, 0, 1.0)
+        if self._auto_log_timer is not None:
+            self._auto_log_timer.cancel()
+            self._auto_log_timer = None
+        self._auto_log_finish()
+
+    def _run_auto_analysis(self, log_path: Path, label: str, params: Dict[str, Any]) -> None:
+        """Background thread: run analyze_flight_log.py, write summary MD, update status."""
+        script = self.repo_root / "scripts" / "analyze_flight_log.py"
+        if not script.exists():
+            self._post_ui_call(
+                dpg.set_value, "txt_diag_status",
+                f"Auto-log saved: {log_path.name} (analyze_flight_log.py not found)",
+            )
+            return
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        out = subprocess.run(
+            [sys.executable, str(script), str(log_path)],
+            capture_output=True, text=True, env=env,
+        )
+        out_dir: Optional[Path] = None
+        for line in out.stdout.splitlines():
+            if "Saving plots to:" in line:
+                candidate = line.split("Saving plots to:")[-1].strip()
+                out_dir = Path(candidate)
+                break
+        if out.returncode == 0 and out_dir is not None and out_dir.exists():
+            self._write_summary_md(out_dir, label, params, log_path)
+            self._post_ui_call(
+                dpg.set_value, "txt_diag_status",
+                f"Auto-analysis done: {label} → {out_dir.name}",
+            )
+            self._post_ui_call(dpg.configure_item, "txt_diag_status", color=(50, 255, 50, 255))
+        else:
+            self._post_ui_call(
+                dpg.set_value, "txt_diag_status",
+                f"Auto-log saved ({label}). Analysis failed — see console.",
+            )
+            self._post_ui_call(dpg.configure_item, "txt_diag_status", color=(255, 200, 50, 255))
+            if out.stderr:
+                print(f"[auto_analysis/{label}] stderr:\n{out.stderr}")
+
+    def _write_summary_md(self, out_dir: Path, label: str, params: Dict[str, Any], log_path: Path) -> None:
+        """Write summary.md into the analysis output directory."""
+        from datetime import datetime
+        lines = [
+            f"# Flight Summary: {label.upper()}",
+            "",
+            f"**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ",
+            f"**Source CSV**: `{log_path.name}`  ",
+            f"**Mode**: `{label}`  ",
+            "",
+            "## Parameters",
+            "",
+        ]
+        for k, v in params.items():
+            lines.append(f"- **{k}**: {v}")
+        lines += [
+            "",
+            "## Plots",
+            "",
+            "See `.png` files in this folder for tracking and MRAC analysis.",
+            "",
+        ]
+        try:
+            (out_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
+        except Exception as exc:
+            print(f"[auto_analysis] could not write summary.md: {exc}")
 
     def _path_mem_start(self) -> None:
         self._recording_path = True
