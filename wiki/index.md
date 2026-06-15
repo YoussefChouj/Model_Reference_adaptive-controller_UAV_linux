@@ -49,6 +49,7 @@
 - [Motor Mixer](entities/motor-mixer.md) — Mixer arithmetic to TIM3 CCR outputs
 - [LAND Ramp Spike and IDLE Gate](entities/land-ramp-spike-idle-gate.md) — Two-phase LAND integrator windup spike + authority-gate IDLE failure and fixes
 - [RC Authority, Gesture and LAND Bug Cluster](entities/rc-authority-gesture-land-bugs.md) — TWC persist, virtual-stick gesture block, LAND-mode arm guard, IDLE threshold, ramp free-fall
+- [Emergency Stick Takeover During Path Modes](entities/emergency-stick-takeover-during-paths.md) — Dashboard arm suppressed physical-stick override; ungated takeover + authority-gated path arbitration
 - [Timer & PWM Configuration](entities/timer-pwm-config.md) — TIM3 configuration and ESC output range
 
 ### Ground Station

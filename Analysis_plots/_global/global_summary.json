@@ -1,0 +1,32 @@
+{
+  "generated": "2026-06-15T13:29:51.177308Z",
+  "modes": {
+    "sinusoid": {
+      "runs": 1,
+      "best_score": null,
+      "best_metric": "-",
+      "champion_run": "-",
+      "leaderboard": [],
+      "latest_run": "exp_flight_sinusoid_1781527210",
+      "latest_score": 54.808106415371746
+    },
+    "twc": {
+      "runs": 14,
+      "best_score": 20.939063541237708,
+      "best_metric": "planar_rmse_cm",
+      "champion_run": "exp_flight_twc_1781526842",
+      "leaderboard": [
+        {
+          "experiment_id": "exp_flight_twc_1781526842",
+          "rank_score": 20.939063541237708,
+          "rank_metric": "planar_rmse_cm",
+          "crosstrack_mean_cm": null,
+          "config_hash": "f0474734a0",
+          "alerts_critical": 0
+        }
+      ],
+      "latest_run": "exp_flight_twc_1781527197",
+      "latest_score": 28.58485250133194
+    }
+  }
+}

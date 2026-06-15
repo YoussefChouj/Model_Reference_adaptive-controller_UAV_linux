@@ -33,6 +33,10 @@ volatile SinusoidPath_t sinusoid_path = {0};
 
 volatile CirclePath_t circle_path = {0};
 
+volatile Figure8Path_t figure8_path = {0};
+
+volatile float waypoint_spacing = 5.0f;  /* default 5 cm waypoint density (loc-PID units = cm); 0 = continuous */
+
 volatile uint8_t GS_KeySDKflag = 0;
 
 

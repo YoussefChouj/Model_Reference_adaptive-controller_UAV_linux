@@ -1,6 +1,7 @@
 #include "AutoflyTask.h"
 #include "math.h"
 #include "flight_fsm.h"
+#include "rc_input.h"
 
 float x_test = 1;
 float y_test = 1;
@@ -15,15 +16,87 @@ int SearchLand_down_cnt = 0;
 
 static void AutoflyTask_PathArbitrate(void)
 {
+	/* No GS path may drive the setpoints unless the GS holds RC authority.
+	 * If the pilot has taken over (physical-stick takeover in RCInput_Update
+	 * dropped authority) or the GS released it, stop every preset so control
+	 * hands cleanly to manual alt/position-hold. */
+	if (!RCInput_GetAuthority()) {
+		sinusoid_path.active = 0U;
+		circle_path.active   = 0U;
+		figure8_path.active  = 0U;
+		TWC.execute          = 0;
+		return;
+	}
+
 	if (sinusoid_path.active) {
 		circle_path.active = 0U;
+		figure8_path.active = 0U;
 		TWC.execute = 0;
 	} else if (circle_path.active) {
 		sinusoid_path.active = 0U;
+		figure8_path.active = 0U;
+		TWC.execute = 0;
+	} else if (figure8_path.active) {
+		sinusoid_path.active = 0U;
+		circle_path.active = 0U;
 		TWC.execute = 0;
 	} else if (TWC.execute != 0) {
 		sinusoid_path.active = 0U;
 		circle_path.active = 0U;
+		figure8_path.active = 0U;
+	}
+}
+
+/* ---- Shared waypoint-density quantizer (reference arc-length accumulator) ----
+ * Holds the committed position setpoint fixed until the CONTINUOUS reference has
+ * travelled waypoint_spacing cm of arc (loc-PID units), then commits the new point. Yaw is
+ * NOT quantized (callers set yaw Des directly). waypoint_spacing<=0 => continuous. */
+static float wp_accum = 0.0f;
+static float wp_last_x = 0.0f, wp_last_y = 0.0f, wp_last_z = 0.0f;
+static uint8_t wp_have_last = 0U;
+
+void AutoflyTask_WaypointReset(void)
+{
+	wp_accum = 0.0f;
+	wp_have_last = 0U;
+}
+
+static void AutoflyTask_CommitRef(float cont_x, float cont_y, float cont_z)
+{
+	float ds = waypoint_spacing;
+	if (ds <= 0.0f) {
+		Ctrler.locxPID.Des = cont_x;
+		Ctrler.locyPID.Des = cont_y;
+		Ctrler.Z_posPID.Des = cont_z;
+		wp_have_last = 0U;
+		wp_accum = 0.0f;
+		return;
+	}
+	if (!wp_have_last) {
+		Ctrler.locxPID.Des = cont_x;
+		Ctrler.locyPID.Des = cont_y;
+		Ctrler.Z_posPID.Des = cont_z;
+		wp_last_x = cont_x;
+		wp_last_y = cont_y;
+		wp_last_z = cont_z;
+		wp_accum = 0.0f;
+		wp_have_last = 1U;
+		return;
+	}
+	{
+		float dx = cont_x - wp_last_x;
+		float dy = cont_y - wp_last_y;
+		float dz = (cont_z - wp_last_z) * 100.0f; /* z is metres; x/y are cm. Scale z to cm so waypoint_spacing (cm) is uniform across all axes (incl. Z-axis sinusoid). */
+		wp_accum += sqrtf(dx * dx + dy * dy + dz * dz);
+	}
+	wp_last_x = cont_x;
+	wp_last_y = cont_y;
+	wp_last_z = cont_z;
+	if (wp_accum >= ds) {
+		Ctrler.locxPID.Des = cont_x;
+		Ctrler.locyPID.Des = cont_y;
+		Ctrler.Z_posPID.Des = cont_z;
+		wp_accum = 0.0f;
 	}
 }
 
@@ -43,9 +116,10 @@ void AutoflyTask_RunCircle(void)
 	circle_path.t_elapsed += dt;
 	circle_path.theta += circle_path.angular_speed * dt;
 
-	Ctrler.locxPID.Des = circle_path.center_x + circle_path.radius * cosf(circle_path.theta);
-	Ctrler.locyPID.Des = circle_path.center_y + circle_path.radius * sinf(circle_path.theta);
-	Ctrler.Z_posPID.Des = circle_path.center_z;
+	AutoflyTask_CommitRef(
+		circle_path.center_x + circle_path.radius * cosf(circle_path.theta),
+		circle_path.center_y + circle_path.radius * sinf(circle_path.theta),
+		circle_path.center_z);
 	Ctrler.yawPID.Des = circle_path.theta * RAD2DEG;
 
 	if (circle_path.duration > 0.0f &&
@@ -73,20 +147,17 @@ void AutoflyTask_RunSinusoid(void)
 	{
 		float off = sinusoid_path.amplitude *
 		            sinf(2.0f * PI * sinusoid_path.frequency * sinusoid_path.t_elapsed);
-		switch (sinusoid_path.axis) {
-			case 0:
-				Ctrler.locxPID.Des = sinusoid_path.center_x + off;
-				Ctrler.locyPID.Des = sinusoid_path.center_y;
-				break;
-			case 1:
-				Ctrler.locxPID.Des = sinusoid_path.center_x;
-				Ctrler.locyPID.Des = sinusoid_path.center_y + off;
-				break;
-			case 2:
-				Ctrler.Z_posPID.Des = sinusoid_path.center_z + off;
-				break;
-			default:
-				break;
+		{
+			float cont_x = sinusoid_path.center_x;
+			float cont_y = sinusoid_path.center_y;
+			float cont_z = sinusoid_path.center_z;
+			switch (sinusoid_path.axis) {
+				case 0: cont_x = sinusoid_path.center_x + off; break;
+				case 1: cont_y = sinusoid_path.center_y + off; break;
+				case 2: cont_z = sinusoid_path.center_z + off; break;
+				default: break;
+			}
+			AutoflyTask_CommitRef(cont_x, cont_y, cont_z);
 		}
 	}
 
@@ -99,6 +170,47 @@ void AutoflyTask_RunSinusoid(void)
 	}
 }
 
+void AutoflyTask_RunFigure8(void)
+{
+	const float dt = 0.005f;
+	float th, cx, cy;
+
+	if (DroneStatus.FlyMode != FlyMode_SDK) {
+		figure8_path.active = 0U;
+		return;
+	}
+
+	if (!figure8_path.active) {
+		return;
+	}
+
+	figure8_path.t_elapsed += dt;
+	figure8_path.theta += figure8_path.angular_speed * dt;
+	th = figure8_path.theta;
+
+	if (figure8_path.type == 1U) {
+		/* Gerono: vertical figure-8 (taller in y) */
+		cx = figure8_path.center_x + 0.5f * figure8_path.amplitude * sinf(2.0f * th);
+		cy = figure8_path.center_y + figure8_path.amplitude * sinf(th);
+	} else {
+		/* Bernoulli: lying infinity (wider in x) */
+		float s = sinf(th);
+		float c = cosf(th);
+		float denom = 1.0f + s * s;
+		cx = figure8_path.center_x + figure8_path.amplitude * c / denom;
+		cy = figure8_path.center_y + figure8_path.amplitude * s * c / denom;
+	}
+
+	AutoflyTask_CommitRef(cx, cy, figure8_path.center_z);
+	Ctrler.yawPID.Des = 0.0f;
+
+	if (figure8_path.duration > 0.0f &&
+	    figure8_path.t_elapsed >= figure8_path.duration) {
+		figure8_path.active = 0U;
+		TWC.execute = 0;
+	}
+}
+
 void AutoflyTask(void)
 {
 	AutoflyTask_PathArbitrate();
@@ -107,6 +219,8 @@ void AutoflyTask(void)
 		AutoflyTask_RunCircle();
 	} else if (sinusoid_path.active) {
 		AutoflyTask_RunSinusoid();
+	} else if (figure8_path.active) {
+		AutoflyTask_RunFigure8();
 	}
 
 	if (((sbus_channel[5] == 1800) && (sbus_channel[4] == 1800) && (sbus_lost == 0)) ) {

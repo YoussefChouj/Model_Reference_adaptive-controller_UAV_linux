@@ -87,3 +87,4 @@
 ..\obj\autoflytask.o: ..\BSP\usart2.h
 ..\obj\autoflytask.o: ..\BSP\usart3.h
 ..\obj\autoflytask.o: ..\API\flight_fsm.h
+..\obj\autoflytask.o: ..\API\rc_input.h

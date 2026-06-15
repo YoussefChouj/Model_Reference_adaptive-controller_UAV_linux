@@ -35,12 +35,14 @@ JUSTFLOAT CHANNEL MAP - Frame A (100 Hz)  --  UDP vofa_port_a (default 1347)
 JUSTFLOAT CHANNEL MAP - Frame B (20 Hz)  --  UDP vofa_port_b (default 1348)
 -------------------------------------------------------------------------------
 Frame B length depends on MAX_NUM_BASIS from the telemetry header.
-Wire format: 16-bit little-endian payload length = (4 * (MAX_NUM_BASIS + 2) + 36) * 4 + 22
-(float block + 22-byte path tail before CRC). Same header for Frame A (payload length 38, last byte = GS_PROTO_VERSION).
+Wire format: 16-bit little-endian payload length = (4 * (MAX_NUM_BASIS + 2) + 36) * 4 + TAIL
+(float block + path tail before CRC). TAIL = 26 (proto v3, adds real_voltage/status.vbat) or
+22 (proto v2). serial_bridge accepts both so plots work before/after reflash.
+Same header for Frame A (payload length 38, last byte = GS_PROTO_VERSION).
 
 Float block channel count: 4 * (MAX_NUM_BASIS + 2) + 36  (this part scales with N).
-Path tail is fixed 22 bytes (not MAX_NUM_BASIS-dependent); serial_bridge unpacks it to 7 extra
-(name, value) pairs appended after all MRAC+PID floats.
+Path tail is fixed 26 bytes in v3 / 22 in v2 (not MAX_NUM_BASIS-dependent); serial_bridge unpacks it to 8
+(v3) or 7 (v2) extra (name, value) pairs appended after all MRAC+PID floats.
 
 The list below is for MAX_NUM_BASIS = 6 (68 float channels I0..I67, then I68..I74 from path tail).
 If MAX_NUM_BASIS = N, MRAC block uses 4*(N+2) floats; PID block stays 36 floats. Indices I0..I(4*(N+2)+35) are the float block; path fields are always the last 7 VOFA channels.
@@ -113,14 +115,15 @@ If MAX_NUM_BASIS = N, MRAC block uses 4*(N+2) floats; PID block stays 36 floats.
 # I65 = pid_locys_FB
 # I66 = pid_locys_Des
 # I67 = pid_locys_U
-# --- Path state (7 channels after float block; indices depend on N) ---
-# I68 = path.active_path_mode   (0=none 1=TWC 2=sinusoid 3=circle)
+# --- Path state (8 channels after float block; indices depend on N) ---
+# I68 = path.active_path_mode   (0=none 1=TWC 2=sinusoid 3=circle 4=figure-8)
 # I69 = path.twc_target_x
 # I70 = path.twc_target_y
 # I71 = path.twc_target_z
 # I72 = path.sinusoid_t_elapsed
 # I73 = path.circle_theta
 # I74 = path.twc_arrived
+# I75 = status.vbat             (battery pack voltage, 4S; added proto v3)
 #
-# For MAX_NUM_BASIS = N: MRAC+PID float block is I0 .. I(4*(N+2)+35). Path fields are the next 7 indices.
-# N=6 example: float block I0..I67, path I68..I74.
+# For MAX_NUM_BASIS = N: MRAC+PID float block is I0 .. I(4*(N+2)+35). Path fields are the next 8 indices.
+# N=6 example: float block I0..I67, path I68..I75.

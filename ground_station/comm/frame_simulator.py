@@ -115,11 +115,12 @@ def build_frame_b(
     st = _sim_path_b_state
     st["t_elapsed"] += 0.02
     st["theta"] += 0.1
-    active_path_mode = int((t_s % 20.0) // 5.0) % 4  # 0?1?2?3, each mode ~5 s
+    active_path_mode = int((t_s % 25.0) // 5.0) % 5  # 0..4, each mode ~5 s (incl. figure-8)
     twc_x, twc_y, twc_z = 1.0, 0.5, 0.7
     twc_arrived = 1 if st["t_elapsed"] > 10.0 else 0
+    vbat = 16.0 + 0.4 * math.sin(0.05 * t_s)  # slow battery sag simulation
     tail = struct.pack(
-        "<BfffffB",
+        "<BfffffBf",
         active_path_mode,
         twc_x,
         twc_y,
@@ -127,6 +128,7 @@ def build_frame_b(
         float(st["t_elapsed"]),
         float(st["theta"]),
         twc_arrived,
+        float(vbat),
     )
     payload = main + tail
     return _pack_telemetry_frame(FRAME_B, max_num_basis, payload)

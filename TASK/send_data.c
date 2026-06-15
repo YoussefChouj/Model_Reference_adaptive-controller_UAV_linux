@@ -333,9 +333,9 @@ void Send_Groundstation_Telemetry_UART4(void)
         // FRAME B �� same 16-bit payload LEN as Frame A
         // MRAC: 4 axes * (MAX_NUM_BASIS + 2) floats
         // PID: 12 loops * 3 floats = 36 floats
-        // Tail: u8 + 3f + f + f + u8 = 22 bytes
+        // Tail: u8 + 3f + f + f + u8 + f(real_voltage) = 26 bytes
         uint8_t total_floats = 4 * (MAX_NUM_BASIS + 2) + 36;
-        uint16_t payload_len = (uint16_t)((uint16_t)total_floats * 4U + 22U);
+        uint16_t payload_len = (uint16_t)((uint16_t)total_floats * 4U + 26U);
         Buf_Telemetry_UART4[2] = 0x02; // ID
         Buf_Telemetry_UART4[3] = (uint8_t)(payload_len >> 8);
         Buf_Telemetry_UART4[4] = (uint8_t)(payload_len & 0xFFU);
@@ -390,6 +390,8 @@ void Send_Groundstation_Telemetry_UART4(void)
                 active_path_mode = 2;
             } else if (circle_path.active) {
                 active_path_mode = 3;
+            } else if (figure8_path.active) {
+                active_path_mode = 4;
             } else if (TWC.execute) {
                 active_path_mode = 1;
             }
@@ -431,6 +433,13 @@ void Send_Groundstation_Telemetry_UART4(void)
                 Buf_Telemetry_UART4[len++] = BYTE3(tf);
             }
             Buf_Telemetry_UART4[len++] = TWC_arrived;
+            {
+                float tf = real_voltage;   /* battery pack voltage (4S), logged as status.vbat */
+                Buf_Telemetry_UART4[len++] = BYTE0(tf);
+                Buf_Telemetry_UART4[len++] = BYTE1(tf);
+                Buf_Telemetry_UART4[len++] = BYTE2(tf);
+                Buf_Telemetry_UART4[len++] = BYTE3(tf);
+            }
         }
     }
     
@@ -467,6 +476,7 @@ static void GroundStation_AbortAllPaths(void)
     TWC.execute = 0;
     sinusoid_path.active = 0U;
     circle_path.active = 0U;
+    figure8_path.active = 0U;
     RCInput_SetAuthority(0U);
     GS_KeySDKflag = 0U;
     FlightFSM_Event(FLIGHT_EVENT_DANGEROUS_STOP);
@@ -626,6 +636,7 @@ void Process_GroundStation_Command(void)
                     taskENTER_CRITICAL();
                     sinusoid_path.active = 1U;
                     sinusoid_path.t_elapsed = 0.0f;
+                    AutoflyTask_WaypointReset();
                     taskEXIT_CRITICAL();
                 } else {
                     sinusoid_path.active = 0U;
@@ -655,10 +666,54 @@ void Process_GroundStation_Command(void)
                     circle_path.active = 1U;
                     circle_path.theta = 0.0f;
                     circle_path.t_elapsed = 0.0f;
+                    AutoflyTask_WaypointReset();
                     taskEXIT_CRITICAL();
                 } else {
                     circle_path.active = 0U;
                 }
+            }
+        }
+
+        /* CMD 0x11 - figure-8 (lemniscate) path (FlyMode_SDK only) */
+        else if (id == 0x11) {
+            if (DroneStatus.FlyMode != FlyMode_SDK) {
+                /* ignore */
+            } else if (idx == 0) {
+                figure8_path.center_x = val;
+            } else if (idx == 1) {
+                figure8_path.center_y = val;
+            } else if (idx == 2) {
+                figure8_path.center_z = val;
+            } else if (idx == 3) {
+                figure8_path.amplitude = val;
+            } else if (idx == 4) {
+                figure8_path.angular_speed = val;
+            } else if (idx == 5) {
+                figure8_path.duration = val;
+            } else if (idx == 6) {
+                figure8_path.type = (uint8_t)(val + 0.5f);
+                if (figure8_path.type > 1U) {
+                    figure8_path.type = 1U;
+                }
+            } else if (idx == 7) {
+                if (((uint8_t)(val + 0.5f)) != 0) {
+                    taskENTER_CRITICAL();
+                    figure8_path.active = 1U;
+                    figure8_path.theta = 0.0f;
+                    figure8_path.t_elapsed = 0.0f;
+                    AutoflyTask_WaypointReset();
+                    taskEXIT_CRITICAL();
+                } else {
+                    figure8_path.active = 0U;
+                }
+            }
+        }
+
+        /* CMD 0x12 - shared waypoint-density spacing (loc-PID units = cm; GUI sends Δs_m*100); 0 = continuous */
+        else if (id == 0x12) {
+            if (idx == 0) {
+                waypoint_spacing = (val < 0.0f) ? 0.0f : val;
+                AutoflyTask_WaypointReset();
             }
         }
 

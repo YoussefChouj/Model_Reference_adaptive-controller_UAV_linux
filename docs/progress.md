@@ -2,6 +2,14 @@
 
 ## Sessions
 
+### 2026-06-15 — Emergency Physical-Stick Takeover During Path Modes
+
+- **Goal**: Fix the bug where the drone ignores physical RC stick movement (needed for emergency intervention) while executing a dashboard-armed path mode.
+- **Completed**: Root-caused and fixed. Dashboard arm (CMD 0x0E) sets `GS_KeySDKflag=1` + authority=1, which permanently suppressed the rate-of-change physical-stick takeover in `RCInput_Update`. Ungated that takeover (now only `!sbus_lost`), cleared `GS_KeySDKflag` on takeover, and added authority gating to `AutoflyTask_PathArbitrate()` so all presets stop when authority drops (clean handoff to manual alt/position-hold). ch10 `DANGEROUS_STOP` hard kill left intact. Firmware rebuilt: 0 Errors, 0 Warnings.
+- **Blocked**: Nothing. Verified by code trace only — no flight test. Reflash pending.
+- **Changed**: `API/rc_input.c` (ungate takeover condition + clear `GS_KeySDKflag`), `TASK/AutoflyTask.c` (`#include "rc_input.h"` + authority-gated path arbitration), rebuilt `OBJ/JX_FLY.{axf,hex}`.
+- **Next**: Reflash `OBJ/JX_FLY.hex`; flight-test fast stick deflection during a path run → confirm path stops + manual control resumes without motor cut. Optionally document in `wiki/concepts/virtual-rc-authority.md`.
+
 ### 2026-04-10 - VOFA Stream Isolation Fix
 
 - **Goal**: Fix VOFA+ context contamination between Frame A (port 1347) and Frame B (port 1348) so each button loads its own independent channel names and tab layout.

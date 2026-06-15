@@ -1,0 +1,508 @@
+{
+  "experiment_id": "exp_flight_sinusoid_1781275730",
+  "timestamp": "2026-06-14T14:42:06.233109Z",
+  "csv_file": "flight_sinusoid_1781275730.csv",
+  "rows_parsed": 13350,
+  "duration_s": 30.947,
+  "firmware_params": {
+    "payload": "PAYLOAD_LIGHT",
+    "mrac_dt": 0.005,
+    "num_basis": 6,
+    "mixer": {
+      "pitch": 1170.0,
+      "roll": 1170.0,
+      "yaw": 1872.0,
+      "z": 222.0
+    },
+    "gamma": {
+      "pitch": [
+        0.5,
+        3.3,
+        1.0,
+        2.0,
+        0.1,
+        1.0
+      ],
+      "roll": [
+        0.5,
+        3.3,
+        1.0,
+        2.0,
+        0.1,
+        1.0
+      ],
+      "yaw": [
+        0.3,
+        2.0,
+        0.7,
+        1.5,
+        0.1,
+        1.0
+      ]
+    },
+    "wlim": {
+      "pitch": [
+        0.5,
+        0.6,
+        0.4,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "roll": [
+        0.5,
+        0.6,
+        0.4,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "yaw": [
+        0.3,
+        0.4,
+        0.2,
+        0.05,
+        0.3,
+        0.2
+      ]
+    },
+    "sigma": {
+      "pitch": "from_config",
+      "roll": "from_config",
+      "yaw": "from_config"
+    },
+    "features": {
+      "projection": true,
+      "sigma_mod": true,
+      "deadzone": true,
+      "l1_filter": true,
+      "pch": true,
+      "perf_recovery": true
+    },
+    "_comment": "Manual overrides for firmware params. Edit before a test session. deep_analysis.py merges this into the experiment record.",
+    "_instructions": "Update the fields below when you change firmware params that aren't in telemetry yet.",
+    "sigma_pitch": null,
+    "sigma_roll": null,
+    "sigma_yaw": null,
+    "omega_u_pitch": null,
+    "omega_u_roll": null,
+    "omega_u_yaw": null,
+    "e_deadzone": null,
+    "e_freeze": 8.0,
+    "notes": ""
+  },
+  "scoreboard": {
+    "pitch": {
+      "rmse": 1.8713971424958462,
+      "rmse_steady": 1.82301095021022,
+      "rmse_transient": 2.14286821167595,
+      "rho_mean": 18.514514638386004,
+      "rho_p95": 37.71897714,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.19185641758208252,
+      "alerts_critical": 1,
+      "alerts_warn": 1
+    },
+    "roll": {
+      "rmse": 1.030340135426193,
+      "rmse_steady": 1.014553357470228,
+      "rmse_transient": 0.9644058681201707,
+      "rho_mean": 32.48508164538,
+      "rho_p95": 48.67510418549998,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.10137652435860368,
+      "alerts_critical": 1,
+      "alerts_warn": 1
+    },
+    "yaw": {
+      "rmse": 0.8392026659158633,
+      "rmse_steady": 0.8141182589418429,
+      "rmse_transient": null,
+      "rho_mean": 21.559936812959997,
+      "rho_p95": 33.870266351999994,
+      "phase_relationship": "reinforcing",
+      "weight_norm_final": 0.100467637454243,
+      "alerts_critical": 1,
+      "alerts_warn": 2
+    },
+    "z": {
+      "rmse": 0.020876760362624203,
+      "rmse_steady": 0.016597092773609982,
+      "rmse_transient": null,
+      "rho_mean": 22.15668866136,
+      "rho_p95": 31.682186765999965,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.2795111764453048,
+      "alerts_critical": 1,
+      "alerts_warn": 2
+    }
+  },
+  "diagnostics": {
+    "pitch": {
+      "authority": {
+        "rho_mean": 18.514514638386004,
+        "rho_median": 18.66363525,
+        "rho_peak": 46.062651960000004,
+        "rho_p95": 37.71897714,
+        "u_ad_rms_mixer": 22.627878412817193,
+        "u_nom_rms": 0.09346318913115303,
+        "u_ad_peak_mixer": 46.062651960000004,
+        "u_nom_peak": 0.18026415
+      },
+      "tracking": {
+        "rmse": 1.8713971424958462,
+        "mae": 1.8430717891592001,
+        "peak_error": 2.9439997200000003,
+        "rmse_steady": 1.82301095021022,
+        "rmse_transient": 2.14286821167595,
+        "num_samples": 150,
+        "duration_s": 30.947
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.0042868871,
+            "drift_rate": -5.378492811190432e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 2.068051830549003
+          },
+          {
+            "index": 1,
+            "theta_final": 0.00028447388,
+            "drift_rate": 2.669300093925666e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.809545351730378
+          },
+          {
+            "index": 2,
+            "theta_final": 0.001656913,
+            "drift_rate": -5.8135581344409625e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 2.035738520696675
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0016130933,
+            "drift_rate": 4.076849520151196e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.8401460561605325
+          },
+          {
+            "index": 4,
+            "theta_final": 0.13256463,
+            "drift_rate": 0.0005752933475615738,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.743206126603548
+          },
+          {
+            "index": 5,
+            "theta_final": 0.13860627,
+            "drift_rate": 8.641362274033113e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.0017126054221734
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.19185641758208252,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": -0.08988459485555211,
+        "relationship": "decoupled"
+      },
+      "alerts": [
+        {
+          "level": "WARN",
+          "code": "HIGH_AUTHORITY",
+          "message": "pitch: MRAC-dominant (\u03c1=18.51). PID gains may be insufficient."
+        },
+        {
+          "level": "CRITICAL",
+          "code": "NEAR_SATURATION",
+          "message": "pitch: MRAC near saturation (\u03c1_p95=37.72). Reduce gamma or increase u_max."
+        }
+      ]
+    },
+    "roll": {
+      "authority": {
+        "rho_mean": 32.48508164538,
+        "rho_median": 31.979307555,
+        "rho_peak": 57.992176709999995,
+        "rho_p95": 48.67510418549998,
+        "u_ad_rms_mixer": 34.10587621865235,
+        "u_nom_rms": 0.08028229570642882,
+        "u_ad_peak_mixer": 57.992176709999995,
+        "u_nom_peak": 0.14479177
+      },
+      "tracking": {
+        "rmse": 1.030340135426193,
+        "mae": 0.8251210481266666,
+        "peak_error": 2.2724399999999996,
+        "rmse_steady": 1.014553357470228,
+        "rmse_transient": 0.9644058681201707,
+        "num_samples": 150,
+        "duration_s": 30.947
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.028662898,
+            "drift_rate": 0.0003543349805863842,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.7449187320257213
+          },
+          {
+            "index": 1,
+            "theta_final": 0.00037411074,
+            "drift_rate": 1.1777159339354261e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.7449187320257213
+          },
+          {
+            "index": 2,
+            "theta_final": 0.0030471522,
+            "drift_rate": 6.918165051418624e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.1955924645361424
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0013891895,
+            "drift_rate": 2.9533544810355736e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.7755194364558762
+          },
+          {
+            "index": 4,
+            "theta_final": 0.068100959,
+            "drift_rate": 0.00031123253626396443,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.743206126603548
+          },
+          {
+            "index": 5,
+            "theta_final": 0.069329232,
+            "drift_rate": 0.00011482104970060499,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.486412253207096
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.10137652435860368,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": -0.046059781052938356,
+        "relationship": "decoupled"
+      },
+      "alerts": [
+        {
+          "level": "WARN",
+          "code": "HIGH_AUTHORITY",
+          "message": "roll: MRAC-dominant (\u03c1=32.49). PID gains may be insufficient."
+        },
+        {
+          "level": "CRITICAL",
+          "code": "NEAR_SATURATION",
+          "message": "roll: MRAC near saturation (\u03c1_p95=48.68). Reduce gamma or increase u_max."
+        }
+      ]
+    },
+    "yaw": {
+      "authority": {
+        "rho_mean": 21.559936812959997,
+        "rho_median": 20.14018344,
+        "rho_peak": 37.826964864000004,
+        "rho_p95": 33.870266351999994,
+        "u_ad_rms_mixer": 22.49347920084074,
+        "u_nom_rms": 0.032288604118346005,
+        "u_ad_peak_mixer": 37.826964864000004,
+        "u_nom_peak": 0.072299995
+      },
+      "tracking": {
+        "rmse": 0.8392026659158633,
+        "mae": 0.7753928908666665,
+        "peak_error": 1.5229769,
+        "rmse_steady": 0.8141182589418429,
+        "rmse_transient": null,
+        "num_samples": 150,
+        "duration_s": 30.947
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 2.6409728e-16,
+            "drift_rate": -2.5105646299471543e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.8078327463082043
+          },
+          {
+            "index": 1,
+            "theta_final": 0.001455065,
+            "drift_rate": 3.8679912028051185e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.680292112321065
+          },
+          {
+            "index": 2,
+            "theta_final": 0.00065576221,
+            "drift_rate": -1.2659277286496694e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.743206126603548
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0,
+            "drift_rate": 0.0,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 4,
+            "theta_final": 0.048239339,
+            "drift_rate": 0.00014041403439151898,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.743206126603548
+          },
+          {
+            "index": 5,
+            "theta_final": 0.0881145,
+            "drift_rate": 6.500500182352618e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.1955924645361424
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.100467637454243,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": 0.5957187435417646,
+        "relationship": "reinforcing"
+      },
+      "alerts": [
+        {
+          "level": "WARN",
+          "code": "HIGH_AUTHORITY",
+          "message": "yaw: MRAC-dominant (\u03c1=21.56). PID gains may be insufficient."
+        },
+        {
+          "level": "CRITICAL",
+          "code": "NEAR_SATURATION",
+          "message": "yaw: MRAC near saturation (\u03c1_p95=33.87). Reduce gamma or increase u_max."
+        },
+        {
+          "level": "WARN",
+          "code": "REDUNDANT_EFFORT",
+          "message": "yaw: MRAC reinforcing PID (r=0.60) with significant authority. PID may need retuning."
+        }
+      ]
+    },
+    "z": {
+      "authority": {
+        "rho_mean": 22.15668866136,
+        "rho_median": 21.09314241,
+        "rho_peak": 44.016623759999995,
+        "rho_p95": 31.682186765999965,
+        "u_ad_rms_mixer": 22.997267614395113,
+        "u_nom_rms": 0.3552926792963868,
+        "u_ad_peak_mixer": 44.016623759999995,
+        "u_nom_peak": 0.81811172
+      },
+      "tracking": {
+        "rmse": 0.020876760362624203,
+        "mae": 0.01578137666666666,
+        "peak_error": 0.03999668000000001,
+        "rmse_steady": 0.016597092773609982,
+        "rmse_transient": null,
+        "num_samples": 150,
+        "duration_s": 30.947
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.0020399655,
+            "drift_rate": 4.3776509964914544e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.647978802468737
+          },
+          {
+            "index": 1,
+            "theta_final": 0.0036780564,
+            "drift_rate": -9.511315663588296e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.809545351730378
+          },
+          {
+            "index": 2,
+            "theta_final": 0.0009350779,
+            "drift_rate": -1.7159893145374697e-06,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 1.5187255630594243
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0,
+            "drift_rate": 0.0,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 4,
+            "theta_final": 0.19861829,
+            "drift_rate": -1.014834563046726e-05,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 2.003425210844347
+          },
+          {
+            "index": 5,
+            "theta_final": 0.19661818,
+            "drift_rate": -1.2556078473093254e-05,
+            "projection_hits_frac": 1.0,
+            "zero_crossings_per_sec": 1.5833521827640806
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.2795111764453048,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": 0.22467583125269006,
+        "relationship": "decoupled"
+      },
+      "alerts": [
+        {
+          "level": "WARN",
+          "code": "HIGH_AUTHORITY",
+          "message": "z: MRAC-dominant (\u03c1=22.16). PID gains may be insufficient."
+        },
+        {
+          "level": "CRITICAL",
+          "code": "NEAR_SATURATION",
+          "message": "z: MRAC near saturation (\u03c1_p95=31.68). Reduce gamma or increase u_max."
+        },
+        {
+          "level": "WARN",
+          "code": "PROJECTION_ACTIVE",
+          "message": "z: Weight[5] hitting projection bound 100% of time. Disturbance may exceed budget."
+        }
+      ]
+    }
+  },
+  "meta": {
+    "analyzer_version": "1.0.0",
+    "analysis_timestamp": "2026-06-14T14:42:06.233109Z"
+  }
+}

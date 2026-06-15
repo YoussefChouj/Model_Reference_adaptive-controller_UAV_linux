@@ -1,0 +1,557 @@
+{
+  "experiment_id": "exp_flight_twc_1781526913",
+  "timestamp": "2026-06-15T13:28:42.494220Z",
+  "csv_file": "flight_twc_1781526913.csv",
+  "rows_parsed": 990,
+  "duration_s": 2.0818,
+  "firmware_params": {
+    "payload": "PAYLOAD_LIGHT",
+    "mrac_dt": 0.005,
+    "num_basis": 6,
+    "mixer": {
+      "pitch": 1170.0,
+      "roll": 1170.0,
+      "yaw": 1872.0,
+      "z": 222.0
+    },
+    "gamma": {
+      "pitch": [
+        0.5,
+        3.3,
+        1.0,
+        2.0,
+        0.1,
+        1.0
+      ],
+      "roll": [
+        0.5,
+        3.3,
+        1.0,
+        2.0,
+        0.1,
+        1.0
+      ],
+      "yaw": [
+        0.3,
+        2.0,
+        0.7,
+        1.5,
+        0.1,
+        1.0
+      ]
+    },
+    "wlim": {
+      "pitch": [
+        0.5,
+        0.6,
+        0.4,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "roll": [
+        0.5,
+        0.6,
+        0.4,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "yaw": [
+        0.3,
+        0.4,
+        0.2,
+        0.05,
+        0.3,
+        0.2
+      ]
+    },
+    "sigma": {
+      "pitch": "from_config",
+      "roll": "from_config",
+      "yaw": "from_config"
+    },
+    "features": {
+      "projection": true,
+      "sigma_mod": true,
+      "deadzone": true,
+      "l1_filter": true,
+      "pch": true,
+      "perf_recovery": true
+    },
+    "_comment": "Manual overrides for firmware params. Edit before a test session. deep_analysis.py merges this into the experiment record.",
+    "_instructions": "Update the fields below when you change firmware params that aren't in telemetry yet.",
+    "sigma_pitch": null,
+    "sigma_roll": null,
+    "sigma_yaw": null,
+    "omega_u_pitch": null,
+    "omega_u_roll": null,
+    "omega_u_yaw": null,
+    "e_deadzone": null,
+    "e_freeze": 8.0,
+    "notes": ""
+  },
+  "scoreboard": {
+    "pitch": {
+      "rmse": 1.8042520800000001,
+      "rmse_steady": 1.8042520800000001,
+      "rmse_transient": null,
+      "rho_mean": 0.24984156475564828,
+      "rho_p95": 0.24984156475564823,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.23242580379601305,
+      "alerts_critical": 0,
+      "alerts_warn": 0
+    },
+    "roll": {
+      "rmse": 0.23941900000000027,
+      "rmse_steady": 0.23941900000000027,
+      "rmse_transient": null,
+      "rho_mean": 0.9364660003889735,
+      "rho_p95": 0.9364660003889735,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.21424108669135536,
+      "alerts_critical": 1,
+      "alerts_warn": 1
+    },
+    "yaw": {
+      "rmse": 0.22207799999999978,
+      "rmse_steady": 0.22207799999999978,
+      "rmse_transient": null,
+      "rho_mean": 0.24491382582907784,
+      "rho_p95": 0.24491382582907778,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.14174069414800908,
+      "alerts_critical": 0,
+      "alerts_warn": 0
+    },
+    "z": {
+      "rmse": 0.00947458000000001,
+      "rmse_steady": 0.00947458000000001,
+      "rmse_transient": null,
+      "rho_mean": 0.8201960748593004,
+      "rho_p95": 0.8201960748593004,
+      "phase_relationship": "decoupled",
+      "weight_norm_final": 0.2960753386589226,
+      "alerts_critical": 0,
+      "alerts_warn": 1
+    }
+  },
+  "diagnostics": {
+    "pitch": {
+      "authority": {
+        "rho_mean": 0.24984156475564828,
+        "rho_median": 0.24984156475564823,
+        "rho_peak": 0.24984156475564823,
+        "rho_p95": 0.24984156475564823,
+        "u_ad_rms_mixer": 43.20967599,
+        "u_nom_rms": 0.11088672,
+        "u_ad_peak_mixer": 43.20967599,
+        "u_nom_peak": 0.11088672
+      },
+      "tracking": {
+        "rmse": 1.8042520800000001,
+        "mae": 1.8042520800000004,
+        "peak_error": 1.8042520800000001,
+        "rmse_steady": 1.8042520800000001,
+        "rmse_transient": null,
+        "num_samples": 11,
+        "duration_s": 2.0818
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.00036138753,
+            "drift_rate": 6.881446504429261e-20,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 1,
+            "theta_final": 0.0010785873,
+            "drift_rate": 2.7720120908549517e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 2,
+            "theta_final": 0.00222266,
+            "drift_rate": 2.617930913873131e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0067116749,
+            "drift_rate": 1.61457100084191e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 4,
+            "theta_final": 0.18214843,
+            "drift_rate": -1.7295748449184223e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 5,
+            "theta_final": 0.14419578,
+            "drift_rate": 2.932616403596744e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.23242580379601305,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": 0.0,
+        "relationship": "decoupled"
+      },
+      "alerts": []
+    },
+    "roll": {
+      "authority": {
+        "rho_mean": 0.9364660003889735,
+        "rho_median": 0.9364660003889735,
+        "rho_peak": 0.9364660003889735,
+        "rho_p95": 0.9364660003889735,
+        "u_ad_rms_mixer": 52.28283410999999,
+        "u_nom_rms": 0.0030307085,
+        "u_ad_peak_mixer": 52.282834109999996,
+        "u_nom_peak": 0.0030307085
+      },
+      "tracking": {
+        "rmse": 0.23941900000000027,
+        "mae": 0.23941900000000027,
+        "peak_error": 0.23941900000000027,
+        "rmse_steady": 0.23941900000000027,
+        "rmse_transient": null,
+        "num_samples": 11,
+        "duration_s": 2.0818
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.027731288,
+            "drift_rate": -5.815091606087237e-20,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 1,
+            "theta_final": 8.7411434e-05,
+            "drift_rate": 1.0234714413779996e-20,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 2,
+            "theta_final": 0.0070494902,
+            "drift_rate": 1.184712915256904e-18,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0025718126,
+            "drift_rate": 1.2927518431174512e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 4,
+            "theta_final": 0.16651264,
+            "drift_rate": 6.565705415008026e-18,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 5,
+            "theta_final": 0.13170969,
+            "drift_rate": 2.753081685582623e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.21424108669135536,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": 0.0,
+        "relationship": "decoupled"
+      },
+      "alerts": [
+        {
+          "level": "WARN",
+          "code": "HIGH_AUTHORITY",
+          "message": "roll: MRAC-dominant (\u03c1=0.94). PID gains may be insufficient."
+        },
+        {
+          "level": "CRITICAL",
+          "code": "NEAR_SATURATION",
+          "message": "roll: MRAC near saturation (\u03c1_p95=0.94). Reduce gamma or increase u_max."
+        }
+      ]
+    },
+    "yaw": {
+      "authority": {
+        "rho_mean": 0.24491382582907784,
+        "rho_median": 0.24491382582907778,
+        "rho_peak": 0.24491382582907778,
+        "rho_p95": 0.24491382582907778,
+        "u_ad_rms_mixer": 8.789321735999998,
+        "u_nom_rms": 0.014474472,
+        "u_ad_peak_mixer": 8.789321736,
+        "u_nom_peak": 0.014474472
+      },
+      "tracking": {
+        "rmse": 0.22207799999999978,
+        "mae": 0.22207799999999978,
+        "peak_error": 0.22207799999999978,
+        "rmse_steady": 0.22207799999999978,
+        "rmse_transient": null,
+        "num_samples": 11,
+        "duration_s": 2.0818
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.0035975254,
+            "drift_rate": 9.58512517147262e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 1,
+            "theta_final": 0.0012300531,
+            "drift_rate": 3.1498417396611923e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 2,
+            "theta_final": 0.0012482298,
+            "drift_rate": 2.6463392359273947e-19,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0,
+            "drift_rate": 0.0,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 4,
+            "theta_final": 0.11431915,
+            "drift_rate": 3.0896513852057394e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 5,
+            "theta_final": 0.083699122,
+            "drift_rate": 1.1276410490108103e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.14174069414800908,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": 0.0,
+        "relationship": "decoupled"
+      },
+      "alerts": []
+    },
+    "z": {
+      "authority": {
+        "rho_mean": 0.8201960748593004,
+        "rho_median": 0.8201960748593004,
+        "rho_peak": 0.8201960748593004,
+        "rho_p95": 0.8201960748593004,
+        "u_ad_rms_mixer": 39.9197958,
+        "u_nom_rms": 0.039419018,
+        "u_ad_peak_mixer": 39.9197958,
+        "u_nom_peak": 0.039419018
+      },
+      "tracking": {
+        "rmse": 0.00947458000000001,
+        "mae": 0.00947458000000001,
+        "peak_error": 0.00947458000000001,
+        "rmse_steady": 0.00947458000000001,
+        "rmse_transient": null,
+        "num_samples": 11,
+        "duration_s": 2.0818
+      },
+      "weights": {
+        "num_basis": 6,
+        "per_weight": [
+          {
+            "index": 0,
+            "theta_final": 0.17637262,
+            "drift_rate": -1.7616253714241244e-18,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 1,
+            "theta_final": 2.6286378e-05,
+            "drift_rate": 7.28664730379696e-21,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 2,
+            "theta_final": 0.002576079,
+            "drift_rate": -2.973042506999513e-20,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 3,
+            "theta_final": 0.0,
+            "drift_rate": 0.0,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 4,
+            "theta_final": 0.19774045,
+            "drift_rate": 3.383631516741389e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          },
+          {
+            "index": 5,
+            "theta_final": 0.13208097,
+            "drift_rate": 4.250329246718893e-17,
+            "projection_hits_frac": 0.0,
+            "zero_crossings_per_sec": 0.0
+          }
+        ],
+        "frozen_frac": 0.0,
+        "weight_norm_final": 0.2960753386589226,
+        "weight_norm_increasing": false
+      },
+      "spectral": null,
+      "phase": {
+        "xcorr_lag0": 0.0,
+        "relationship": "decoupled"
+      },
+      "alerts": [
+        {
+          "level": "WARN",
+          "code": "HIGH_AUTHORITY",
+          "message": "z: MRAC-dominant (\u03c1=0.82). PID gains may be insufficient."
+        }
+      ]
+    }
+  },
+  "meta": {
+    "analyzer_version": "1.0.0",
+    "analysis_timestamp": "2026-06-15T13:28:42.494220Z"
+  },
+  "mode": "twc",
+  "params": {},
+  "path_geometry": {
+    "mode": "twc",
+    "position_tracking": {
+      "x": {
+        "rmse": 3.2120812901161,
+        "mae": 3.2120812901161004,
+        "peak_error": 3.2120812901161,
+        "rmse_steady": 3.2120812901161,
+        "rmse_transient": null
+      },
+      "y": {
+        "rmse": 24.529874999999997,
+        "mae": 24.529875,
+        "peak_error": 24.529875,
+        "rmse_steady": 24.529875,
+        "rmse_transient": null
+      },
+      "z": {
+        "rmse": 0.00947458000000001,
+        "mae": 0.00947458000000001,
+        "peak_error": 0.00947458000000001,
+        "rmse_steady": 0.00947458000000001,
+        "rmse_transient": null
+      }
+    },
+    "planar_rmse_cm": 24.739285230781,
+    "planar_peak_cm": 24.739285230781,
+    "tracking_decomp": {
+      "x": {
+        "reference": "static",
+        "bias_cm": -3.2120812901161004,
+        "total_rmse_cm": 3.2120812901161
+      },
+      "y": {
+        "reference": "static",
+        "bias_cm": 24.529875,
+        "total_rmse_cm": 24.529874999999997
+      }
+    },
+    "yaw_drift": {
+      "cmd_deg": 30.0,
+      "mean_offset_deg": -0.22207799999999978,
+      "final_offset_deg": -0.22207799999999978,
+      "drift_rate_deg_s": -2.838786144729614e-17,
+      "total_drift_deg": -5.90978499609811e-17,
+      "peak_to_peak_deg": 0.0
+    },
+    "settling": {
+      "initial_err_cm": 24.739285037308434,
+      "final_err_cm": 24.739285037308434,
+      "peak_err_cm": 24.739285037308434,
+      "settling_band_cm": 5.0,
+      "settling_time_s": null
+    },
+    "settling_s": null,
+    "rank_score": 24.739285230781,
+    "rank_metric": "planar_rmse_cm"
+  },
+  "context": {
+    "duration_s": 2.082,
+    "samples": 11,
+    "median_dt_s": 0.20760000000000006,
+    "max_gap_s": 0.21700000000000008,
+    "vbat_start": 0.0,
+    "vbat_end": 0.0,
+    "vbat_drop": 0.0,
+    "events": []
+  },
+  "verdict": [
+    "Planar XY tracking RMSE was **24.7 cm** (peak 24.7 cm).",
+    "Worst-tracked position axis was **Y** (RMSE 24.53 cm).",
+    "**Never settled** within 5 cm of target (final error 24.7 cm).",
+    "\u26a0 **1 CRITICAL** MRAC alert(s) \u2014 run is INELIGIBLE as a champion until resolved.",
+    "MRAC was most active on **roll** (\u03c1_mean 0.94)."
+  ],
+  "champion_delta": {
+    "mode": "twc",
+    "config_hash": "f0474734a0",
+    "prev_config_best": 20.939063541237708,
+    "new_config_champion": false,
+    "prev_overall_best": 20.939063541237708,
+    "overall_best": 20.939063541237708,
+    "is_overall_champion": false
+  }
+}

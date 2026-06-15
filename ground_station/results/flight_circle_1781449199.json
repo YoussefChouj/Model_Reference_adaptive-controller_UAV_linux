@@ -1,0 +1,212 @@
+{
+  "experiment_id": "exp_flight_circle_1781449199",
+  "timestamp": "2026-06-15T12:18:02.829841Z",
+  "csv_file": "flight_circle_1781449199.csv",
+  "rows_parsed": 2772,
+  "duration_s": 0.0,
+  "firmware_params": {
+    "payload": "PAYLOAD_LIGHT",
+    "mrac_dt": 0.005,
+    "num_basis": 6,
+    "mixer": {
+      "pitch": 1170.0,
+      "roll": 1170.0,
+      "yaw": 1872.0,
+      "z": 222.0
+    },
+    "gamma": {
+      "pitch": [
+        0.5,
+        3.3,
+        1.0,
+        2.0,
+        0.1,
+        1.0
+      ],
+      "roll": [
+        0.5,
+        3.3,
+        1.0,
+        2.0,
+        0.1,
+        1.0
+      ],
+      "yaw": [
+        0.3,
+        2.0,
+        0.7,
+        1.5,
+        0.1,
+        1.0
+      ]
+    },
+    "wlim": {
+      "pitch": [
+        0.5,
+        0.6,
+        0.4,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "roll": [
+        0.5,
+        0.6,
+        0.4,
+        0.1,
+        0.4,
+        0.2
+      ],
+      "yaw": [
+        0.3,
+        0.4,
+        0.2,
+        0.05,
+        0.3,
+        0.2
+      ]
+    },
+    "sigma": {
+      "pitch": "from_config",
+      "roll": "from_config",
+      "yaw": "from_config"
+    },
+    "features": {
+      "projection": true,
+      "sigma_mod": true,
+      "deadzone": true,
+      "l1_filter": true,
+      "pch": true,
+      "perf_recovery": true
+    },
+    "_comment": "Manual overrides for firmware params. Edit before a test session. deep_analysis.py merges this into the experiment record.",
+    "_instructions": "Update the fields below when you change firmware params that aren't in telemetry yet.",
+    "sigma_pitch": null,
+    "sigma_roll": null,
+    "sigma_yaw": null,
+    "omega_u_pitch": null,
+    "omega_u_roll": null,
+    "omega_u_yaw": null,
+    "e_deadzone": null,
+    "e_freeze": 8.0,
+    "notes": ""
+  },
+  "scoreboard": {
+    "pitch": {
+      "rmse": null,
+      "rmse_steady": null,
+      "rmse_transient": null,
+      "rho_mean": null,
+      "rho_p95": null,
+      "phase_relationship": null,
+      "weight_norm_final": null,
+      "alerts_critical": 0,
+      "alerts_warn": 0
+    },
+    "roll": {
+      "rmse": null,
+      "rmse_steady": null,
+      "rmse_transient": null,
+      "rho_mean": null,
+      "rho_p95": null,
+      "phase_relationship": null,
+      "weight_norm_final": null,
+      "alerts_critical": 0,
+      "alerts_warn": 0
+    },
+    "yaw": {
+      "rmse": null,
+      "rmse_steady": null,
+      "rmse_transient": null,
+      "rho_mean": null,
+      "rho_p95": null,
+      "phase_relationship": null,
+      "weight_norm_final": null,
+      "alerts_critical": 0,
+      "alerts_warn": 0
+    },
+    "z": {
+      "rmse": null,
+      "rmse_steady": null,
+      "rmse_transient": null,
+      "rho_mean": null,
+      "rho_p95": null,
+      "phase_relationship": null,
+      "weight_norm_final": null,
+      "alerts_critical": 0,
+      "alerts_warn": 0
+    }
+  },
+  "diagnostics": {
+    "pitch": {
+      "authority": null,
+      "tracking": null,
+      "weights": {},
+      "spectral": null,
+      "phase": {},
+      "alerts": []
+    },
+    "roll": {
+      "authority": null,
+      "tracking": null,
+      "weights": {},
+      "spectral": null,
+      "phase": {},
+      "alerts": []
+    },
+    "yaw": {
+      "authority": null,
+      "tracking": null,
+      "weights": {},
+      "spectral": null,
+      "phase": {},
+      "alerts": []
+    },
+    "z": {
+      "authority": null,
+      "tracking": null,
+      "weights": {},
+      "spectral": null,
+      "phase": {},
+      "alerts": []
+    }
+  },
+  "meta": {
+    "analyzer_version": "1.0.0",
+    "analysis_timestamp": "2026-06-15T12:18:02.829841Z"
+  },
+  "mode": "circle",
+  "params": {
+    "cx": 0.0,
+    "cy": 0.0,
+    "cz": 0.9,
+    "radius_m": 0.6,
+    "omega_rad_s": 0.3,
+    "duration_s": 40
+  },
+  "path_geometry": {
+    "mode": "circle",
+    "position_tracking": {},
+    "rank_score": null,
+    "rank_metric": null
+  },
+  "context": {
+    "duration_s": 40.836800000000004,
+    "samples": 198,
+    "median_dt_s": 0.20250000000000057,
+    "max_gap_s": 0.22669999999999968,
+    "events": []
+  },
+  "verdict": [
+    "MRAC health clean: no warnings or critical alerts."
+  ],
+  "champion_delta": {
+    "mode": "circle",
+    "config_hash": "ea6a3ddd49",
+    "prev_config_best": null,
+    "new_config_champion": false,
+    "prev_overall_best": null,
+    "overall_best": null,
+    "is_overall_champion": false
+  }
+}

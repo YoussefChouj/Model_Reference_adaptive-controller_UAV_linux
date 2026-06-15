@@ -173,12 +173,18 @@ void RCInput_Update(void)
         return;
     }
 
-    /* --- Physical RC takeover check ---
-     * Rate-of-change detection: fires only when the pilot is actively moving a
-     * stick.  Suppressed when GS_KeySDKflag=1 (ground station explicitly holds
-     * authority) or when the heartbeat is active (GS keepalive is flowing).
-     * The heartbeat watchdog below is the failsafe for GS disconnect.         */
-    if (!GS_KeySDKflag && !s_heartbeat_active && !sbus_lost) {
+    /* --- Physical RC takeover check (emergency manual override) ---
+     * Rate-of-change detection: fires when the pilot actively moves a stick.
+     * This is the pilot's emergency override and MUST work even during a GS-
+     * controlled flight (path presets / VRC), so it is intentionally NOT
+     * suppressed by GS_KeySDKflag or by an active GS keepalive heartbeat.
+     * Only gated on a valid SBUS link: if sbus_lost, physical stick readings
+     * are stale/invalid and cannot be trusted to detect motion.
+     * On trigger, authority is dropped → RCInput_Get() returns physical sticks
+     * and AutoflyTask_PathArbitrate() stops all presets (clean handoff to
+     * manual alt/position-hold). The ch10 DANGEROUS_STOP remains the hard kill.
+     * The heartbeat watchdog below is the separate failsafe for GS disconnect. */
+    if (!sbus_lost) {
         float cur0 = s_normalize((float)Remoter.ThrCtrler);
         float cur1 = s_normalize((float)Remoter.PitCtrler);
         float cur2 = s_normalize((float)Remoter.RolCtrler);
@@ -207,6 +213,7 @@ void RCInput_Update(void)
                 s_authority        = 0U;
                 s_heartbeat_active = 0U;
                 s_heartbeat_lost   = 0U;
+                GS_KeySDKflag      = 0U; /* GS no longer holds SDK authority after manual takeover */
                 return;
             }
         }

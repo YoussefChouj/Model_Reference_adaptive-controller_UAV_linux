@@ -23,26 +23,16 @@ python .agent_scripts/knowledge_gate.py --unlock
 
 ## Session State
 
-**Last Updated**: 2026-05-27 (crash incident — full RC→mode logic audit in progress)  
-**Goal**: Audit and fix all RC controller ↔ firmware mode communication logic (IDLE/LAND/gesture/arm) following crash where IDLE failed and drone hit ceiling.
-
-### Crash Incident (2026-05-26)
-
-*   IDLE mode did not engage properly after gesture arm
-*   Drone continuously climbed and hit ceiling
-*   Physical damage to parts
+**Last Updated**: (pending — no active session)  
+**Goal**: _(none set — run `/session-start` to begin)_
 
 ### Session Tasks
 
-| # | Task | Status |
-| --- | --- | --- |
-| 1 | Map full RC→mode state machine (ch5, gesture, arm, IDLE, LAND) | ⏳ |
-| 2 | Identify all hidden bugs/race conditions in mode transitions | ⏳ |
-| 3 | Audit IDLE gate logic (throttle threshold, authority flag) | ⏳ |
-| 4 | Audit arm gesture path (physical vs virtual sticks, mode guard) | ⏳ |
-| 5 | Audit LAND ramp + disarm branch | ⏳ |
-| 6 | Fix all confirmed bugs, update firmware | ⏳ |
-| 7 | Rebuild Keil5 + reflash | ⏳ |
+_(none — pending)_
+
+### Prior Session (closed) — Crash audit 2026-05-26
+
+RC→mode logic audit (IDLE/LAND/gesture/arm) after ceiling crash. See git history / wiki.
 
 ### Known Remaining Issues (future work)
 

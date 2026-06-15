@@ -32,7 +32,7 @@
 /* Ground-station protocol version (uint8, appended as last byte of Frame A payload).
  * Increment when the frame layout or CMD semantics change. Must match GS_PROTO_VERSION
  * in ground_station/comm/serial_bridge.py. */
-#define GS_PROTO_VERSION             2U
+#define GS_PROTO_VERSION             3U
 
 #define ARM_Delay_time  150
 #define DISARM_Delay_time  50// 50*20ms = 1s
@@ -205,6 +205,30 @@ typedef struct {
 } CirclePath_t;
 
 extern volatile CirclePath_t circle_path;
+
+/* Figure-8 (lemniscate) path parameters. CMD 0x11. FlyMode_SDK only.
+ * type: 0 = Bernoulli (lying infinity), 1 = Gerono (vertical figure-8).
+ * Same concurrency rules as circle_path (taskENTER_CRITICAL on activation). */
+typedef struct {
+	float center_x;
+	float center_y;
+	float center_z;
+	float amplitude;      /* A, metres */
+	float angular_speed;  /* rad/s, advances theta */
+	float duration;       /* s, 0 = run until aborted */
+	uint8_t type;         /* 0 = Bernoulli, 1 = Gerono */
+	uint8_t active;
+	float theta;
+	float t_elapsed;
+} Figure8Path_t;
+
+extern volatile Figure8Path_t figure8_path;
+
+/* Shared waypoint-density spacing (reference quantization), metres. CMD 0x12 idx 0.
+ * 0 = continuous reference. Applied to sinusoid/circle/figure-8 via a reference
+ * arc-length accumulator in AutoflyTask (see AutoflyTask_CommitRef). */
+extern volatile float waypoint_spacing;
+extern void AutoflyTask_WaypointReset(void);
 
 /* Ground station: parallel trigger for SDK state machine (see AutoflyTask, CMD 0x0E) */
 extern volatile uint8_t GS_KeySDKflag;

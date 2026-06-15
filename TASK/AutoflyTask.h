@@ -20,6 +20,7 @@ extern int take_off_flag;
 void AutoflyTask(void);
 void AutoflyTask_RunSinusoid(void);
 void AutoflyTask_RunCircle(void);
+void AutoflyTask_RunFigure8(void);
 
 void SDK_StateMachine_Reset(void);
 void SDK_StateMachine_Loop(void);

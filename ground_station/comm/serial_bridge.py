@@ -43,9 +43,16 @@ except ImportError:  # pragma: no cover
 #                          4=tanh_saturation_on 5=e_modification_on 6=l1_filtering_on
 #                          7=axis_enable_pitch 8=axis_enable_roll 9=axis_enable_yaw
 #                          val>=0.5 = ON, val<0.5 = OFF
+#   0x10 reset world-frame optical-flow origin — idx 0 (value ignored; use 1.0)
+#   0x11 figure-8 (lemniscate) path — FlyMode_SDK only:
+#        idx 0=center_x(cm) 1=center_y(cm) 2=center_z(m) 3=amplitude(cm)
+#            4=angular_speed(rad/s) 5=duration(s) 6=type(0=Bernoulli,1=Gerono)
+#            7=activate(val>=0.5)
+#   0x12 waypoint density — idx 0=spacing in loc-PID units (cm); 0 = continuous.
+#        Shared across sinusoid/circle/figure-8 (reference arc-length quantizer).
 # Must match GS_PROTO_VERSION in Global_file/global_declare.h.
 # Increment both when the telemetry frame layout or CMD semantics change.
-GS_PROTO_VERSION: int = 2
+GS_PROTO_VERSION: int = 3
 
 cmd_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
 
@@ -561,14 +568,21 @@ class SerialBridge:
         #   FB, Des, U => 3 floats per loop
         total_floats = 4 * (max_num_basis + 2) + 36
         main_len = total_floats * 4
-        path_tail_len = 22  # u8 + 3f + f + f + u8 (path state, see send_data.c Frame B)
-        if len(payload) != main_len + path_tail_len:
+        # Path tail: v3 = 26 bytes (adds real_voltage f), v2 = 22 bytes (no vbat).
+        # Accept both so plots keep working before the firmware is reflashed to v3.
+        tail_len = len(payload) - main_len
+        has_vbat = tail_len == 26
+        if tail_len not in (22, 26):
             return []
 
         fmt = "<" + ("f" * total_floats)
         vals = struct.unpack(fmt, payload[:main_len])
-        tail = payload[main_len : main_len + path_tail_len]
-        (apm_u8, twc_tx, twc_ty, twc_tz, sin_te, circ_th, twc_arr_u8) = struct.unpack("<BfffffB", tail)
+        tail = payload[main_len : main_len + tail_len]
+        if has_vbat:
+            (apm_u8, twc_tx, twc_ty, twc_tz, sin_te, circ_th, twc_arr_u8, vbat) = struct.unpack("<BfffffBf", tail)
+        else:
+            (apm_u8, twc_tx, twc_ty, twc_tz, sin_te, circ_th, twc_arr_u8) = struct.unpack("<BfffffB", tail)
+            vbat = None
 
         # Update GUI state for MRAC basis hiding.
         with self._state_lock:
@@ -616,6 +630,8 @@ class SerialBridge:
         out.append(("path.sinusoid_t_elapsed", float(sin_te)))
         out.append(("path.circle_theta", float(circ_th)))
         out.append(("path.twc_arrived", float(twc_arr_u8)))
+        if vbat is not None:
+            out.append(("status.vbat", float(vbat)))
 
         return out
 
@@ -775,8 +791,9 @@ class SerialBridge:
                 return
         elif frame_type == 0x02:
             total_floats = 4 * (max_num_basis + 2) + 36
-            expected_len = total_floats * 4 + 22
-            if len_payload != expected_len:
+            main_len = total_floats * 4
+            # Accept v2 (+22) and v3 (+26, adds vbat) Frame B tails.
+            if len_payload not in (main_len + 22, main_len + 26):
                 return
         else:
             return
@@ -856,8 +873,9 @@ class SerialBridge:
                     continue
             elif frame_type == 0x02:
                 total_floats = 4 * (max_num_basis + 2) + 36
-                expected_len = total_floats * 4 + 22
-                if len_payload != expected_len:
+                main_len = total_floats * 4
+                # Accept v2 (+22) and v3 (+26, adds vbat) Frame B tails.
+                if len_payload not in (main_len + 22, main_len + 26):
                     sync_seen = False
                     continue
             else:

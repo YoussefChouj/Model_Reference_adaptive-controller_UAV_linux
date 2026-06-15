@@ -849,7 +849,8 @@ class Dashboard:
             src = str(dpg.get_value("combo_pos_source"))
             self._position_source = src
             ok = src not in ("None", "")
-            for tg in ("btn_path_twc_exec", "btn_path_sin_exec", "btn_path_circ_exec"):
+            for tg in ("btn_path_twc_exec", "btn_path_sin_exec", "btn_path_circ_exec",
+                       "btn_path_fig8_exec", "btn_path_spacing_apply"):
                 dpg.configure_item(tg, enabled=ok)
             try:
                 dpg.configure_item("paths_no_source_warn", show=not ok)
@@ -1060,6 +1061,7 @@ class Dashboard:
         # locxPID/locyPID operate in cm; Z_posPID operates in m.
         axis_int = int(round(axis))
         is_z = (axis_int == 2)
+        self._paths_cmd_spacing()  # push shared waypoint density before starting
         self._send_cmd(0x0B, 0, cx if is_z else cx * 100.0)
         self._send_cmd(0x0B, 1, cy if is_z else cy * 100.0)
         self._send_cmd(0x0B, 2, cz)
@@ -1092,6 +1094,7 @@ class Dashboard:
         except Exception:
             return
         # locxPID/locyPID operate in cm; center_z and duration are unitless/meters.
+        self._paths_cmd_spacing()  # push shared waypoint density before starting
         self._send_cmd(0x0C, 0, cx * 100.0)
         self._send_cmd(0x0C, 1, cy * 100.0)
         self._send_cmd(0x0C, 2, cz)
@@ -1109,6 +1112,54 @@ class Dashboard:
         t = threading.Timer(dur + 1.0, lambda: self._post_ui_call(self._auto_log_finish))
         self._auto_log_timer = t
         t.start()
+
+    def _paths_cmd_figure8(self) -> None:
+        self._path_exec_trace.clear()
+        self._path_abort_flag[0] = False
+        try:
+            cx = float(dpg.get_value("fig8_cx"))
+            cy = float(dpg.get_value("fig8_cy"))
+            cz = float(dpg.get_value("fig8_cz"))
+            amp = float(dpg.get_value("fig8_amp"))
+            om = float(dpg.get_value("fig8_omega"))
+            dur = float(dpg.get_value("fig8_dur"))
+            shape = str(dpg.get_value("fig8_type"))
+        except Exception:
+            return
+        ftype = 1.0 if shape.startswith("Gerono") else 0.0
+        self._paths_cmd_spacing()  # push shared waypoint density before starting
+        # locxPID/locyPID operate in cm; center_z and duration are unitless/meters.
+        self._send_cmd(0x11, 0, cx * 100.0)
+        self._send_cmd(0x11, 1, cy * 100.0)
+        self._send_cmd(0x11, 2, cz)
+        self._send_cmd(0x11, 3, amp * 100.0)
+        self._send_cmd(0x11, 4, om)
+        self._send_cmd(0x11, 5, dur)
+        self._send_cmd(0x11, 6, ftype)
+        self._send_cmd(0x11, 7, 1.0)
+        params: Dict[str, Any] = {
+            "cx": cx, "cy": cy, "cz": cz,
+            "amplitude_m": amp, "omega_rad_s": om, "duration_s": dur,
+            "shape": "gerono" if ftype else "bernoulli",
+            "waypoint_spacing_m": float(dpg.get_value("path_wp_spacing")),
+        }
+        self._auto_log_start("figure8", params)
+        if self._auto_log_timer is not None:
+            self._auto_log_timer.cancel()
+        t = threading.Timer(dur + 1.0, lambda: self._post_ui_call(self._auto_log_finish))
+        self._auto_log_timer = t
+        t.start()
+
+    def _paths_cmd_spacing(self) -> None:
+        """Send shared waypoint-density spacing (CMD 0x12). GUI metres → firmware cm
+        (firmware accumulates reference arc-length in loc-PID units, i.e. cm)."""
+        try:
+            ds_m = float(dpg.get_value("path_wp_spacing"))
+        except Exception:
+            return
+        if ds_m < 0.0:
+            ds_m = 0.0
+        self._send_cmd(0x12, 0, ds_m * 100.0)
 
     def _paths_clear_trace(self) -> None:
         self._path_exec_trace.clear()
@@ -1808,6 +1859,39 @@ class Dashboard:
                     enabled=False,
                     callback=lambda: self._paths_cmd_circle(),
                 )
+                dpg.add_separator()
+                dpg.add_text("Figure-8 (lemniscate, XY plane)", color=(200, 200, 200, 255))
+                dpg.add_input_float(tag="fig8_cx", label="cx", width=120, default_value=0.0)
+                dpg.add_input_float(tag="fig8_cy", label="cy", width=120, default_value=0.0)
+                dpg.add_input_float(tag="fig8_cz", label="cz", width=120, default_value=0.0)
+                dpg.add_input_float(tag="fig8_amp", label="amplitude m", width=160, default_value=1.0)
+                dpg.add_input_float(tag="fig8_omega", label="omega rad/s", width=140, default_value=0.3)
+                dpg.add_input_float(tag="fig8_dur", label="duration s", width=120, default_value=60.0)
+                dpg.add_combo(
+                    ("Bernoulli (infinity)", "Gerono (vertical 8)"),
+                    tag="fig8_type", label="shape", width=200,
+                    default_value="Bernoulli (infinity)",
+                )
+                dpg.add_button(
+                    label="Execute figure-8",
+                    tag="btn_path_fig8_exec",
+                    width=200,
+                    enabled=False,
+                    callback=lambda: self._paths_cmd_figure8(),
+                )
+                dpg.add_separator()
+                dpg.add_text("Waypoint density (applies to all path modes)", color=(200, 200, 200, 255))
+                dpg.add_input_float(
+                    tag="path_wp_spacing", label="spacing m [0 = continuous]",
+                    width=260, default_value=0.05, min_value=0.0, step=0.01,
+                )
+                dpg.add_button(
+                    label="Apply spacing",
+                    tag="btn_path_spacing_apply",
+                    width=200,
+                    enabled=False,
+                    callback=lambda: self._paths_cmd_spacing(),
+                )
             with dpg.child_window(width=-1, height=-1, border=True):
                 dpg.add_text("Position tracking — world frame @ 10 Hz", color=(200, 200, 200, 255))
                 with dpg.group(horizontal=True):
@@ -2028,7 +2112,7 @@ class Dashboard:
                         self._post_ui_call(dpg.configure_item, "diag_result_modal", show=True)
 
                         # --- Chain deep analysis ---
-                        deep_script = self.repo_root / "ground_station" / "scripts" / "deep_analysis.py"
+                        deep_script = self.repo_root / "scripts" / "deep_analysis.py"
                         if deep_script.exists():
                             self._post_ui_call(dpg.set_value, "txt_diag_status",
                                                "Plots done. Running deep analysis...")
@@ -2044,7 +2128,7 @@ class Dashboard:
                                 self._post_ui_call(dpg.configure_item, "txt_diag_status",
                                                    color=(50, 255, 50, 255))
                                 # Update modal text to include JSON path
-                                json_path = self.repo_root / "ground_station" / "results" / f"{active_log.stem}.json"
+                                json_path = self.repo_root / "results" / f"{active_log.stem}.json"
                                 self._post_ui_call(
                                     dpg.set_value, "diag_result_text",
                                     f"Analysis complete!\n\n"
@@ -2155,7 +2239,12 @@ class Dashboard:
                 out_dir = Path(candidate)
                 break
         if out.returncode == 0 and out_dir is not None and out_dir.exists():
-            self._write_summary_md(out_dir, label, params, log_path)
+            # Chain deep_analysis: it computes the full scorecard + verdict, writes
+            # the enriched summary.md/report.md/JSON, and updates the champion store.
+            deep_ok = self._run_deep_analysis(log_path, out_dir, label, params, env)
+            if not deep_ok:
+                # Fallback: at least keep the thin params-only summary.
+                self._write_summary_md(out_dir, label, params, log_path)
             self._post_ui_call(
                 dpg.set_value, "txt_diag_status",
                 f"Auto-analysis done: {label} → {out_dir.name}",
@@ -2170,8 +2259,42 @@ class Dashboard:
             if out.stderr:
                 print(f"[auto_analysis/{label}] stderr:\n{out.stderr}")
 
+    def _run_deep_analysis(self, log_path: Path, out_dir: Path, label: str,
+                           params: Dict[str, Any], env: Dict[str, str]) -> bool:
+        """Run deep_analysis.py with the real run params, then refresh the global
+        cross-run view. Returns True if deep_analysis succeeded (it owns summary.md)."""
+        scripts = self.repo_root / "scripts"
+        deep = scripts / "deep_analysis.py"
+        if not deep.exists():
+            return False
+        try:
+            meta_path = out_dir / ".analysis_meta.json"
+            meta_path.write_text(
+                json.dumps({"mode": label, "params": params or {}}),
+                encoding="utf-8",
+            )
+            r = subprocess.run(
+                [sys.executable, str(deep), str(log_path), str(out_dir), str(meta_path)],
+                capture_output=True, text=True, env=env,
+            )
+            if r.returncode != 0:
+                print(f"[deep_analysis/{label}] failed:\n{r.stderr}\n{r.stdout}")
+                return False
+            # Stage 3: refresh the global cross-run report (cheap; history already appended).
+            g = scripts / "global_analysis.py"
+            if g.exists():
+                gr = subprocess.run(
+                    [sys.executable, str(g)], capture_output=True, text=True, env=env,
+                )
+                if gr.returncode != 0:
+                    print(f"[global_analysis] non-fatal error:\n{gr.stderr}")
+            return True
+        except Exception as exc:
+            print(f"[deep_analysis/{label}] exception: {exc}")
+            return False
+
     def _write_summary_md(self, out_dir: Path, label: str, params: Dict[str, Any], log_path: Path) -> None:
-        """Write summary.md into the analysis output directory."""
+        """Write summary.md into the analysis output directory (fallback / thin)."""
         from datetime import datetime
         lines = [
             f"# Flight Summary: {label.upper()}",

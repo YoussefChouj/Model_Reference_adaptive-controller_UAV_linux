@@ -111,8 +111,8 @@ def decode_stream(buf: bytearray, stats: FrameStats) -> None:
             except Exception:
                 pass
         elif frame_type == 0x02:
-            expected = (4 * (max_num_basis + 2) + 36) * 4 + 22
-            if payload_len != expected:
+            main_len = (4 * (max_num_basis + 2) + 36) * 4
+            if payload_len not in (main_len + 22, main_len + 26):
                 stats.len_fail += 1
                 continue
             stats.frame_b_ok += 1
