@@ -32,7 +32,7 @@
 /* Ground-station protocol version (uint8, appended as last byte of Frame A payload).
  * Increment when the frame layout or CMD semantics change. Must match GS_PROTO_VERSION
  * in ground_station/comm/serial_bridge.py. */
-#define GS_PROTO_VERSION             3U
+#define GS_PROTO_VERSION             6U
 
 #define ARM_Delay_time  150
 #define DISARM_Delay_time  50// 50*20ms = 1s

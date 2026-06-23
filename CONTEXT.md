@@ -16,6 +16,29 @@ meaningful to a controls/embedded reviewer; implementation detail lives in the c
     preset advances at `dt = 0.005f` (200 Hz) and writes PID `.Des`. NOT the Python  
     `path_executor.py`.
 
+## System identification (SysID) — inner-loop excitation
+
+Planned module (design in progress; see ADR when written). Purpose: replace guessed inner-loop  
+parameters with values **identified from flight data**.
+
+*   **SysID excitation** — a firmware-generated test signal added to **one axis's rate setpoint**  
+    (`gyro*.Des`). Closed-loop by design: the controller keeps stabilizing the vehicle, and the  
+    plant model `x/u` is recovered offline from the high-rate ID frame (`r, x, u_nom, u_ad, xm`).  
+    On the excited axis the **outer angle loop is bypassed** (clean inner-loop excitation); the  
+    other axes stay angle-stabilized.
+*   **Green zone (virtual test cube)** — an axis-aligned position box sized to the lab (~2×2×2 m)  
+    and anchored at the drone's start point (OF origin reset before each run). The excited axis is  
+    free to drift **inside** the zone; on a soft-boundary violation the outer loop re-engages, the  
+    run aborts, and the drone returns to centre. **Backstop only** — primary drift control is  
+    **high-frequency excitation** (translation falls ~1/f³, so a sweep starting ≳0.8 Hz barely  
+    moves the vehicle while still capturing the rolloff band that sets `ref_model_bw`).  
+    Caveat: geofence accuracy is limited by OF position drift (~50 cm); reliable tight-space  
+    geofencing wants drift-free position (T265 VIO).
+*   **Identified quantities** — inner-loop **bandwidth** (→ sets `ref_model_bw`) and effective  
+    **inertia `J` / damping `b`** from `J·ẋ + b·x = u`. Note: from flight data alone `J` and torque  
+    effectiveness (`mrac_to_mixer`) are coupled — the *lumped* input-output model is identifiable  
+    (which is what MRAC needs); separating physical `J` needs an independent effectiveness measurement.
+
 ## Trajectory presets (firmware-generated)
 
 Run only when `DroneStatus.FlyMode == FlyMode_SDK`. Mutually exclusive via  

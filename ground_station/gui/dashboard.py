@@ -11,6 +11,7 @@ import time
 import json
 import socket
 from pathlib import Path
+from collections import deque
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Allow `python ground_station/gui/dashboard.py` from the repo root without PYTHONPATH.
@@ -96,6 +97,12 @@ VRC_STICK_MAX = 1.0
 VRC_STICK_CENTER = 0.0
 # Bench mode UI cap: limits throttle to 20 % from bottom so drone cannot lift off.
 VRC_BENCH_THR_MAX = -0.6
+
+# Battery (4S LiPo) state-of-charge estimate from pack voltage. Linear V->% is rough but
+# adequate as a "time to land" cue. Empty floor is 3.5 V/cell (conservative land threshold).
+BATT_FULL_V = 16.8    # 4.2 V/cell
+BATT_EMPTY_V = 14.0   # 3.5 V/cell
+BATT_WARN_PCT = 30.0  # below this -> popup prompting to land
 
 
 
@@ -315,11 +322,18 @@ class Dashboard:
         self._bench_mode_ui: bool = False
 
         self._flight_logger = FlightLogger()
+        self._log_lock = threading.Lock()       # serialize CSV writes across render + telemetry-rx threads
+        self._low_batt_warned: bool = False     # one-shot low-battery popup latch (resets on re-arm)
         self._path_abort_flag: List[bool] = [False]
         self._position_source: str = "None"
         self._expert_mode: bool = False
         self._recording_flight: bool = False
         self._recording_path: bool = False
+        self._sysid_recording: bool = False     # this recording was auto-started by START SysID
+        self._sysid_prev_state: int = 0          # last seen FSM state, for active->IDLE auto-stop
+        self._sysid_forced_idframe: bool = False  # START SysID turned id_frame_on; restore it on stop
+        self._sysid_active: bool = False          # a sysid run is in progress (until finished)
+        self._sysid_timer: Optional[threading.Timer] = None  # fallback finish if FSM telemetry never returns
         self._path_point_buffer: List[Tuple[float, float]] = []
         self._last_log_t: float = 0.0
         self._last_path_sample_t: float = 0.0
@@ -357,7 +371,13 @@ class Dashboard:
         self._plot_z_des: List[float] = []
 
         # Unified telemetry: UDP mirror (remote bridge) + direct copy when local SerialBridge in-process.
-        self._telem: Dict[str, Any] = {"a": {}, "b": {}, "max_num_basis": 8}
+        self._telem: Dict[str, Any] = {"a": {}, "b": {}, "id": {}, "max_num_basis": 8}
+        self._last_id_counter: float = -1.0  # dedup high-rate ID-frame logging by firmware sample counter
+        # Live link-quality: rolling window of firmware sample-counter deltas. recv_frac =
+        # (#frames) / (sum of deltas). < 1.0 means dropped frames -> drone too far from receiver.
+        self._id_link_gaps: "deque[float]" = deque(maxlen=300)
+        self._id_link_last: float = -1.0
+        self._id_link_rx_t: float = 0.0  # monotonic time of last ID frame (for 'ID idle' detection)
         self._telem_stop = threading.Event()
         self._telem_thread = threading.Thread(target=self._telemetry_listener, name="dashboard_telemetry_udp", daemon=True)
         self._telem_thread.start()
@@ -407,6 +427,27 @@ class Dashboard:
                     self._telem["a"] = {str(k): float(v) for k, v in msg["a"].items()}
                 if "b" in msg and isinstance(msg["b"], dict):
                     self._telem["b"] = {str(k): float(v) for k, v in msg["b"].items()}
+                if "id" in msg and isinstance(msg["id"], dict):
+                    idf = {str(k): float(v) for k, v in msg["id"].items()}
+                    self._telem["id"] = idf
+                    # Live link quality: track sample-counter deltas to measure dropped frames.
+                    c = idf.get("id.sample_counter")
+                    if c is not None:
+                        if 0.0 <= self._id_link_last < c:
+                            delta = c - self._id_link_last
+                            if delta < 500.0:          # ignore counter resets / wild jumps
+                                self._id_link_gaps.append(delta)
+                        else:
+                            self._id_link_gaps.clear()  # reset / first frame
+                        self._id_link_last = c
+                        self._id_link_rx_t = time.monotonic()
+                    # Log at full link rate here (this thread fires once per received datagram), deduped by
+                    # the firmware sample counter, so the 100 Hz ID stream is captured without render-loop loss.
+                    if self._recording_flight:
+                        if c is not None and c != self._last_id_counter:
+                            self._last_id_counter = c
+                            with self._log_lock:
+                                self._flight_logger.log_snapshot("ID", idf)
                 if "max_num_basis" in msg:
                     self._telem["max_num_basis"] = int(msg["max_num_basis"])
                 self._last_telem_rx_t = time.monotonic()
@@ -833,11 +874,87 @@ class Dashboard:
         except Exception:
             pass
 
+        # Battery indicator + low-voltage land warning. vbat comes from Frame B (status.vbat); the
+        # high-rate ID frame carries id.vbat, used as fallback when A/B is suppressed during ID capture.
+        try:
+            vbat = b.get("status.vbat")
+            if vbat is None:
+                vbat = (self._telem.get("id") or {}).get("id.vbat")
+            if vbat is not None and float(vbat) > 5.0 and telem_fresh:
+                v = float(vbat)
+                pct = max(0.0, min(100.0, (v - BATT_EMPTY_V) / (BATT_FULL_V - BATT_EMPTY_V) * 100.0))
+                if pct >= BATT_WARN_PCT:
+                    col = (150, 200, 150, 255) if pct >= 55.0 else (235, 210, 90, 255)
+                else:
+                    col = (255, 80, 80, 255)
+                dpg.set_value("mon_battery", f"Battery: {v:.2f} V ({pct:.0f}%)")
+                dpg.configure_item("mon_battery", color=col)
+                if pct < BATT_WARN_PCT and not self._low_batt_warned:
+                    self._low_batt_warned = True
+                    dpg.set_value(
+                        "low_batt_text",
+                        f"Battery at {pct:.0f}% ({v:.2f} V) — below {BATT_WARN_PCT:.0f}%.\nLand the drone now.",
+                    )
+                    dpg.configure_item("low_batt_modal", show=True)
+                elif pct >= BATT_WARN_PCT + 5.0:
+                    # Re-arm the one-shot once safely above threshold (hysteresis avoids flicker).
+                    self._low_batt_warned = False
+        except Exception:
+            pass
+
+        # Live link quality during ID capture: % of frames received (rolling). Drops = drone too
+        # far from the receiver -> fly closer. Mirrors the offline analyzer's link-quality gate.
+        try:
+            gaps = list(self._id_link_gaps)
+            id_active = (time.monotonic() - self._id_link_rx_t) < 1.0 and len(gaps) >= 20
+            if id_active:
+                recv_frac = len(gaps) / sum(gaps) if sum(gaps) > 0 else 0.0
+                pct = max(0.0, min(100.0, recv_frac * 100.0))
+                if recv_frac >= 0.97:
+                    lcol, verdict = (150, 200, 150, 255), "GOOD"
+                elif recv_frac >= 0.85:
+                    lcol, verdict = (235, 210, 90, 255), "WARN - fly closer"
+                else:
+                    lcol, verdict = (255, 80, 80, 255), "BAD - fly closer!"
+                dpg.set_value("status_link_sidebar", f"Link: {pct:.0f}% ({verdict})")
+                dpg.configure_item("status_link_sidebar", color=lcol)
+            else:
+                dpg.set_value("status_link_sidebar", "Link: -- (ID idle)")
+                dpg.configure_item("status_link_sidebar", color=(180, 180, 180, 255))
+        except Exception:
+            pass
+
+        # Live SysID FSM state (ADR-0004 dec.6). Carried in the 0x03 ID frame as id.sysid_state.
+        try:
+            st = (self._telem.get("id") or {}).get("id.sysid_state")
+            if st is not None and telem_fresh:
+                names = {0: "IDLE", 1: "RAMP_IN", 2: "RUNNING", 3: "RAMP_OUT", 4: "RECOVERY"}
+                si = int(round(float(st)))
+                name = names.get(si, f"?{si}")
+                if si == 0:
+                    col = (150, 150, 150, 255)        # idle
+                elif si == 4:
+                    col = (255, 80, 80, 255)          # recovery / abort
+                else:
+                    col = (235, 210, 90, 255)         # active (ramp/running)
+                dpg.set_value("sysid_state_text", f"FSM: {name}")
+                dpg.configure_item("sysid_state_text", color=col)
+                # Run finished: active (RAMP/RUNNING/RECOVERY) -> IDLE transition.
+                if si == 0 and self._sysid_prev_state != 0:
+                    self._sysid_finish("complete")
+                self._sysid_prev_state = si
+        except Exception:
+            pass
+
         tnow = time.monotonic()
         if self._recording_flight and (tnow - self._last_log_t) >= 0.05:
             self._last_log_t = tnow
-            self._flight_logger.log_snapshot("A", a)
-            self._flight_logger.log_snapshot("B", b)
+            with self._log_lock:
+                self._flight_logger.log_snapshot("A", a)
+                self._flight_logger.log_snapshot("B", b)
+        # NOTE: the high-rate ID frame (0x03 @100Hz) is logged in the telemetry-RX thread (_telemetry_listener),
+        # not here — the render loop runs too slowly to capture 100 Hz. That thread receives the bridge's UDP
+        # mirror (active in both local in-process and remote bridge modes), so it sees every ID frame.
         if self._recording_path and (tnow - self._last_path_sample_t) >= 0.1:
             self._last_path_sample_t = tnow
             self._path_point_buffer.append(
@@ -2162,12 +2279,17 @@ class Dashboard:
         logs = self.repo_root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         fn = logs / f"flight_{int(time.time())}.csv"
-        self._flight_logger.start(fn)
+        with self._log_lock:
+            self._flight_logger.start(fn)
+        self._last_id_counter = -1.0
         self._recording_flight = True
 
     def _flight_log_stop(self) -> None:
-        self._flight_logger.stop()
+        # Clear the flag first so the RX thread stops issuing ID writes, then close under the lock
+        # so no in-flight log_snapshot races the file close.
         self._recording_flight = False
+        with self._log_lock:
+            self._flight_logger.stop()
 
     # ------------------------------------------------------------------
     # Auto-recording helpers (triggered by Execute buttons)
@@ -2419,8 +2541,10 @@ class Dashboard:
                     dpg.add_text("SBUS: ?", tag="status_sbus_sidebar", color=(180, 180, 180, 255))
                     dpg.add_text("Bench: OFF", tag="status_bench_sidebar", color=(180, 180, 180, 255))
                     dpg.add_text("Ctrl: RC ACTIVE", tag="status_authority_sidebar", color=(0, 200, 0, 255))
+                    dpg.add_text("Battery: -- V (--%)", tag="mon_battery", color=(150, 200, 150, 255), wrap=180)
+                    dpg.add_text("Link: -- (ID idle)", tag="status_link_sidebar", color=(180, 180, 180, 255), wrap=180)
                     dpg.add_separator()
-                    
+
                     dpg.add_text("Flight Mode", color=(200, 200, 200, 255))
                     dpg.add_button(
                         label="SDK Mode",
@@ -2546,6 +2670,38 @@ class Dashboard:
                 width=100,
                 pos=(420, 120),
                 callback=lambda: dpg.configure_item("conn_result_modal", show=False),
+            )
+
+        with dpg.window(
+            label="LOW BATTERY",
+            modal=True,
+            show=False,
+            width=460,
+            height=160,
+            pos=(470, 250),
+            tag="low_batt_modal",
+        ):
+            dpg.add_text("", tag="low_batt_text", wrap=430, color=(255, 80, 80, 255))
+            dpg.add_button(
+                label="Acknowledge — landing",
+                width=220,
+                callback=lambda: dpg.configure_item("low_batt_modal", show=False),
+            )
+
+        with dpg.window(
+            label="SysID Finished",
+            modal=True,
+            show=False,
+            width=520,
+            height=220,
+            pos=(440, 240),
+            tag="sysid_done_modal",
+        ):
+            dpg.add_text("", tag="sysid_done_text", wrap=490, color=(120, 220, 120, 255))
+            dpg.add_button(
+                label="OK",
+                width=120,
+                callback=lambda: dpg.configure_item("sysid_done_modal", show=False),
             )
 
         with dpg.window(
@@ -2804,8 +2960,10 @@ class Dashboard:
             (7, "axis_enable_pitch",  "Pitch axis enabled"),
             (8, "axis_enable_roll",   "Roll axis enabled"),
             (9, "axis_enable_yaw",    "Yaw axis enabled"),
+            (10, "output_injection_on", "OUTPUT INJECTION ON — u_ad reaches motors (OFF = shadow mode, motors see pure PID)"),
+            (11, "id_frame_on",         "HIGH-RATE ID FRAME ON — 100 Hz system-ID stream (replaces A/B telemetry while active)"),
         ]
-        defaults = {0: True, 1: True, 2: True, 3: True, 4: True, 5: True, 6: False, 7: True, 8: True, 9: True}
+        defaults = {0: True, 1: True, 2: True, 3: True, 4: True, 5: True, 6: False, 7: True, 8: True, 9: True, 10: False, 11: False}
         for idx, tag_name, label in flags:
             dpg.add_checkbox(
                 tag=f"mrac_flag_{tag_name}",
@@ -2813,6 +2971,140 @@ class Dashboard:
                 default_value=defaults.get(idx, True),
                 callback=lambda s, a, u=idx: self._send_cmd(0x0F, u, 1.0 if a else 0.0),
             )
+        dpg.add_separator()
+        dpg.add_text("Reference Model (CMD 0x13)", color=(200, 200, 200, 255))
+        dpg.add_text("Switches the inner-loop reference model live. Snaps bumplessly on change.", color=(150, 150, 150, 255))
+        dpg.add_combo(
+            ("0: Passthrough (xm = r)", "1: First-order", "2: Second-order"),
+            tag="mrac_ref_model_type",
+            default_value="0: Passthrough (xm = r)",
+            width=260,
+            callback=lambda s, a, u=None: self._send_cmd(0x13, 0, float(str(a).split(":")[0])),
+        )
+        dpg.add_separator()
+        dpg.add_text("Gyro low-pass filter (CMD 0x15)", color=(200, 200, 200, 255))
+        dpg.add_checkbox(label="Gyro LPF ON (default OFF/transparent)", tag="gyro_filt_on",
+                         callback=lambda s, a: self._send_cmd(0x15, 0, 1.0 if a else 0.0))
+        dpg.add_input_float(label="cutoff Hz", tag="gyro_filt_fc", default_value=40.0, width=140,
+                            callback=lambda s, a: self._send_cmd(0x15, 1, float(a)))
+        dpg.add_separator()
+        dpg.add_text("System ID excitation (CMD 0x14)", color=(255, 180, 80, 255))
+        dpg.add_text("Armed + SDK + in green zone + 0.3-1.5 m. RC stick = instant takeover.",
+                     color=(150, 150, 150, 255))
+        # Z excitation is not yet wired in firmware (rejected by SysID_Start, ADR-0004 #1) — not offered.
+        dpg.add_combo(("0: pitch", "1: roll", "2: yaw"), tag="sysid_axis",
+                      default_value="1: roll", width=140)
+        dpg.add_combo(("0: chirp", "1: multisine"), tag="sysid_sig",
+                      default_value="0: chirp", width=160)
+        # Defaults chosen to keep the drone inside the ±0.8 m green zone: f0=2.5 Hz avoids the
+        # large low-frequency lateral excursion (~1/f^2) that walked it into the wall at 0.8 Hz,
+        # and a modest amp/dur limits exposure. Raise once a run completes RUNNING cleanly.
+        dpg.add_input_float(label="f0 Hz", tag="sysid_f0", default_value=2.5, width=140)
+        dpg.add_input_float(label="f1 Hz", tag="sysid_f1", default_value=12.0, width=140)
+        dpg.add_input_float(label="amplitude (deg/s; Z m/s)", tag="sysid_amp", default_value=12.0, width=160)
+        dpg.add_input_float(label="duration s", tag="sysid_dur", default_value=12.0, width=140)
+        # Green-zone XY geofence (CMD 0x14 idx 7). ON by default. Disable ONLY for closed-loop
+        # runs under direct pilot watch — the RC dead-man stays the final authority and all other
+        # aborts (arm/mode/altitude/attitude) remain active. Sent live and again at START.
+        dpg.add_checkbox(label="XY geofence ON (uncheck to disable — pilot watch only)",
+                         tag="sysid_geofence_on", default_value=True,
+                         callback=lambda s, a: self._send_cmd(0x14, 7, 1.0 if a else 0.0))
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="START SysID", callback=self._sysid_start)
+            dpg.add_button(label="ABORT", callback=self._sysid_abort)
+        dpg.add_text("FSM: —", tag="sysid_state_text", color=(150, 150, 150, 255))
+
+    def _sysid_start(self) -> None:
+        # Finalize any leftover run whose FSM never reported IDLE (e.g. ID frame not
+        # arriving) so we always begin clean and write a fresh log.
+        if self._sysid_active:
+            self._sysid_finish("restarted")
+        ax = int(str(dpg.get_value("sysid_axis")).split(":")[0])
+        sg = int(str(dpg.get_value("sysid_sig")).split(":")[0])
+        # Force the high-rate 0x03 ID frame ON (CMD 0x0F idx 11) so the FSM state and
+        # the 100 Hz id.* stream are captured. ALWAYS (re)send the enable command — the
+        # checkbox UI state can't be trusted to mirror the board after a reflash/reboot
+        # (the board resets id_frame_on to 0 while the box may still read checked), so a
+        # conditional send would silently leave the board emitting A/B. Remember the prior
+        # UI state only to decide whether to restore it to OFF on stop.
+        self._sysid_forced_idframe = not bool(dpg.get_value("mrac_flag_id_frame_on"))
+        dpg.set_value("mrac_flag_id_frame_on", True)
+        self._send_cmd(0x0F, 11, 1.0)
+        # Auto-start a flight recording so the 0x03 ID frames are captured for
+        # offline sysid_analysis.py. Skip if one is already running (don't clobber it).
+        if self.connected and not self._recording_flight:
+            axis_name = {0: "pitch", 1: "roll", 2: "yaw"}.get(ax, str(ax))
+            logs = self.repo_root / "logs"
+            logs.mkdir(parents=True, exist_ok=True)
+            fn = logs / f"sysid_{axis_name}_{int(time.time())}.csv"
+            with self._log_lock:
+                self._flight_logger.start(fn)
+            self._last_id_counter = -1.0
+            self._recording_flight = True
+            self._sysid_recording = True   # auto-stop this log when the FSM returns to IDLE
+        self._sysid_prev_state = 0
+        self._sysid_active = True
+        self._send_cmd(0x10, 0, 1.0)  # reset OF origin -> green-zone center
+        self._send_cmd(0x14, 0, float(ax))
+        self._send_cmd(0x14, 1, float(sg))
+        self._send_cmd(0x14, 2, float(dpg.get_value("sysid_f0")))
+        self._send_cmd(0x14, 3, float(dpg.get_value("sysid_f1")))
+        self._send_cmd(0x14, 4, float(dpg.get_value("sysid_amp")))
+        dur = float(dpg.get_value("sysid_dur"))
+        self._send_cmd(0x14, 5, dur)
+        # (Re)assert the geofence enable from the checkbox before starting — the board can't be
+        # trusted to mirror the UI after a reflash/reboot (defaults back to ON), so send it
+        # explicitly so a disabled box actually disables it for this run.
+        self._send_cmd(0x14, 7, 1.0 if bool(dpg.get_value("sysid_geofence_on")) else 0.0)
+        self._send_cmd(0x14, 6, 1.0)  # start (firmware re-checks all gates)
+        # Fallback completion: the FSM active->IDLE transition is the primary stop, but if
+        # the 0x03 ID frame / FSM state never arrives, finish on a timer. Firmware run length
+        # is ramp_in(1.5) + dur + ramp_out(1.5) + recovery(2.0); add ~5 s margin.
+        if self._sysid_timer is not None:
+            self._sysid_timer.cancel()
+        self._sysid_timer = threading.Timer(
+            dur + 10.0, lambda: self._post_ui_call(self._sysid_finish, "timeout"))
+        self._sysid_timer.daemon = True
+        self._sysid_timer.start()
+
+    def _sysid_finish(self, reason: str = "complete") -> None:
+        """Stop a sysid run: close the auto-recording, restore the id-frame flag, cancel the
+        fallback timer, and pop the completion dialog. Idempotent (guarded by _sysid_active)."""
+        if not self._sysid_active:
+            return
+        self._sysid_active = False
+        if self._sysid_timer is not None:
+            self._sysid_timer.cancel()
+            self._sysid_timer = None
+        log_name = "(none — no recording was active)"
+        if self._sysid_recording:
+            p = self._flight_logger._path
+            if p is not None:
+                log_name = Path(p).name
+            self._flight_log_stop()
+            self._sysid_recording = False
+        if self._sysid_forced_idframe:
+            dpg.set_value("mrac_flag_id_frame_on", False)
+            self._send_cmd(0x0F, 11, 0.0)
+            self._sysid_forced_idframe = False
+        note = ""
+        if reason == "timeout":
+            note = ("\n\nNote: finished on the fallback timer — the FSM state never arrived.\n"
+                    "If the FSM label stayed blank, the board firmware may pre-date the\n"
+                    "91-byte 0x03 ID frame (re-flash the current build).")
+        elif reason == "restarted":
+            note = "\n\n(Previous run was still active and was closed out.)"
+        dpg.set_value(
+            "sysid_done_text",
+            f"SysID run finished ({reason}).\n\nRecording: {log_name}\n\n"
+            f"Analyze with:\n  python ground_station/scripts/sysid_analysis.py "
+            f"logs/{log_name} --axis <axis>{note}")
+        dpg.configure_item("sysid_done_modal", show=True)
+
+    def _sysid_abort(self) -> None:
+        self._send_cmd(0x14, 6, 0.0)
+        # Finish immediately (don't wait for the fallback timer / FSM telemetry).
+        self._sysid_finish("aborted")
 
     def run(self) -> None:
         try:

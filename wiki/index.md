@@ -51,6 +51,7 @@
 - [RC Authority, Gesture and LAND Bug Cluster](entities/rc-authority-gesture-land-bugs.md) — TWC persist, virtual-stick gesture block, LAND-mode arm guard, IDLE threshold, ramp free-fall
 - [Emergency Stick Takeover During Path Modes](entities/emergency-stick-takeover-during-paths.md) — Dashboard arm suppressed physical-stick override; ungated takeover + authority-gated path arbitration
 - [Timer & PWM Configuration](entities/timer-pwm-config.md) — TIM3 configuration and ESC output range
+- [SysID Excitation Module](entities/sysid-excitation-module.md) — Automated inner-loop sysid: FSM, 91-byte 0x03 ID frame, Z no-op gotcha, offline Bode pipeline
 
 ### Ground Station
 - [Ground Station Bridge](entities/ground-station-bridge.md) — Serial decode/command/VOFA/UDP bridge
@@ -79,6 +80,7 @@
 
 - [Architectural Decisions](sources/architectural-decisions.md) — docs/decisions.md (2026-04-13)
 - [Cross-Subsystem Interfaces](sources/cross-subsystem-interfaces.md) — docs/interfaces.md (2026-04-13)
-- [Direct MRAC + FF + Projection Notebook](sources/direct-mrac-ff-projection-simulation-notebook.md) — External simulation notebook digest (2026-04-14)
-- [Adaptive Control Tutorial Notebook](sources/adaptive-control-tutorial-notebook.md) — Progressive adaptive-control experiments (2026-04-14)
-- [Adaptive Control Tutorial 2 Notebook](sources/adaptive-control-tutorial-2-notebook.md) — Beginner-to-derivative-free simulation set (2026-04-14)
+- [Direct MRAC + FF + Projection Notebook](sources/direct-mrac-ff-projection-simulation-notebook.md) — 60-cell multi-axis quadrotor MRAC: Config flags, barrier, LF-learning, actuator dynamics, tuning guide (2026-06-20)
+- [Adaptive Control Tutorial Notebook](sources/adaptive-control-tutorial-notebook.md) — 18-cell scalar→2D progression: fixed-gain→projection→σ-mod→RBF→perf-recovery; known bugs documented (2026-06-20)
+- [Adaptive Control Tutorial 2 Notebook](sources/adaptive-control-tutorial-2-notebook.md) — Integral/PID/DF-MRAC/set-theoretic/LF-learning with equations, tuning table, and error bound gotcha (2026-06-20)
+- [Roll-Pitch-Yaw PID-MRAC Notebook](sources/pid-mrac-notebook.md) — 20-cell hardware bridge: LQR/pole-placement PID design, cascaded + inner-MRAC, DShot mixer, sequential LQR firmware gains, stability margins (2026-06-20)

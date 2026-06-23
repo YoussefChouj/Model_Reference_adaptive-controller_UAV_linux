@@ -1,31 +1,43 @@
 #include "ADC.h"
 
-void ADC1_Configuration(void)      //ADC¼ì²âµçÔ´µçÑ¹
+void ADC1_Configuration(void)      //ADCï¿½ï¿½ï¿½ï¿½Ô´ï¿½ï¿½Ñ¹
 {
-	//GPIOA  ADCÊ±ÖÓ
+	//GPIOA  ADCÊ±ï¿½ï¿½
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
 	
-  //PA4Ä£ÄâÊäÈë
+  //PA4Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	GPIO_InitTypeDef GPIO_InitStruct;
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_4;
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
 	GPIO_Init(GPIOA, &GPIO_InitStruct);
 	
+	// ADC common (clock) config â€” REQUIRED. Without it ADC_CCR stays at reset (ADCPRE=PCLK2/2).
+	// PCLK2=84MHz here, so /2 = 42MHz exceeds the STM32F407 36MHz ADC max -> conversions return 0.
+	// Div4 -> 84/4 = 21MHz, within spec.
+	ADC_CommonInitTypeDef ADC_CommonInitStruct;
+	ADC_CommonStructInit(&ADC_CommonInitStruct);
+	ADC_CommonInitStruct.ADC_Mode = ADC_Mode_Independent;
+	ADC_CommonInitStruct.ADC_Prescaler = ADC_Prescaler_Div4;
+	ADC_CommonInitStruct.ADC_DMAAccessMode = ADC_DMAAccessMode_Disabled;
+	ADC_CommonInitStruct.ADC_TwoSamplingDelay = ADC_TwoSamplingDelay_5Cycles;
+	ADC_CommonInit(&ADC_CommonInitStruct);
+
 	// SET ADC
 	ADC_InitTypeDef ADC_InitStruct;
 	ADC_StructInit(&ADC_InitStruct);
-	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;  // 12Î»·Ö±æÂÊ
-	ADC_InitStruct.ADC_ScanConvMode = DISABLE;           // µ¥Í¨µÀ×ª»»
-	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;     // µ¥´Î×ª»»
-	ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T1_CC1; // Íâ²¿´¥·¢
+	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;  // 12Î»ï¿½Ö±ï¿½ï¿½ï¿½
+	ADC_InitStruct.ADC_ScanConvMode = DISABLE;           // ï¿½ï¿½Í¨ï¿½ï¿½×ªï¿½ï¿½
+	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;     // ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½
+	ADC_InitStruct.ADC_ExternalTrigConv = ADC_ExternalTrigConv_T1_CC1; // ï¿½â²¿ï¿½ï¿½ï¿½ï¿½
 	ADC_Init(ADC1, &ADC_InitStruct);
-	
-  //ADC Í¨µÀ
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_4, 1, ADC_SampleTime_3Cycles);
 
-	//Ê¹ÄÜ
+  //ADC Í¨ï¿½ï¿½ â€” 480-cycle sample time: battery divider is a slow DC source with non-trivial
+  //          impedance; 3 cycles was far too short for the S/H cap to settle.
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_4, 1, ADC_SampleTime_480Cycles);
+
+	//Ê¹ï¿½ï¿½
 	ADC_Cmd(ADC1, ENABLE);
 	
 //	ADC_ResetCalibration(ADC1);
@@ -34,13 +46,20 @@ void ADC1_Configuration(void)      //ADC¼ì²âµçÔ´µçÑ¹
 //	while(ADC_GetCalibrationStatus(ADC1));
 }
 
-uint16_t ADC_Read(void) 
+uint16_t ADC_Read(void)
 {
-  //Æô¶¯×ª»»
+  //ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½
 	ADC_SoftwareStartConv(ADC1);
-	//µÈ´ý×ª»»Íê³É
-  while(!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
-  //¶ÁÈ¡ADCÖµ
+	//ï¿½È´ï¿½×ªï¿½ï¿½ï¿½ï¿½ï¿½ â€” bounded: a mis-clocked/stuck ADC must never hang the caller (SystemMonitor_Task).
+	//If EOC never sets, bail out and report 0 (degraded) instead of spinning forever.
+	{
+		uint32_t eoc_timeout = 100000u;
+		while(!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC))
+		{
+			if(--eoc_timeout == 0u) return 0;
+		}
+	}
+  //ï¿½ï¿½È¡ADCÖµ
 	uint16_t value = ADC_GetConversionValue(ADC1);
   ADC_ClearFlag(ADC1, ADC_FLAG_EOC);
   return value;

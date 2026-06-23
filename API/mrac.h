@@ -53,9 +53,16 @@
 #define ENABLE_SIGMA_MODIFICATION      1
 #define ENABLE_WEIGHT_NORMALIZATION    1    // Normalize by (1 + theta'theta)
 #define ENABLE_LOW_FREQ_LEARNING       1    // L1-style filtered weight updates
+#define FIX_LEAKAGE_NORMALIZATION      1    // Remove denom from leakage terms
+#define ENABLE_DYNAMIC_REF_MODEL       1    // (legacy compile gate; runtime type now set by DEFAULT_REF_MODEL_TYPE / CMD 0x13)
+
+// Power-on reference-model type (runtime-switchable from dashboard via CMD 0x13):
+//   0 = passthrough (xm = r)  [SAFEST — historically stable, matches e_sat/e_freeze calibration]
+//   1 = first-order           2 = second-order
+#define DEFAULT_REF_MODEL_TYPE         0
 
 // Advanced features
-#define ENABLE_PERFORMANCE_RECOVERY    1    // L1 state predictor + low-pass filtered correction
+#define ENABLE_PERFORMANCE_RECOVERY    1    // 1st-order low-pass filter on u_ad (omega_u cutoff). NOTE: NOT a full L1 state predictor; lambda_perf/tau_v are unused.
 #define INCLUDE_CONTROL_IN_REGRESSOR   1    // Add [un, v] to regressor (important for actuator modeling)
 
 // Future features (disabled for now)
@@ -151,8 +158,9 @@ typedef struct {
     float e_sat;                // [rad/s] Tanh saturation scale for gradient PBe signal
     float k_e;                  // [-] e-modification: extra leakage proportional to |e|
 
-    // Reserved for future reference model implementation
-    float ref_model_bw;         // [rad/s] Reference model bandwidth
+    // Reference model parameters (runtime-selectable type via CMD 0x13)
+    float ref_model_bw;         // [rad/s] Reference model bandwidth (Am for 1st-order, wn for 2nd-order)
+    float ref_model_zeta;       // [-] Damping ratio for 2nd-order reference model (~0.8 = mild overshoot)
     float P_lyap;               // Lyapunov matrix scalar (default 1.0f)
     
 } MRAC_AxisConfig_t;
@@ -161,9 +169,11 @@ typedef struct {
 typedef struct {
     // Reference model states (xm, omega_m)
     float xm;           // Reference state (e.g. desired rate)
-    
+    float xm_dot;       // Reference state velocity (2nd-order model); 0 for passthrough/1st-order
+
     // Plant states (x, omega)
     float x;            // Actual plant state (e.g. measured gyro rate)
+    float r;            // Latched rate command into this axis (rad/s) — for telemetry / system-ID frame
     
     // Tracking errors (e)
     float e;            // Tracking error (x - xm)
@@ -205,6 +215,9 @@ typedef struct {
     uint8_t axis_enable_pitch;
     uint8_t axis_enable_roll;
     uint8_t axis_enable_yaw;
+    uint8_t output_injection_on;    // Runtime shadow-mode gate: 0 = MRAC learns but motors see pure PID; 1 = u_ad injected
+    uint8_t id_frame_on;            // High-rate system-ID telemetry frame (0x03 @ 100Hz, replaces A/B while set)
+    uint8_t ref_model_type;         // Reference model: 0 = passthrough (xm=r), 1 = first-order, 2 = second-order
 } MRAC_FeatureFlags_t;
 
 // ------------------------------------------------------------------------------

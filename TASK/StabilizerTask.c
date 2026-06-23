@@ -3,6 +3,8 @@
 #include "pid.h"
 #include "ADC.h"
 #include "mrac.h"
+#include "gyro_filter.h"
+#include "sysid.h"
 #include "rc_input.h"
 #include "flight_fsm.h"
 
@@ -121,9 +123,11 @@ void Update_Data(void)
 	Ctrler.rollPID.FB  = imu_data.rol ;
 	Ctrler.yawPID.FB   = -imu_data.yaw;
 
-	Ctrler.gyroyPID.FB = -Gyro_Y_Real*RAD2DEG ;
-	Ctrler.gyroxPID.FB = Gyro_X_Real*RAD2DEG ;
-	Ctrler.gyrozPID.FB = -Gyro_Z_Real*RAD2DEG;
+	// Phase-1 gyro low-pass (default pass-through; enable via CMD 0x15). Filters the rate FB that
+	// the rate PID, MRAC, and the system-ID frame all consume — see API/gyro_filter.c / ADR-0004.
+	Ctrler.gyroyPID.FB = GyroFilter_Apply(GYRO_FILT_PITCH, -Gyro_Y_Real*RAD2DEG);
+	Ctrler.gyroxPID.FB = GyroFilter_Apply(GYRO_FILT_ROLL,   Gyro_X_Real*RAD2DEG);
+	Ctrler.gyrozPID.FB = GyroFilter_Apply(GYRO_FILT_YAW,   -Gyro_Z_Real*RAD2DEG);
 	
 }
 /*************************************************************************
@@ -297,6 +301,19 @@ void Compute_Motor(void)
 	Update_Des(case_Update_gyro_Des);   //���½��ٶ�
 	
 	SDK_Set_Gyroz();
+
+	// SysID excitation (ADR-0004): tick the signal generator + safety FSM, then SUPERIMPOSE the
+	// excitation onto the active axis's RATE setpoint with += (closed-loop SysID). The outer
+	// angle/position cascade stays live, so position hold keeps the drone on station (it wiggles in
+	// place instead of translating open-loop and walking out of the green zone). Pitch/roll/yaw here;
+	// Z is injected at the Z_ratePID.Des site. No-op while the FSM is IDLE.
+	// NOTE: the rate setpoint now = outer-loop output + dither, so the logged `r`/`u` are closed-loop
+	// signals. Plant ID is done offline with the direct method (Phi_xu/Phi_uu) on u_nom+u_ad -> x.
+	SysID_Update();
+	if (SysID_IsAxisActive(SYSID_AXIS_PITCH)) Ctrler.gyroyPID.Des += SysID_GetRateSetpoint(SYSID_AXIS_PITCH);
+	if (SysID_IsAxisActive(SYSID_AXIS_ROLL))  Ctrler.gyroxPID.Des += SysID_GetRateSetpoint(SYSID_AXIS_ROLL);
+	if (SysID_IsAxisActive(SYSID_AXIS_YAW))   Ctrler.gyrozPID.Des += SysID_GetRateSetpoint(SYSID_AXIS_YAW);
+
 	ComputePID(&Ctrler.gyroxPID);
 	ComputePID(&Ctrler.gyroyPID);
 	ComputePID(&Ctrler.gyrozPID);
@@ -311,11 +328,13 @@ void Compute_Motor(void)
 	 Throttle_th=2950;
 
 #if ENABLE_MRAC_OUTPUT_INJECTION == 1
-	// Inject MRAC adaptive signals.
-	// u_total = u_nom + (u_ad * scaling_factor)
-	// NaN/Inf guard: if u_ad is not finite (e.g. due to diverged adaptive weights),
-	// fall back to zero correction so the PID baseline always reaches the motors.
-	{
+	// Runtime shadow-mode gate (mrac_flags.output_injection_on, CMD 0x0F idx 10).
+	// When OFF the motors see pure PID even though MRAC keeps learning/logging u_ad.
+	if (mrac_flags.output_injection_on) {
+		// Inject MRAC adaptive signals.
+		// u_total = u_nom + (u_ad * scaling_factor)
+		// NaN/Inf guard: if u_ad is not finite (e.g. due to diverged adaptive weights),
+		// fall back to zero correction so the PID baseline always reaches the motors.
 		float mrac_z     = mrac_state.z_rate.u_ad * mrac_config_z.mrac_to_mixer;
 		float mrac_roll  = mrac_state.roll.u_ad  * mrac_config_roll.mrac_to_mixer;
 		float mrac_pitch = mrac_state.pitch.u_ad * mrac_config_pitch.mrac_to_mixer;
@@ -328,9 +347,15 @@ void Compute_Motor(void)
 		u_gyrox      = Ctrler.gyroxPID.U  + mrac_roll;
 		u_gyroy      = -(Ctrler.gyroyPID.U + mrac_pitch); // Motor mixer needs gyroy reversed
 		u_gyroz      = Ctrler.gyrozPID.U  + mrac_yaw;
+	} else {
+		// Runtime shadow mode: MRAC computes silently, motors see normal PID output.
+		Throttle_out = Ctrler.Z_ratePID.U + Throttle_th;
+		u_gyrox  = Ctrler.gyroxPID.U;
+		u_gyroy  = -Ctrler.gyroyPID.U;
+		u_gyroz  = Ctrler.gyrozPID.U;
 	}
 #else
-	// Shadow mode: MRAC computes silently, but motors only see normal PID output.
+	// Compile-time shadow mode: MRAC computes silently, but motors only see normal PID output.
     Throttle_out=Ctrler.Z_ratePID.U + Throttle_th;
 
 	u_gyrox  = Ctrler.gyroxPID.U ;

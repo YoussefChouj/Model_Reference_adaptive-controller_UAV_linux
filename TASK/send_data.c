@@ -1,5 +1,7 @@
 #include "send_data.h"
 #include "mrac.h"
+#include "gyro_filter.h"
+#include "sysid.h"
 #include "pid.h"
 #include "robot_types.h"
 #include "global_declare.h"
@@ -293,7 +295,76 @@ void Send_Groundstation_Telemetry_UART4(void)
     Buf_Telemetry_UART4[0] = 0xAA;
     Buf_Telemetry_UART4[1] = 0xBB;
     
-    if (frame_counter % 5 != 0) // 100Hz Frame A 
+    if (mrac_flags.id_frame_on) // FRAME 0x03 — high-rate system-ID stream @100Hz (replaces A/B while active)
+    {
+        // Payload (36 B): u32 sample_counter, u8 axis_id, {r,x,u_nom,u_ad,xm} floats for THE EXCITED
+        // AXIS ONLY, f sysid_dither, f real_voltage, u8 ARM, u8 FlyMode, u8 SysID FSM state.
+        // Single-axis: a run excites one axis; logging only it shrinks the frame from 95->36 B so the
+        // GS frame's DMA busy-wait drops ~8.5->~3.7 ms, letting Send_Task stream at 200 Hz (1:1 with
+        // the control loop) for clean 2nd-order+ plant ID. axis_id (0 pitch,1 roll,2 yaw,3 z) tells
+        // the GS which axis these signals belong to.
+        // sysid_dither = raw excitation (exogenous instrument) for unbiased closed-loop IV ID.
+        // u_nom and u_ad kept SEPARATE: u_nom+u_ad is the plant input; u_ad alone is the adaptive signal.
+        // sample_counter is the firmware time base (detects dropped frames via counter gaps).
+        static uint32_t id_sample_counter = 0;
+        MRAC_AxisState_t* idax[4];
+        MRAC_AxisState_t* a;
+        uint8_t axis_id = SysID_GetAxis();
+        float idvals[5];
+        uint16_t payload_len = 36U;
+        int k;
+
+        Buf_Telemetry_UART4[2] = 0x03; // ID frame type
+        Buf_Telemetry_UART4[3] = (uint8_t)(payload_len >> 8);
+        Buf_Telemetry_UART4[4] = (uint8_t)(payload_len & 0xFFU);
+        Buf_Telemetry_UART4[5] = MAX_NUM_BASIS;
+        len = 6;
+
+        Buf_Telemetry_UART4[len++] = (uint8_t)(id_sample_counter & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((id_sample_counter >> 8) & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((id_sample_counter >> 16) & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((id_sample_counter >> 24) & 0xFFU);
+
+        Buf_Telemetry_UART4[len++] = axis_id;
+
+        idax[0] = &mrac_state.pitch; idax[1] = &mrac_state.roll;
+        idax[2] = &mrac_state.yaw;   idax[3] = &mrac_state.z_rate;
+        a = idax[axis_id & 0x03U];
+        idvals[0] = a->r;      // rate command into axis (rad/s)
+        idvals[1] = a->x;      // measured rate (rad/s)
+        idvals[2] = a->u_nom;  // nominal PID effort (SI Nm / N)
+        idvals[3] = a->u_ad;   // adaptive effort (SI Nm / N) — plant input = u_nom + u_ad
+        idvals[4] = a->xm;     // reference-model state (rad/s)
+        for (k = 0; k < 5; k++) {
+            Buf_Telemetry_UART4[len++] = BYTE0(idvals[k]);
+            Buf_Telemetry_UART4[len++] = BYTE1(idvals[k]);
+            Buf_Telemetry_UART4[len++] = BYTE2(idvals[k]);
+            Buf_Telemetry_UART4[len++] = BYTE3(idvals[k]);
+        }
+        {
+            float dval = SysID_GetDither(); // exogenous excitation -> clean IV instrument offline
+            Buf_Telemetry_UART4[len++] = BYTE0(dval);
+            Buf_Telemetry_UART4[len++] = BYTE1(dval);
+            Buf_Telemetry_UART4[len++] = BYTE2(dval);
+            Buf_Telemetry_UART4[len++] = BYTE3(dval);
+        }
+        {
+            // real_voltage is refreshed at 1 Hz by Get_Voltage() in SystemMonitor_Task (battery
+            // changes slowly; that single periodic read also drives the low-battery beep and the
+            // dashboard battery widget in all modes). Operating-point voltage matters for SysID
+            // because actuator effectiveness scales with pack voltage -> it modulates the gain K.
+            float tf = real_voltage;
+            Buf_Telemetry_UART4[len++] = BYTE0(tf);
+            Buf_Telemetry_UART4[len++] = BYTE1(tf);
+            Buf_Telemetry_UART4[len++] = BYTE2(tf);
+            Buf_Telemetry_UART4[len++] = BYTE3(tf);
+        }
+        Buf_Telemetry_UART4[len++] = DroneStatus.ARM_Status;
+        Buf_Telemetry_UART4[len++] = DroneStatus.FlyMode;
+        Buf_Telemetry_UART4[len++] = SysID_GetState(); // live FSM state for the GS System ID tab (ADR-0004 dec.6)
+        id_sample_counter++;
+    }
+    else if (frame_counter % 5 != 0) // 100Hz Frame A
     {
         // FRAME A �� header: [type][LEN_hi][LEN_lo][MAX_NUM_BASIS], payload 37 bytes (16-bit LEN)
         {
@@ -727,7 +798,9 @@ void Process_GroundStation_Command(void)
         /* CMD 0x0F - MRAC feature-flag runtime toggle (val >= 0.5 = ON, else OFF).
          * idx: 0=adaptation_on  1=projection_on  2=deadzone_on  3=hard_freeze_on
          *      4=tanh_saturation_on  5=e_modification_on  6=l1_filtering_on
-         *      7=axis_enable_pitch  8=axis_enable_roll  9=axis_enable_yaw        */
+         *      7=axis_enable_pitch  8=axis_enable_roll  9=axis_enable_yaw
+         *      10=output_injection_on (shadow-mode gate: 0=motors see pure PID)
+         *      11=id_frame_on (high-rate system-ID telemetry frame 0x03 @100Hz, replaces A/B)  */
         else if (id == 0x0F) {
             uint8_t on = ((uint8_t)(val + 0.5f)) != 0U ? 1U : 0U;
             switch (idx) {
@@ -741,7 +814,79 @@ void Process_GroundStation_Command(void)
                 case 7: mrac_flags.axis_enable_pitch  = on; break;
                 case 8: mrac_flags.axis_enable_roll   = on; break;
                 case 9: mrac_flags.axis_enable_yaw    = on; break;
+                case 10: mrac_flags.output_injection_on = on; break;
+                case 11: mrac_flags.id_frame_on         = on; break;
                 default: break;
+            }
+        }
+
+        /* CMD 0x13 — reference model type selector (idx 0, val = 0/1/2).
+         *   0 = passthrough (xm = r), 1 = first-order, 2 = second-order.
+         * Snaps all reference states to plant on change for bumpless switching. */
+        else if (id == 0x13) {
+            if (idx == 0) {
+                uint8_t t = (uint8_t)(val + 0.5f);
+                if (t > 2U) t = 2U;
+                mrac_flags.ref_model_type = t;
+                mrac_state.pitch.xm  = mrac_state.pitch.x;   mrac_state.pitch.xm_dot  = 0.0f;
+                mrac_state.roll.xm   = mrac_state.roll.x;    mrac_state.roll.xm_dot   = 0.0f;
+                mrac_state.yaw.xm    = mrac_state.yaw.x;     mrac_state.yaw.xm_dot    = 0.0f;
+                mrac_state.z_rate.xm = mrac_state.z_rate.x;  mrac_state.z_rate.xm_dot = 0.0f;
+            }
+        }
+
+        /* CMD 0x14 — SysID excitation control (ADR-0004). Set params (idx 0-5) then start/abort (idx 6).
+         *   idx 0=axis(0 pitch,1 roll,2 yaw,3 Z)  1=signal(0 chirp,1 multisine)  2=f0 Hz  3=f1 Hz
+         *       4=amplitude (deg/s; Z in m/s)  5=duration s  6=start(>=0.5)/abort(<0.5)
+         *       7=geofence enable (>=0.5 ON default, <0.5 OFF — pilot-watch override)
+         * Dashboard sends CMD 0x10 (OF-origin reset) immediately before idx 6 start. */
+        else if (id == 0x14) {
+            static uint8_t sx_axis = 0U, sx_sig = 0U;
+            static float sx_f0 = 1.0f, sx_f1 = 12.0f, sx_amp = 30.0f, sx_dur = 20.0f;
+            switch (idx) {
+                case 0: sx_axis = (uint8_t)(val + 0.5f); break;
+                case 1: sx_sig  = (uint8_t)(val + 0.5f); break;
+                case 2: sx_f0 = val; break;
+                case 3: sx_f1 = val; break;
+                case 4: sx_amp = val; break;
+                case 5: sx_dur = val; break;
+                case 6:
+                    if (((uint8_t)(val + 0.5f)) != 0U) {
+                        /* Self-sufficient OF-origin reset (ADR-0004 dec.6/finding #13): do not rely
+                         * on the GS having sent CMD 0x10 first, so the green-zone centre is always
+                         * captured at a fresh (0,0) origin. Mirrors the 0x10 handler below. */
+                        ano_of.earth_x       = 0.0f;
+                        ano_of.earth_y       = 0.0f;
+                        ano_of.earth_x_ture  = 0.0f;
+                        ano_of.earth_y_ture  = 0.0f;
+                        ano_of.DISTANCE_X    = 0.0f;
+                        ano_of.DISTANCE_Y    = 0.0f;
+                        Ctrler.locxPID.FB    = 0.0f;
+                        Ctrler.locyPID.FB    = 0.0f;
+                        Ctrler.locxPID.Des   = 0.0f;
+                        Ctrler.locyPID.Des   = 0.0f;
+                        Ctrler.locxsPID.Des  = 0.0f;
+                        Ctrler.locysPID.Des  = 0.0f;
+                        SysID_Start((SysID_Axis_e)sx_axis, (SysID_Signal_e)sx_sig, sx_f0, sx_f1, sx_amp, sx_dur);
+                    } else {
+                        SysID_Abort();
+                    }
+                    break;
+                case 7: SysID_SetGeofence(((uint8_t)(val + 0.5f)) != 0U ? 1U : 0U); break;
+                default: break;
+            }
+        }
+
+        /* CMD 0x15 — gyro low-pass filter (Phase 1, ADR-0004).
+         *   idx 0 = enable (val>=0.5 ON, else pass-through)
+         *   idx 1 = cutoff Hz (applied to pitch/roll/yaw)  */
+        else if (id == 0x15) {
+            if (idx == 0) {
+                GyroFilter_SetEnabled(((uint8_t)(val + 0.5f)) != 0U ? 1U : 0U);
+            } else if (idx == 1) {
+                GyroFilter_SetCutoff(GYRO_FILT_PITCH, val);
+                GyroFilter_SetCutoff(GYRO_FILT_ROLL,  val);
+                GyroFilter_SetCutoff(GYRO_FILT_YAW,   val);
             }
         }
 

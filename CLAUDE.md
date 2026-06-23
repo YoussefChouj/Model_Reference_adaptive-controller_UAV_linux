@@ -23,21 +23,30 @@ python .agent_scripts/knowledge_gate.py --unlock
 
 ## Session State
 
-**Last Updated**: (pending — no active session)  
-**Goal**: _(none set — run `/session-start` to begin)_
+**Last Updated**: 2026-06-20  
+**Goal**: Sim rebuild Phase 1 — build clean `sim/` Python package (plant, ref model, adaptive law, regressor, scenarios, run); firmware-parity with `mrac.c`; `/grill-with-docs` then `/tdd` red-green-refactor.
 
 ### Session Tasks
 
-_(none — pending)_
+| # | Task | Status |
+|---|------|--------|
+| 1 | `/grill-with-docs` — package design, plant fidelity, regressor alignment, 6-DOF seam | pending |
+| 2 | `/tdd` slice 1 — `plant.py` | pending |
+| 3 | `/tdd` slice 2 — `reference_model.py` | pending |
+| 4 | `/tdd` slice 3 — `adaptive_law.py` + `regressor.py` | pending |
+| 5 | `sim/README.md` + session-end distill | pending |
 
-### Prior Session (closed) — Crash audit 2026-05-26
+### Prior Session (closed) — sysid + inner-loop MRAC 2026-06-16
 
-RC→mode logic audit (IDLE/LAND/gesture/arm) after ceiling crash. See git history / wiki.
+Audited firmware (MRAC/leakage/gyro_filter/bypass/FSM clean); fixed Z-axis no-op + OF self-reset; wrote `sysid_analysis.py`; added live FSM-state telemetry (0x03 frame 90→91 B, proto 3→4). See `docs/progress.md` / git history. Deferred: uVision build, SysID safety gates, full Z wiring.
 
 ### Known Remaining Issues (future work)
 
 *   **Optical flow XY drift** — `locxPID.FB` / `locyPID.FB` drift ~50 cm over short flights; expected OF sensor behaviour.
 *   **MRAC adaptive weights lost on power cycle** — no EEPROM persistence yet. Future work.
+*   **SysID deferred safety gates (ADR-0004 #2/#3)** — `sysid_abort_condition()` still lacks battery-low, telemetry/OF-stale, and sustained-saturation aborts (no clean `bat_warn`/`of_valid` symbols exist — needs thresholds defined first). Green-zone **hard** boundary (±0.7 m → controlled descent) not implemented; only the soft ±0.5 m → RECOVERY exists. RC dead-man remains final authority. Do before output-injection-ON SysID flights.
+*   **SysID Z-axis not wired** — `SYSID_AXIS_Z` is rejected in `SysID_Start`; full Z excitation needs a `Z_ratePID.Des` injection site + its own altitude/ground-effect abort guards (ADR-0004 #1).
+*   **ADR-0004 doc drift** — dec.7 says 200 Hz (firmware emits the 0x03 ID frame at 100 Hz); no separate `PRECHECK` FSM state (gates run synchronously in `SysID_Start`); manual abort is CMD `0x14` idx6, not `0x0D`. Functionally fine; amend ADR when convenient.
 
 ---
 

@@ -41,3 +41,11 @@
 - **Blocked**: `qwen/qwen3-coder:free` and `z-ai/glm-4.5-air:free` hit provider-side 429 burst limits during testing; they remain as fallbacks and recover within minutes.
 - **Changed**: `~/.claude/openrouter_models.json` (new), `~/.claude/skills/free*/SKILL.md` (5 new skills), `CLAUDE.md` (Free Model Routing section added).
 - **Next**: Set `OPENROUTER_API_KEY` in environment; run `/free-review` on a real file to confirm end-to-end; run `/update-models` weekly to rotate deprecated models.
+
+## 2026-06-16 — Finish sysid + inner-loop MRAC
+
+- **Goal:** Complete the in-progress inner-loop MRAC + automated system-ID excitation work (ADR-0003/0004 Phase 1–4): audit/fix firmware, build the offline ID pipeline, close dashboard/protocol gaps.
+- **Completed:** Firmware audit (3 parallel agents) — MRAC core, leakage, gyro_filter, P/R/Y bypass, FSM all verified clean. Fixed Z-axis silent no-op (now rejected in `SysID_Start`) and made `0x14` start self-reset the OF origin. Wrote `sysid_analysis.py` (Bode x/u & x/r, coherence gate, BW→ref_model_bw, J·ẋ+b·x=u). Added live FSM-state display (firmware 0x03 frame 90→91 B, GS_PROTO_VERSION 3→4, parsed + colour-coded in dashboard). Documented CMD 0x14; verified packing byte-for-byte.
+- **Blocked/deferred:** Keil/ARMCC V5.06 build NOT run (no CLI toolchain here — verify in uVision). Deferred safety gates: battery-low / telemetry-stale / saturation aborts + hard ±0.7 m boundary (need threshold symbols). Full Z excitation wiring deferred.
+- **Files changed:** `API/sysid.c`, `TASK/send_data.c`, `Global_file/global_declare.h`, `ground_station/comm/serial_bridge.py`, `ground_station/gui/dashboard.py`, `ground_station/scripts/sysid_analysis.py` (new), `CLAUDE.md`, `docs/progress.md`.
+- **Next session:** Build in uVision; implement deferred SysID safety gates before any output-injection-ON flight; optionally amend ADR-0004 (100 Hz / PRECHECK / 0x0D drift); run first shadow-mode SysID capture and feed it to `sysid_analysis.py`.

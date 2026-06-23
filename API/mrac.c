@@ -19,7 +19,7 @@ MRAC_AxisConfig_t mrac_config_roll;
 MRAC_AxisConfig_t mrac_config_yaw;
 MRAC_AxisConfig_t mrac_config_z;
 
-// Supplied by SINS/baro-IMU fusion — wire this before flight test.
+// Supplied by SINS/baro-IMU fusion ï¿½ wire this before flight test.
 
 // TODO [HW-PARAM]: identify from motor characterization
 #define MOTOR_CT 0.0f
@@ -148,7 +148,7 @@ static void MRAC_ProjectGradient(float grad[], const float Theta[], int num_basi
 // Runs the core MRAC algorithm for a single axis.
 static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const MRAC_AxisConfig_t* config, float cross_coupling, float r)
 {
-    float P = 1.0f; 
+    float P;
     float Phi_sq;
     float denom;
     float grad[MAX_NUM_BASIS];
@@ -157,12 +157,40 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
     float sigma_e;
     float sigma_eff;
     float sigma_lf_active;
+    float raw_u_ad;
     int do_adaptation;
     int i;
     
-    // 1. Update reference model dynamics
-    // No reference model for now. Set xm = r (direct instantaneous command passthrough)
-    state->xm = r;
+    // 1. Update reference model dynamics (runtime-selectable via mrac_flags.ref_model_type)
+    //    NOTE: P doubles as the adaptive-law gain (grad = -PBe*P*Phi/denom). Reducing it with the
+    //    reference bandwidth deliberately throttles learning vs. passthrough â€” see ADR-0003.
+    state->r = r; // latch command for telemetry / system-ID frame
+    switch (mrac_flags.ref_model_type) {
+        case 2: {
+            // 2nd-order: xm_ddot = wn^2 (r - xm) - 2*zeta*wn*xm_dot  (semi-implicit Euler, stable for DT*wn < 2)
+            float wn  = config->ref_model_bw;
+            float acc = wn * wn * (r - state->xm) - 2.0f * config->ref_model_zeta * wn * state->xm_dot;
+            state->xm_dot += MRAC_DT * acc;
+            state->xm     += MRAC_DT * state->xm_dot;
+            P = 1.0f / (2.0f * wn); // heuristic scalar Lyapunov gain for the 2nd-order case (ADR-0003)
+            break;
+        }
+        case 1: {
+            // 1st-order: xm_dot = bw*(r - xm), unity DC gain. P solves 2*Am*P = 1.
+            float dx = config->ref_model_bw * (r - state->xm);
+            state->xm    += MRAC_DT * dx;
+            state->xm_dot = dx;
+            P = 1.0f / (2.0f * config->ref_model_bw);
+            break;
+        }
+        case 0:
+        default:
+            // Passthrough: instantaneous command, infinite-bandwidth reference. e = -(PID error).
+            state->xm = r;
+            state->xm_dot = 0.0f;
+            P = 1.0f;
+            break;
+    }
     
     // 2. Compute tracking error (e = x - xm)
     state->e = state->x - state->xm;
@@ -190,7 +218,7 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
 
     PBe = state->e;
 
-    // Tanh saturation: bound effective error to ±e_sat regardless of spike magnitude
+    // Tanh saturation: bound effective error to ï¿½e_sat regardless of spike magnitude
     if (mrac_flags.tanh_saturation_on && config->e_sat > 0.0f) {
         PBe = config->e_sat * tanhf(PBe / config->e_sat);
     }
@@ -213,9 +241,15 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
         }
 
         for (i = 0; i < MAX_NUM_BASIS; i++) {
+#if FIX_LEAKAGE_NORMALIZATION == 1
+            y = config->gamma[i] * (grad[i]
+                - sigma_lf_active * (state->Theta[i] - state->Whatf[i])
+                - sigma_eff * state->Theta[i]);
+#else
             y = config->gamma[i] * (grad[i]
                 - sigma_lf_active * (state->Theta[i] - state->Whatf[i]) / denom
                 - sigma_eff * state->Theta[i] / denom);
+#endif
 
             state->Theta[i] += MRAC_DT * y;
 
@@ -227,10 +261,18 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
     }
     
     // 6. Compute adaptive control component (u_ad = Theta^T * Phi)
-    state->u_ad = 0.0f;
+    raw_u_ad = 0.0f;
     for (i = 0; i < MAX_NUM_BASIS; i++) {
-        state->u_ad += state->Theta[i] * state->Phi[i];
+        raw_u_ad += state->Theta[i] * state->Phi[i];
     }
+
+#if ENABLE_PERFORMANCE_RECOVERY == 1
+    // Apply L1-style low-pass filter to the adaptive signal
+    // u_ad_dot = omega_u * (raw_u_ad - u_ad)
+    state->u_ad += MRAC_DT * config->omega_u * (raw_u_ad - state->u_ad);
+#else
+    state->u_ad = raw_u_ad;
+#endif
 }
 
 // ------------------------------------------------------------------------------
@@ -279,46 +321,61 @@ void MRAC_Init(void)
     mrac_config_pitch.sigma = 0.01f;
     mrac_config_pitch.e_deadzone = 0.05f;
     mrac_config_pitch.J = 0.0023f; // kg*m^2
-    mrac_config_pitch.ref_model_bw = 50.0f;
+    mrac_config_pitch.ref_model_bw = 44.0f;  // SysID 2026-06-18: closed-loop -3dB BW ~44 rad/s (plant
+                                             // K~185, lag pole ~2.6Hz, delay ~12ms; rel-degree 2). Use 2nd-order ref.
+    mrac_config_pitch.ref_model_zeta = 0.8f; // 2nd-order model damping
+    mrac_config_pitch.omega_u = 30.0f; // ~5Hz LPF for performance recovery
     mrac_config_pitch.u_max = 6.73863f; // U_MAX_PITCH
     mrac_config_pitch.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_PR;
     mrac_config_pitch.sigma_lf = 0.8f;
     mrac_config_pitch.gam_f = 16.0f;
-    mrac_config_pitch.e_freeze = 5.0f;
-    mrac_config_pitch.e_sat = 3.5f;
+    mrac_config_pitch.e_freeze = 1.2f; // data-grounded (2026-06-16): passthrough max|e|=0.77; was 5.0 (never fired)
+    mrac_config_pitch.e_sat = 0.5f;    // data-grounded: ~p99 of |e|; was 3.5 (tanh stayed linear, never engaged)
     mrac_config_pitch.k_e = 0.05f;
     
     // Set Scalar Constants: Roll
     mrac_config_roll.sigma = 0.01f;
     mrac_config_roll.e_deadzone = 0.05f;
     mrac_config_roll.J = 0.0023f; // kg*m^2
-    mrac_config_roll.ref_model_bw = 50.0f;
+    mrac_config_roll.ref_model_bw = 44.0f;  // SysID 2026-06-18: closed-loop -3dB BW ~44.1 rad/s, repeatable
+                                            // <0.3% (multisine x7 + chirp; K~165, pole ~3.2Hz, delay ~15ms; rel-deg 2). 2nd-order ref.
+    mrac_config_roll.ref_model_zeta = 0.8f;
+    mrac_config_roll.omega_u = 30.0f;
     mrac_config_roll.u_max = 6.73863f; // U_MAX_ROLL
     mrac_config_roll.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_PR;
     mrac_config_roll.sigma_lf = 0.8f;
     mrac_config_roll.gam_f = 16.0f;
-    mrac_config_roll.e_freeze = 5.0f;
-    mrac_config_roll.e_sat = 3.5f;
+    mrac_config_roll.e_freeze = 1.2f; // data-grounded (2026-06-16): passthrough max|e|=0.82; was 5.0 (never fired)
+    mrac_config_roll.e_sat = 0.5f;    // data-grounded: ~p99 of |e|; was 3.5 (never engaged)
     mrac_config_roll.k_e = 0.05f;
 
     // Set Scalar Constants: Yaw
     mrac_config_yaw.sigma = 0.01f;
     mrac_config_yaw.e_deadzone = 0.05f;
     mrac_config_yaw.J = 0.0015f; // kg*m^2
-    mrac_config_yaw.ref_model_bw = 30.0f;
+    mrac_config_yaw.ref_model_bw = 30.0f;   // PROVISIONAL. SysID 2026-06-18: yaw is a PURE INTEGRATOR
+                                            // G~37/s (relative degree 1, no pole) -> should use FIRST-order ref
+                                            // (per-axis type, see ADR-0005). 30 rad/s unvalidated; needs a yaw
+                                            // closed-loop BW measurement (yaw is the slow axis) before injection.
+    mrac_config_yaw.ref_model_zeta = 0.8f;
+    mrac_config_yaw.omega_u = 20.0f; // Slower LPF for yaw
     mrac_config_yaw.u_max = 2.027f; // U_MAX_YAW
     mrac_config_yaw.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_YAW;
     mrac_config_yaw.sigma_lf = 1.0f;
     mrac_config_yaw.gam_f = 16.0f;
-    mrac_config_yaw.e_freeze = 1.0f;
-    mrac_config_yaw.e_sat = 2.0f;
+    mrac_config_yaw.e_freeze = 1.0f;  // keep: passthrough max|e|=1.28 so this still catches true outliers
+    mrac_config_yaw.e_sat = 0.7f;     // data-grounded (2026-06-16): ~p99 of |e|; was 2.0 (never engaged)
     mrac_config_yaw.k_e = 0.05f;
 
     // Set Scalar Constants: Z-Axis
     mrac_config_z.sigma = 0.01f;
     mrac_config_z.e_deadzone = 0.05f;
+    mrac_config_z.e_freeze = 1.2f;  // data-grounded (2026-06-16): close Z spike-protection gap (was 0 = disabled); passthrough max|e|=1.0
+    mrac_config_z.e_sat = 0.4f;     // data-grounded: ~p95-p99 of |e|; was 0 = tanh disabled on the most over-driven axis
     mrac_config_z.J = 1.5f; // Mass in kg (not inertia)
     mrac_config_z.ref_model_bw = 20.0f; // Slower translation bandwidth
+    mrac_config_z.ref_model_zeta = 0.8f;
+    mrac_config_z.omega_u = 20.0f;
     mrac_config_z.u_max = 13.47726f; // U_MAX_Z
     mrac_config_z.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_Z;
 
@@ -332,7 +389,12 @@ void MRAC_Init(void)
     mrac_flags.axis_enable_pitch  = 1;
     mrac_flags.axis_enable_roll   = 1;
     mrac_flags.axis_enable_yaw    = 1;
-    
+    // Shadow mode by default: MRAC learns and computes u_ad but motors see pure PID
+    // until the operator explicitly enables injection from the dashboard (CMD 0x0F idx 10).
+    mrac_flags.output_injection_on = 0;
+    mrac_flags.id_frame_on        = 0;                       // high-rate system-ID frame off by default (CMD 0x0F idx 11)
+    mrac_flags.ref_model_type     = DEFAULT_REF_MODEL_TYPE;  // reference model type (CMD 0x13); 0 = passthrough
+
     MRAC_Reset();
 }
 
@@ -352,11 +414,11 @@ void MRAC_Reset(void)
         mrac_state.z_rate.Whatf[i]= 0.0f;
     }
     
-    // Snap references
-    mrac_state.pitch.xm = mrac_state.pitch.x;
-    mrac_state.roll.xm  = mrac_state.roll.x;
-    mrac_state.yaw.xm   = mrac_state.yaw.x;
-    mrac_state.z_rate.xm= mrac_state.z_rate.x;
+    // Snap references to plant state (bumpless) and zero 2nd-order velocity states
+    mrac_state.pitch.xm = mrac_state.pitch.x;   mrac_state.pitch.xm_dot  = 0.0f;
+    mrac_state.roll.xm  = mrac_state.roll.x;    mrac_state.roll.xm_dot   = 0.0f;
+    mrac_state.yaw.xm   = mrac_state.yaw.x;     mrac_state.yaw.xm_dot    = 0.0f;
+    mrac_state.z_rate.xm= mrac_state.z_rate.x;  mrac_state.z_rate.xm_dot = 0.0f;
 }
 
 void MRAC_Control(const CtrlerTypeDef* current_state)

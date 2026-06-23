@@ -1,6 +1,7 @@
 #include "main.h"
 #include "creat_task.h"
 #include "mrac.h"
+#include "gyro_filter.h"
 
 /**
  * @module  main.c
@@ -105,30 +106,52 @@ void SystemMonitor_Task(void *pvParameters)
     while(1) // Infinite loop - task runs forever
   {
       SystemErrorDetect(); // Check for system errors or faults
-      
+      Get_Voltage();       // 1 Hz ADC battery read: drives the low-battery beep (SetBeep<15V),
+                           // the dashboard battery widget (status.vbat / id.vbat), and the SysID
+                           // operating-point log. Previously only called from the unused
+                           // ANO_Report_UserData1(), so real_voltage stayed 0 everywhere.
+
       vTaskDelayUntil(&PreviousWakeTime, TimeIncrement ); // Sleep until exactly 1000ms has passed since last wake (maintains precise 1 Hz timing)
   }
 }
 
 /*--------------------------------------------------------
 �������ܣ� ���ߴ������� (h��n sh�� g��ng n��ng: w�� xi��n chu��n k��u r��n w��) - "Function: Wireless serial port task"
-֡��    ��  100 (zh��n l��: 100) - "Frame rate: 100 Hz" (runs 100 times per second)
+// Frame rate: 100 Hz normal flight; 200 Hz during a SysID run (id_frame_on) for clean high-rate ID.
 ----------------------------------------------------------*/
 void Send_Task(void *pvParameters)
 {
     TickType_t PreviousWakeTime;
-    const TickType_t TimeIncrement = pdMS_TO_TICKS(10); // 10ms period = 100 Hz
-    PreviousWakeTime = xTaskGetTickCount();	
+    PreviousWakeTime = xTaskGetTickCount();
   while(1)
   {
-        // Keep UART5 stream clean for ground-station telemetry frames.
-        // ANO_Report_UserData1() also uses UART5 DMA stream and would interleave payloads.
-        send_to_linux(); // Send data to Linux companion computer (if present)
-        Send_Groundstation_Telemetry_UART4(); // Send telemetry to Ground Station
-        Process_GroundStation_Command(); // Process received commands
-        usart3_send();//�������������� (chu��n k��u s��n f�� s��ng r��n w��) - "UART3 send task" - transmit data via UART3 peripheral
+        // SysID high-rate mode (id_frame_on): stream the single-axis ID frame at a STABLE 200 Hz
+        // (1:1 with the 200 Hz Stabilizer loop -> no aliasing; clean periodic capture for FRF /
+        // 2nd-order+ plant ID, which a multisine needs to avoid spectral leakage).
+        //
+        // MUST be vTaskDelay (relative), NOT vTaskDelayUntil: the GS frame TX is a background DMA,
+        // but Send_Groundstation_Telemetry_UART4() busy-waits at its START for the PREVIOUS DMA to
+        // finish (send_data.c). One 43 B frame takes ~3.73 ms on the 115200 link. The 1000 Hz IMU
+        // and 200 Hz control tasks preempt this priority-2 task, so the body can't reliably finish
+        // inside a 5 ms deadline -> vTaskDelayUntil falls behind and RUNS AWAY (returns immediately
+        // each pass), pacing the loop at the ~3.73 ms busy-wait = ~270 Hz, which 100%-saturates the
+        // UART and drops bursts of frames. vTaskDelay always sleeps a full 5 ms of wall-clock; the
+        // DMA completes during that sleep, so the next busy-wait is ~0, the link sits at ~75 %
+        // (8.6 KB/s of 11.52 KB/s) with margin, and the rate cannot run away. (For >200 Hz you must
+        // raise the UART5 baud or shrink the frame; 115200 + 43 B caps clean capture near 200 Hz.)
+        if (mrac_flags.id_frame_on) {
+            Send_Groundstation_Telemetry_UART4(); // single-axis ID frame -> UART5 (DMA1_Stream7)
+            Process_GroundStation_Command();      // still service START/ABORT/flag commands
+            vTaskDelay(pdMS_TO_TICKS(5));          // hard 5 ms floor = stable ~200 Hz, no runaway
+            PreviousWakeTime = xTaskGetTickCount(); // re-base so the 100 Hz path resumes cleanly after a run
+        } else {
+            send_to_linux(); // Send data to Linux companion computer (if present)
+            Send_Groundstation_Telemetry_UART4(); // Send telemetry to Ground Station
+            Process_GroundStation_Command(); // Process received commands
+            usart3_send();//�������������� - "UART3 send task" - transmit data via UART3 peripheral
+            vTaskDelayUntil(&PreviousWakeTime, pdMS_TO_TICKS(10)); // 10ms = 100 Hz
+        }
         system_monitor.USART2_task_cnt++; // Increment task execution counter (for monitoring task health)
-        vTaskDelayUntil(&PreviousWakeTime, TimeIncrement );
   }
 }
 
@@ -183,6 +206,7 @@ void Stabilizer_Task(void *pvParameters)
                  // mrac_to_mixer scalers, and axis_enable flags. Without this call all
                  // configs stay zero-initialized, causing division-by-zero (u_nom = +/-inf)
                  // and NaN in u_ad that corrupts the motor throttle channel.
+    GyroFilter_Init(200.0f); // Phase-1 gyro LPF; starts DISABLED (pass-through) — see ADR-0004.
   while(1)
     {
                         // PERF: Keep fixed-period scheduling for control-loop determinism.

@@ -50,9 +50,14 @@ except ImportError:  # pragma: no cover
 #            7=activate(val>=0.5)
 #   0x12 waypoint density — idx 0=spacing in loc-PID units (cm); 0 = continuous.
 #        Shared across sinusoid/circle/figure-8 (reference arc-length quantizer).
+#   0x14 SysID excitation (ADR-0004) — set params (idx 0-5) then start/abort (idx 6):
+#        idx 0=axis (0=pitch 1=roll 2=yaw 3=Z)  1=signal (0=chirp 1=multisine)
+#            2=f0_Hz  3=f1_Hz  4=amplitude (deg/s; Z in m/s)  5=duration_s
+#            6=start (val>=0.5 -> SysID_Start) / abort (val<0.5 -> SysID_Abort)
+#        Dashboard sends 0x10 (OF-origin reset) immediately before idx 6 start.
 # Must match GS_PROTO_VERSION in Global_file/global_declare.h.
 # Increment both when the telemetry frame layout or CMD semantics change.
-GS_PROTO_VERSION: int = 3
+GS_PROTO_VERSION: int = 6
 
 cmd_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
 
@@ -229,6 +234,7 @@ class SerialBridge:
         self._last_rc_authority: Optional[float] = None
         self._last_telemetry_a: Dict[str, float] = {}
         self._last_telemetry_b: Dict[str, float] = {}
+        self._last_telemetry_id: Dict[str, float] = {}
         self._telemetry_lock = threading.Lock()
 
         # Debug printing throttle (simulate mode can be very chatty).
@@ -635,11 +641,45 @@ class SerialBridge:
 
         return out
 
+    def _unpack_frame_id(self, payload: bytes) -> List[Tuple[str, float]]:
+        # FRAME 0x03 — high-rate (200 Hz) single-axis system-ID stream. Fixed 36-byte layout:
+        #   u32 sample_counter | u8 axis_id | {r, x, u_nom, u_ad, xm} float (EXCITED AXIS ONLY)
+        #   | f sysid_dither | f real_voltage | u8 ARM | u8 FlyMode | u8 SysID FSM state
+        # Only the excited axis is logged (axis_id: 0 pitch,1 roll,2 yaw,3 z) so the frame is small
+        # enough to stream at 200 Hz. sysid_dither = raw excitation (exogenous instrument) for
+        # unbiased closed-loop IV ID. Keys are emitted as id.<axisname>.* so downstream analysis
+        # (which only uses the excited axis) is unchanged.
+        if len(payload) != 36:
+            return []
+        out: List[Tuple[str, float]] = []
+        counter = struct.unpack_from("<I", payload, 0)[0]
+        out.append(("id.sample_counter", float(counter)))
+        axes = ("pitch", "roll", "yaw", "z")
+        fields = ("r", "x", "u_nom", "u_ad", "xm")
+        axis_id = payload[4]
+        ax = axes[axis_id] if axis_id < len(axes) else f"axis{axis_id}"
+        vals = struct.unpack_from("<5f", payload, 5)
+        for fld, v in zip(fields, vals):
+            out.append((f"id.{ax}.{fld}", float(v)))
+        (dither, vbat) = struct.unpack_from("<2f", payload, 25)
+        arm = payload[33]
+        mode = payload[34]
+        sysid_state = payload[35]
+        out.append(("id.axis", float(axis_id)))
+        out.append(("id.dither", float(dither)))
+        out.append(("id.vbat", float(vbat)))
+        out.append(("id.arm", float(arm)))
+        out.append(("id.mode", float(mode)))
+        out.append(("id.sysid_state", float(sysid_state)))
+        return out
+
     def _handle_frame(self, frame_type: int, max_num_basis: int, payload: bytes) -> None:
         if frame_type == 0x01:
             lines = self._unpack_frame_a(max_num_basis, payload)
         elif frame_type == 0x02:
             lines = self._unpack_frame_b(max_num_basis, payload)
+        elif frame_type == 0x03:
+            lines = self._unpack_frame_id(payload)
         else:
             return
 
@@ -648,6 +688,8 @@ class SerialBridge:
             with self._telemetry_lock:
                 if frame_type == 0x01:
                     self._last_telemetry_a = mp
+                elif frame_type == 0x03:
+                    self._last_telemetry_id = mp
                 else:
                     self._last_telemetry_b = mp
             self._maybe_debug_print_telemetry(frame_type, lines)
@@ -660,10 +702,11 @@ class SerialBridge:
             with self._telemetry_lock:
                 a = dict(self._last_telemetry_a)
                 b = dict(self._last_telemetry_b)
+                idf = dict(self._last_telemetry_id)
             with self._state_lock:
                 mb = int(self._last_max_num_basis)
             payload = json.dumps(
-                {"a": a, "b": b, "max_num_basis": mb},
+                {"a": a, "b": b, "id": idf, "max_num_basis": mb},
                 separators=(",", ":"),
             ).encode("utf-8")
             if len(payload) > 65000:
@@ -795,6 +838,9 @@ class SerialBridge:
             # Accept v2 (+22) and v3 (+26, adds vbat) Frame B tails.
             if len_payload not in (main_len + 22, main_len + 26):
                 return
+        elif frame_type == 0x03:
+            if len_payload != 36:
+                return
         else:
             return
 
@@ -876,6 +922,10 @@ class SerialBridge:
                 main_len = total_floats * 4
                 # Accept v2 (+22) and v3 (+26, adds vbat) Frame B tails.
                 if len_payload not in (main_len + 22, main_len + 26):
+                    sync_seen = False
+                    continue
+            elif frame_type == 0x03:
+                if len_payload != 36:
                     sync_seen = False
                     continue
             else:
