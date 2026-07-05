@@ -31,9 +31,14 @@ from ground_station.comm.serial_bridge import _xor_crc8, load_config, GS_PROTO_V
 SYNC = (0xAA, 0xBB)
 FRAME_A = 0x01
 FRAME_B = 0x02
+FRAME_BENCH = 0x04
 
 # Mutable state for Frame B path tail (Section 8): updated each Frame B packet in loop_b.
 _sim_path_b_state = {"t_elapsed": 0.0, "theta": 0.0}
+
+# Bench-frame RPM channels: sin-curve one channel alive, three parked at 0 (matches
+# the one-sensor bench reality).
+_sim_bench_state = {"counter": 0}
 
 
 def _pack_telemetry_frame(frame_type: int, max_num_basis: int, payload: bytes) -> bytes:
@@ -141,6 +146,38 @@ def _step_theta(theta: List[List[float]], step_scale: float = 0.04) -> None:
             theta[ax][i] = max(-3.0, min(3.0, theta[ax][i]))
 
 
+def build_frame_bench(t_s: float) -> bytes:
+    """FRAME 0x04 v8 (20 B): u32 sample_counter | u8 motor_id | u16 commanded_ccr |
+    f real_voltage | u8 active | {u16 rpm0..3}. Sin-curve one live RPM channel,
+    three parked at 0 — matches the one-sensor bench reality described in ADR-0010."""
+    counter = _sim_bench_state["counter"]
+    _sim_bench_state["counter"] = (counter + 1) & 0xFFFFFFFF
+    motor_id = 1
+    # CCR step across a sweep: 2000 -> 4000 over 10 s.
+    ccr = int(2000.0 + (math.sin(0.5 * t_s) * 0.5 + 0.5) * 2000.0)
+    ccr = max(2000, min(4000, ccr))
+    vbat = 16.0 + 0.4 * math.sin(0.05 * t_s)
+    active = 1
+    # Channel 0 has a live sensor: rpm roughly tracks CCR/4000 * 10000.
+    rpm0 = int((ccr - 2000) / 2000.0 * 10000.0)
+    rpm1 = 0
+    rpm2 = 0
+    rpm3 = 0
+    payload = struct.pack(
+        "<IBHfB4H",
+        counter,
+        motor_id & 0xFF,
+        ccr & 0xFFFF,
+        float(vbat),
+        active & 0xFF,
+        rpm0 & 0xFFFF,
+        rpm1,
+        rpm2,
+        rpm3,
+    )
+    return _pack_telemetry_frame(FRAME_BENCH, 8, payload)
+
+
 def main() -> None:
     cfg = load_config()
     default_host = str(cfg.get("vofa_host", "127.0.0.1"))
@@ -159,7 +196,7 @@ def main() -> None:
     p.add_argument("--max-num-basis", type=int, default=6, help="MAX_NUM_BASIS (default 6)")
     args = p.parse_args()
     print(
-        f"Simulator: Frame A @ 100Hz, Frame B @ 20Hz -> {args.host}:{args.port} (raw telemetry for serial_bridge). "
+        f"Simulator: Frame A @ 100Hz, Frame B @ 20Hz, Frame Bench (0x04 v8) @ 50Hz -> {args.host}:{args.port} (raw telemetry for serial_bridge). "
         f"MAX_NUM_BASIS={args.max_num_basis}",
         flush=True,
     )
@@ -195,10 +232,19 @@ def main() -> None:
             sock.sendto(pkt, dest)
             time.sleep(0.05)
 
+    def loop_bench() -> None:
+        while not ev.is_set():
+            t_s = time.monotonic() - t0
+            pkt = build_frame_bench(t_s)
+            sock.sendto(pkt, dest)
+            time.sleep(0.02)
+
     th_a = threading.Thread(target=loop_a, daemon=True)
     th_b = threading.Thread(target=loop_b, daemon=True)
+    th_bench = threading.Thread(target=loop_bench, daemon=True)
     th_a.start()
     th_b.start()
+    th_bench.start()
     try:
         while True:
             time.sleep(0.5)
@@ -208,6 +254,7 @@ def main() -> None:
         ev.set()
         th_a.join(timeout=1.0)
         th_b.join(timeout=1.0)
+        th_bench.join(timeout=1.0)
         sock.close()
 
 

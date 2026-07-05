@@ -31,8 +31,8 @@
 
 /* Ground-station protocol version (uint8, appended as last byte of Frame A payload).
  * Increment when the frame layout or CMD semantics change. Must match GS_PROTO_VERSION
- * in ground_station/comm/serial_bridge.py. */
-#define GS_PROTO_VERSION             6U
+ * in ground_station/comm/serial_bridge.py. v8: bench frame 0x04 payload grew 12->20 B (4x u16 RPM). */
+#define GS_PROTO_VERSION             8U
 
 #define ARM_Delay_time  150
 #define DISARM_Delay_time  50// 50*20ms = 1s
@@ -140,6 +140,15 @@ extern StickMotionTypeDef StickMotion;
 extern volatile uint8_t sbus_lost;
 extern volatile uint32_t sbus_last_valid_tick;
 extern volatile uint8_t bench_mode_active;
+
+/* Motor bench-test mode (CMD 0x16, DISARMED-only) — drives a single chosen motor
+ * to a commanded CCR for the thrust-stand experiment (docs/bench_characterization.md).
+ * WRITTEN BY: send_data.c CMD 0x16 (active/id/ccr) and StabilizerTask (dead-man clears active).
+ * READ BY: StabilizerTask Update_Motor (actuator drive) and send_data.c frame 0x04. */
+extern volatile uint8_t  motor_test_active;    /* 1 = bench test is driving a motor */
+extern volatile uint8_t  motor_test_id;        /* 1..4 = M1..M4 (0 = none) */
+extern volatile uint16_t motor_test_ccr;       /* commanded CCR, clamped [2000,4000] */
+extern volatile uint32_t motor_test_watchdog;  /* ticks since last heartbeat (stabilizer-owned dead-man) */
 
 /* Ground-station safety limits.
  * WRITTEN BY: send_data.c CMD 0x09 (speeds/angles) and CMD 0x03 idx 8-9 (throttle).

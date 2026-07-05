@@ -148,7 +148,11 @@ static void MRAC_ProjectGradient(float grad[], const float Theta[], int num_basi
 // Runs the core MRAC algorithm for a single axis.
 static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const MRAC_AxisConfig_t* config, float cross_coupling, float r)
 {
-    float P;
+    float P = 1.0f;
+    float P_e = 0.0f;
+    float P_edot = 0.0f;
+    float s;
+    float raw_xdot;
     float Phi_sq;
     float denom;
     float grad[MAX_NUM_BASIS];
@@ -160,10 +164,11 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
     float raw_u_ad;
     int do_adaptation;
     int i;
-    
+
     // 1. Update reference model dynamics (runtime-selectable via mrac_flags.ref_model_type)
-    //    NOTE: P doubles as the adaptive-law gain (grad = -PBe*P*Phi/denom). Reducing it with the
-    //    reference bandwidth deliberately throttles learning vs. passthrough — see ADR-0003.
+    //    Adaptive-law gain: 1st-order/passthrough use the scalar heuristic P (ADR-0003);
+    //    the 2nd-order case uses the FULL matrix-P state-space drive (ADR-0007, supersedes
+    //    ADR-0003 for type 2) — see the s = e*Pe + e_dot*Pedot selection in step 5.
     state->r = r; // latch command for telemetry / system-ID frame
     switch (mrac_flags.ref_model_type) {
         case 2: {
@@ -172,7 +177,7 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
             float acc = wn * wn * (r - state->xm) - 2.0f * config->ref_model_zeta * wn * state->xm_dot;
             state->xm_dot += MRAC_DT * acc;
             state->xm     += MRAC_DT * state->xm_dot;
-            P = 1.0f / (2.0f * wn); // heuristic scalar Lyapunov gain for the 2nd-order case (ADR-0003)
+            // P unused for the drive here; matrix-P (Pe,Pedot) is formed in step 5.
             break;
         }
         case 1: {
@@ -194,7 +199,15 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
     
     // 2. Compute tracking error (e = x - xm)
     state->e = state->x - state->xm;
-    
+
+    // 2b. Filtered finite-difference rate derivative -> tracking-error derivative.
+    //     Drives the 2nd-order matrix-P law (e_dot); kept warm every tick (also for
+    //     telemetry) even in deadzone/freeze. ADR-0007.
+    raw_xdot = (state->x - state->x_prev) / MRAC_DT;
+    state->xdot_f += MRAC_DT * config->wc_edot * (raw_xdot - state->xdot_f);
+    state->x_prev = state->x;
+    state->e_dot  = state->xdot_f - state->xm_dot;
+
     // 3. Compute nominal control (done externally)
     
     // 4. Generate Basis/Regressor vector (Phi)
@@ -218,9 +231,24 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
 
     PBe = state->e;
 
-    // Tanh saturation: bound effective error to �e_sat regardless of spike magnitude
+    // Tanh saturation: bound effective error to +/-e_sat regardless of spike magnitude
     if (mrac_flags.tanh_saturation_on && config->e_sat > 0.0f) {
         PBe = config->e_sat * tanhf(PBe / config->e_sat);
+    }
+
+    // Lyapunov drive signal s (= e_v^T P B). Scalar heuristic for passthrough/1st-order
+    // (ADR-0003); full state-space [e, e_dot]^T P [0;1] = e*Pe + e_dot*Pedot for the
+    // 2nd-order matrix-P law (ADR-0007). e_dot is LPF-bounded and not separately
+    // tanh-saturated in Phase 1 (e is, via PBe).
+    if (mrac_flags.ref_model_type == 2) {
+        float wn = config->ref_model_bw;
+        float a0 = wn * wn;
+        float a1 = 2.0f * config->ref_model_zeta * wn;
+        P_e    = config->ref_Q1 / (2.0f * a0);
+        P_edot = (config->ref_Q1 / a0 + config->ref_Q2) / (2.0f * a1);
+        s = PBe * P_e + state->e_dot * P_edot;
+    } else {
+        s = PBe * P;
     }
 
     if (mrac_flags.adaptation_on && do_adaptation) {
@@ -232,7 +260,7 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
         sigma_lf_active = mrac_flags.l1_filtering_on ? config->sigma_lf : 0.0f;
 
         for (i = 0; i < MAX_NUM_BASIS; i++) {
-            grad[i] = (-PBe * P * state->Phi[i]) / denom;
+            grad[i] = (-s * state->Phi[i]) / denom;
         }
 
         if (mrac_flags.projection_on) {
@@ -379,6 +407,15 @@ void MRAC_Init(void)
     mrac_config_z.u_max = 13.47726f; // U_MAX_Z
     mrac_config_z.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_Z;
 
+    // 2nd-order matrix-P state-space law params (ADR-0007), consumed only when
+    // ref_model_type==2 (pitch/roll); set for all axes, harmless on yaw/z.
+    // Q = I default (Q1=Q2=1). Q1=wn would recover the old scalar e-channel gain
+    // 1/(2*wn). wc_edot: LPF cutoff for the finite-difference rate derivative.
+    mrac_config_pitch.ref_Q1 = 1.0f; mrac_config_pitch.ref_Q2 = 1.0f; mrac_config_pitch.wc_edot = 30.0f;
+    mrac_config_roll.ref_Q1  = 1.0f; mrac_config_roll.ref_Q2  = 1.0f; mrac_config_roll.wc_edot  = 30.0f;
+    mrac_config_yaw.ref_Q1   = 1.0f; mrac_config_yaw.ref_Q2   = 1.0f; mrac_config_yaw.wc_edot   = 30.0f;
+    mrac_config_z.ref_Q1     = 1.0f; mrac_config_z.ref_Q2     = 1.0f; mrac_config_z.wc_edot     = 30.0f;
+
     mrac_flags.adaptation_on      = ENABLE_MRAC_COMPUTATION;
     mrac_flags.projection_on      = ENABLE_PROJECTION_OPERATOR;
     mrac_flags.deadzone_on        = ENABLE_DEADZONE;
@@ -419,6 +456,12 @@ void MRAC_Reset(void)
     mrac_state.roll.xm  = mrac_state.roll.x;    mrac_state.roll.xm_dot   = 0.0f;
     mrac_state.yaw.xm   = mrac_state.yaw.x;     mrac_state.yaw.xm_dot    = 0.0f;
     mrac_state.z_rate.xm= mrac_state.z_rate.x;  mrac_state.z_rate.xm_dot = 0.0f;
+
+    // Zero the rate-derivative estimator (ADR-0007) so e_dot starts clean post-reset.
+    mrac_state.pitch.x_prev = mrac_state.pitch.x;   mrac_state.pitch.xdot_f  = 0.0f; mrac_state.pitch.e_dot  = 0.0f;
+    mrac_state.roll.x_prev  = mrac_state.roll.x;    mrac_state.roll.xdot_f   = 0.0f; mrac_state.roll.e_dot   = 0.0f;
+    mrac_state.yaw.x_prev   = mrac_state.yaw.x;     mrac_state.yaw.xdot_f    = 0.0f; mrac_state.yaw.e_dot    = 0.0f;
+    mrac_state.z_rate.x_prev= mrac_state.z_rate.x;  mrac_state.z_rate.xdot_f = 0.0f; mrac_state.z_rate.e_dot = 0.0f;
 }
 
 void MRAC_Control(const CtrlerTypeDef* current_state)

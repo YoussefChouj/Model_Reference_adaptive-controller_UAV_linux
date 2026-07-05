@@ -39,6 +39,35 @@ parameters with values **identified from flight data**.
     effectiveness (`mrac_to_mixer`) are coupled — the *lumped* input-output model is identifiable  
     (which is what MRAC needs); separating physical `J` needs an independent effectiveness measurement.
 
+## Simulation package (`sim/`) — adaptive-control source of truth
+
+Rebuild of the legacy notebooks (ADR-0006). One codebase, two scenarios: **hardware-param
+derivation** (gains/P pasted into `mrac.c`) and **virtual simulation** (pluggable plant). The
+controller and adaptive law are **plant-agnostic** — they never know if the plant behind the seam
+is an identified linear model, a future 6-DOF model, or Gazebo.
+
+*   **Plant boundary = the rate loop.** `plant.step(u_dict) -> state_dict`: torque/thrust (SI,
+    `u_nom + u_ad`) in, **rate** out (`p,q,r,vz`). Outer position/attitude PID lives in `baseline.py`,
+    never in the plant. `state_dict` is extensible so a later plant can return full 6-DOF state.
+*   **Identified plant realisation** — `G(s)=K/(s(1+s/p))·e^{-sT}` as ZOH-discretized rational part
+    + **integer delay ring buffer** (`N=round(T/dt)`). Roll/pitch = rel-degree-2 + delay; yaw = pure
+    integrator `37/s`. Delay is load-bearing (caps learning aggressiveness) — never drop it.
+*   **Sim↔firmware parity rule (HARD).** Sim controller step `dt = 0.005 s` (= `MRAC_DT`, 200 Hz) so
+    every gain/flag pastes from `mrac.c` with no rescaling. The **regressor `Phi` is hand-ported from
+    `MRAC_GenerateStructuredBasis` (`mrac.c:65-91`) and pinned by a golden-vector test** — if the
+    firmware formula drifts, the test fails. Active flag combo: `STRUCTURED + INCLUDE_CONTROL` ⇒
+    6 basis terms `[bias, x, x·tanh x, cross_coupling, u_nom, xm]`.
+*   **Adaptive coupling, not dynamic coupling.** Plant axes are independent SISO, but regressors are
+    cross-coupled: `cross_pitch = roll_rate·yaw_rate`, `cross_roll = pitch_rate·yaw_rate`
+    (`mrac.c:445-446`). The run-loop must read **all** plant rates, compute cross terms, *then* build
+    each axis regressor — ordering is a parity requirement.
+*   **Reference-model default diverges from firmware on purpose.** Firmware ships `ref_model_type=0`
+    (passthrough); the sim defaults to the **identified per-axis types** (2nd-order roll/pitch, 1st-order
+    yaw, ADR-0005) because validating those is the point. Passthrough stays available as a baseline.
+*   **Per-run artifacts** — `sim/runs/<ts>_<scenario>/{plots/, report.md, data.csv, metrics.json}`.
+*   **Frame** — canonical **NED** (firmware); ENU adapter only at the Gazebo seam. **Gazebo** is a
+    reserved `NotImplementedError` stub in Phase 1; bring-up is a later Linux-partition session.
+
 ## Trajectory presets (firmware-generated)
 
 Run only when `DroneStatus.FlyMode == FlyMode_SDK`. Mutually exclusive via  

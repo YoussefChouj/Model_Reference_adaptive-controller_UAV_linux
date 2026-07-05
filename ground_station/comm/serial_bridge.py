@@ -57,7 +57,7 @@ except ImportError:  # pragma: no cover
 #        Dashboard sends 0x10 (OF-origin reset) immediately before idx 6 start.
 # Must match GS_PROTO_VERSION in Global_file/global_declare.h.
 # Increment both when the telemetry frame layout or CMD semantics change.
-GS_PROTO_VERSION: int = 6
+GS_PROTO_VERSION: int = 8
 
 cmd_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
 
@@ -235,6 +235,7 @@ class SerialBridge:
         self._last_telemetry_a: Dict[str, float] = {}
         self._last_telemetry_b: Dict[str, float] = {}
         self._last_telemetry_id: Dict[str, float] = {}
+        self._last_telemetry_bench: Dict[str, float] = {}
         self._telemetry_lock = threading.Lock()
 
         # Debug printing throttle (simulate mode can be very chatty).
@@ -673,6 +674,41 @@ class SerialBridge:
         out.append(("id.sysid_state", float(sysid_state)))
         return out
 
+    def _unpack_frame_bench(self, payload: bytes) -> List[Tuple[str, float]]:
+        # FRAME 0x04 — motor bench-test stream (~100 Hz, replaces A/B while active).
+        # Dual-length backward compat (mirror of _unpack_frame_b v2/v3 pattern):
+        #   v7 = 12 B (no RPM): u32 sample_counter | u8 motor_id | u16 commanded_ccr |
+        #                         f real_voltage | u8 active
+        #   v8 = 20 B (adds 4x u16 RPM): v7 bytes + u16 rpm0..3 little-endian
+        # v7 fills rpm=(0,0,0,0); v8 parses all four channels. Thrust is read off an
+        # external scale by hand; this frame carries the operating point so the
+        # dashboard logs each manual thrust point against a fresh pack voltage and
+        # (v8) measured ω. See docs/bench_characterization.md and ADR-0010.
+        if len(payload) not in (12, 20):
+            return []
+        counter = struct.unpack_from("<I", payload, 0)[0]
+        motor_id = payload[4]
+        ccr = struct.unpack_from("<H", payload, 5)[0]
+        vbat = struct.unpack_from("<f", payload, 7)[0]
+        active = payload[11]
+        if len(payload) >= 20:
+            r0, r1, r2, r3 = struct.unpack_from("<4H", payload, 12)
+            rpm_tuple: Tuple[int, int, int, int] = (int(r0), int(r1), int(r2), int(r3))
+        else:
+            rpm_tuple = (0, 0, 0, 0)
+        return [
+            ("bench.sample_counter", float(counter)),
+            ("bench.motor_id", float(motor_id)),
+            ("bench.ccr", float(ccr)),
+            ("bench.vbat", float(vbat)),
+            ("bench.active", float(active)),
+            ("bench.rpm", float(max(rpm_tuple))),
+            ("bench.rpm1", float(rpm_tuple[0])),
+            ("bench.rpm2", float(rpm_tuple[1])),
+            ("bench.rpm3", float(rpm_tuple[2])),
+            ("bench.rpm4", float(rpm_tuple[3])),
+        ]
+
     def _handle_frame(self, frame_type: int, max_num_basis: int, payload: bytes) -> None:
         if frame_type == 0x01:
             lines = self._unpack_frame_a(max_num_basis, payload)
@@ -680,6 +716,8 @@ class SerialBridge:
             lines = self._unpack_frame_b(max_num_basis, payload)
         elif frame_type == 0x03:
             lines = self._unpack_frame_id(payload)
+        elif frame_type == 0x04:
+            lines = self._unpack_frame_bench(payload)
         else:
             return
 
@@ -690,6 +728,8 @@ class SerialBridge:
                     self._last_telemetry_a = mp
                 elif frame_type == 0x03:
                     self._last_telemetry_id = mp
+                elif frame_type == 0x04:
+                    self._last_telemetry_bench = mp
                 else:
                     self._last_telemetry_b = mp
             self._maybe_debug_print_telemetry(frame_type, lines)
@@ -703,10 +743,11 @@ class SerialBridge:
                 a = dict(self._last_telemetry_a)
                 b = dict(self._last_telemetry_b)
                 idf = dict(self._last_telemetry_id)
+                bench = dict(self._last_telemetry_bench)
             with self._state_lock:
                 mb = int(self._last_max_num_basis)
             payload = json.dumps(
-                {"a": a, "b": b, "id": idf, "max_num_basis": mb},
+                {"a": a, "b": b, "id": idf, "bench": bench, "max_num_basis": mb},
                 separators=(",", ":"),
             ).encode("utf-8")
             if len(payload) > 65000:
@@ -841,6 +882,11 @@ class SerialBridge:
         elif frame_type == 0x03:
             if len_payload != 36:
                 return
+        elif frame_type == 0x04:
+            # v7 = 12 B (no RPM), v8 = 20 B (4x u16 RPM appended). Accept both
+            # so the bridge still parses pre-reflash firmware.
+            if len_payload not in (12, 20):
+                return
         else:
             return
 
@@ -926,6 +972,12 @@ class SerialBridge:
                     continue
             elif frame_type == 0x03:
                 if len_payload != 36:
+                    sync_seen = False
+                    continue
+            elif frame_type == 0x04:
+                # v7 = 12 B (no RPM), v8 = 20 B (4x u16 RPM appended). Accept both
+                # so the bridge still parses pre-reflash firmware.
+                if len_payload not in (12, 20):
                     sync_seen = False
                     continue
             else:

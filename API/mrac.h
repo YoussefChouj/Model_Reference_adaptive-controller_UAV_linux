@@ -161,8 +161,16 @@ typedef struct {
     // Reference model parameters (runtime-selectable type via CMD 0x13)
     float ref_model_bw;         // [rad/s] Reference model bandwidth (Am for 1st-order, wn for 2nd-order)
     float ref_model_zeta;       // [-] Damping ratio for 2nd-order reference model (~0.8 = mild overshoot)
-    float P_lyap;               // Lyapunov matrix scalar (default 1.0f)
-    
+    float P_lyap;               // [legacy] scalar Lyapunov gain field — UNUSED (ADR-0007)
+
+    // 2nd-order matrix-P state-space adaptive law (ADR-0007; active only when
+    // ref_model_type==2). Lyapunov drive  s = e*Pe + e_dot*Pedot  where Pe,Pedot are
+    // the 2nd column of P (B=[0;1]), computed live from (ref_model_bw, ref_model_zeta, Q):
+    //   Pe = Q1/(2*wn^2),  Pedot = (Q1/wn^2 + Q2)/(4*zeta*wn).  Q1=wn -> Pe=1/(2*wn).
+    float ref_Q1;               // [-] Lyapunov Q diagonal: rate-error weight
+    float ref_Q2;               // [-] Lyapunov Q diagonal: rate-derivative weight
+    float wc_edot;              // [rad/s] LPF cutoff for the finite-difference rate derivative
+
 } MRAC_AxisConfig_t;
 
 // State structure for an MRAC axis (mutable runtime data)
@@ -194,6 +202,11 @@ typedef struct {
     
     // Saturation deficit used for Pseudo Control Hedging
     float u_def;        // u_cmd - u_actual_after_mixer
+
+    // Rate-derivative estimator for the 2nd-order state-space law (ADR-0007)
+    float x_prev;       // previous-tick plant rate (finite-difference derivative)
+    float xdot_f;       // LPF'd plant-rate derivative (angular-accel estimate)
+    float e_dot;        // tracking-error derivative (xdot_f - xm_dot)
 } MRAC_AxisState_t;
 
 // Main MRAC structure holding all 4 axes

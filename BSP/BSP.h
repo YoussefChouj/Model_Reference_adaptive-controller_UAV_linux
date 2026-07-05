@@ -4,6 +4,7 @@
 #include  "stm32f4xx.h"
 #include "spi.h"
 #include "pwm.h"
+#include "rpm.h"
 #include "usart1.h"
 #include "usart2.h"
 #include "led.h" 

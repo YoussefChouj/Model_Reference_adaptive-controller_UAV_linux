@@ -25,6 +25,9 @@ short Throttle_th = 2200;
 #define LAND_DES_STEP   0.0015f
 /* Safety net: 2000 ticks at 200 Hz = 10 s max landing time before forced disarm. */
 #define LAND_MAX_TICKS  2000U
+/* Motor bench-test dead-man: stabilizer runs at 200 Hz, so 100 ticks = 500 ms.
+ * If the dashboard stops sending CMD 0x16 heartbeats, motors are zeroed. */
+#define MOTOR_TEST_DEADMAN_TICKS  100U
 float Cos_Yaw_01= 0;
 float Sin_Yaw_01= 0;
 
@@ -142,6 +145,29 @@ void Update_Motor(void)
     static uint16_t s_land_timeout = 0U;
 
     FlightState_t state = FlightFSM_GetState();
+
+    /* Motor bench-test override (CMD 0x16): drive ONE chosen motor to a commanded CCR
+     * for the thrust-stand experiment. Strictly DISARMED-only, with a dead-man — if the
+     * dashboard stops sending heartbeats (watchdog exceeds the window) or anything leaves
+     * DISARMED, motors are zeroed and test mode exits. RC/arming stays the final authority.
+     * Set_PWM_Motors() applies the [2000,4000] clamp. See docs/bench_characterization.md. */
+    if (motor_test_active)
+    {
+        if (state != FLIGHT_STATE_DISARMED ||
+            ++motor_test_watchdog > MOTOR_TEST_DEADMAN_TICKS)
+        {
+            motor_test_active = 0U;
+            Set_Zero_Motors();
+            return;
+        }
+        mymotor.motor1 = (motor_test_id == 1U) ? (short)motor_test_ccr : Motor_PWM_ZERO;
+        mymotor.motor2 = (motor_test_id == 2U) ? (short)motor_test_ccr : Motor_PWM_ZERO;
+        mymotor.motor3 = (motor_test_id == 3U) ? (short)motor_test_ccr : Motor_PWM_ZERO;
+        mymotor.motor4 = (motor_test_id == 4U) ? (short)motor_test_ccr : Motor_PWM_ZERO;
+        Set_PWM_Motors();
+        return;
+    }
+
     if (state == FLIGHT_STATE_ARMED)
     {
         if (flight_phase == FLIGHT_PHASE_LANDING)
@@ -798,7 +824,7 @@ void Get_Voltage(void)     //ͨ��ADC����ص�ѹ
 {
 	adc_value = ADC_Read();
 	voltage = Voltage_Calculation(adc_value);
-	real_voltage = (voltage/2.85f)*16.8f;     //������2.99
+	real_voltage = 7.0663f*voltage + 0.8930f;   //2-pt cal 2026-06-24: (2.21289V,16.53) (1.98081V,14.89)
 	if(real_voltage<15.0f)
 	{
 		SetBeep(1);//�����ź�

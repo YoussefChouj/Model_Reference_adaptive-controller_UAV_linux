@@ -116,6 +116,13 @@ def decode_stream(buf: bytearray, stats: FrameStats) -> None:
                 stats.len_fail += 1
                 continue
             stats.frame_b_ok += 1
+        elif frame_type == 0x04:
+            # ADR-0010: bench frame. v7 = 12 B, v8 = 20 B (4x u16 RPM appended).
+            # Accept both so the diag tool works across the reflash.
+            if payload_len not in (12, 20):
+                stats.len_fail += 1
+                continue
+            stats.frame_b_ok += 1
         else:
             stats.unknown_type += 1
 

@@ -8,6 +8,7 @@
 #include "rc_input.h"
 #include "flight_fsm.h"
 #include "Ano_OF.h"
+#include "rpm.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -295,7 +296,60 @@ void Send_Groundstation_Telemetry_UART4(void)
     Buf_Telemetry_UART4[0] = 0xAA;
     Buf_Telemetry_UART4[1] = 0xBB;
     
-    if (mrac_flags.id_frame_on) // FRAME 0x03 — high-rate system-ID stream @100Hz (replaces A/B while active)
+    if (motor_test_active) // FRAME 0x04 — motor bench-test stream @100Hz (replaces A/B while active)
+    {
+        // Payload (20 B): u32 sample_counter, u8 motor_id, u16 commanded_ccr, f real_voltage, u8 active,
+        // {u16 rpm0, u16 rpm1, u16 rpm2, u16 rpm3} — ADR-0010. Layout `<I B H f B 4H`.
+        // Thrust is read off an external scale by hand; the firmware streams the operating point
+        // (which motor, what CCR, pack voltage, measured RPM) at the loop-adjacent rate so the dashboard
+        // logs each manually-entered thrust point against fresh voltage and measured ω. Get_Voltage() is
+        // called here because SystemMonitor_Task only refreshes real_voltage at 1 Hz (too slow to catch
+        // pack sag during a sweep). sample_counter detects dropped frames. RPMs are averaged per-channel
+        // and stale channels read 0 (sensor unplugged / motor stopped). See docs/bench_characterization.md.
+        static uint32_t bench_sample_counter = 0;
+        uint16_t payload_len = 20U;
+        float tf;
+        uint16_t rpm_vals[RPM_NUM_CH];
+        uint8_t i;
+
+        for (i = 0; i < RPM_NUM_CH; i++) {
+            rpm_vals[i] = RPM_Get(i);
+        }
+
+        Get_Voltage(); // fresh pack voltage per frame (overrides the 1 Hz SystemMonitor read)
+
+        Buf_Telemetry_UART4[2] = 0x04; // bench frame type
+        Buf_Telemetry_UART4[3] = (uint8_t)(payload_len >> 8);
+        Buf_Telemetry_UART4[4] = (uint8_t)(payload_len & 0xFFU);
+        Buf_Telemetry_UART4[5] = MAX_NUM_BASIS; // header parity with other frames
+        len = 6;
+
+        Buf_Telemetry_UART4[len++] = (uint8_t)(bench_sample_counter & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((bench_sample_counter >> 8) & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((bench_sample_counter >> 16) & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((bench_sample_counter >> 24) & 0xFFU);
+
+        Buf_Telemetry_UART4[len++] = motor_test_id;
+        Buf_Telemetry_UART4[len++] = (uint8_t)(motor_test_ccr & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((motor_test_ccr >> 8) & 0xFFU);
+
+        tf = real_voltage;
+        Buf_Telemetry_UART4[len++] = BYTE0(tf);
+        Buf_Telemetry_UART4[len++] = BYTE1(tf);
+        Buf_Telemetry_UART4[len++] = BYTE2(tf);
+        Buf_Telemetry_UART4[len++] = BYTE3(tf);
+
+        Buf_Telemetry_UART4[len++] = motor_test_active;
+
+        // ADR-0010: 4 channels × u16 little-endian RPM after the active byte.
+        // Reordered by channel index, NOT motor number — physical plugging decides pairing.
+        for (i = 0; i < RPM_NUM_CH; i++) {
+            Buf_Telemetry_UART4[len++] = (uint8_t)(rpm_vals[i] & 0xFFU);
+            Buf_Telemetry_UART4[len++] = (uint8_t)((rpm_vals[i] >> 8) & 0xFFU);
+        }
+        bench_sample_counter++;
+    }
+    else if (mrac_flags.id_frame_on) // FRAME 0x03 — high-rate system-ID stream @100Hz (replaces A/B while active)
     {
         // Payload (36 B): u32 sample_counter, u8 axis_id, {r,x,u_nom,u_ad,xm} floats for THE EXCITED
         // AXIS ONLY, f sysid_dither, f real_voltage, u8 ARM, u8 FlyMode, u8 SysID FSM state.
@@ -934,6 +988,32 @@ void Process_GroundStation_Command(void)
                     GS_KeySDKflag = 0U;
                     RCInput_SetAuthority(0U);
                 }
+            }
+        }
+
+        /* CMD 0x16 — motor bench test (DISARMED-only; thrust-stand experiment).
+         *   idx 0 = enable / heartbeat (val>=0.5 ON; each send pets the dead-man)
+         *   idx 1 = motor select (1..4 = M1..M4; 0 = none)
+         *   idx 2 = commanded CCR (clamped to [2000,4000])
+         * The stabilizer drives only the selected motor and zeroes everything if no
+         * heartbeat arrives within MOTOR_TEST_DEADMAN_TICKS or the FSM leaves DISARMED.
+         * See docs/bench_characterization.md. */
+        else if (id == 0x16) {
+            if (idx == 0) {
+                if (((uint8_t)(val + 0.5f)) != 0U) {
+                    motor_test_active   = 1U;
+                    motor_test_watchdog = 0U;   /* heartbeat: pet the dead-man */
+                } else {
+                    motor_test_active = 0U;
+                }
+            } else if (idx == 1) {
+                uint8_t m = (uint8_t)(val + 0.5f);
+                motor_test_id = (m <= 4U) ? m : 0U;
+            } else if (idx == 2) {
+                float c = val;
+                if (c < 2000.0f) c = 2000.0f;
+                if (c > 4000.0f) c = 4000.0f;
+                motor_test_ccr = (uint16_t)(c + 0.5f);
             }
         }
     }

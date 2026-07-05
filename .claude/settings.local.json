@@ -7,7 +7,9 @@
       "Bash(pip install:*)",
       "Bash(python3 scripts/sync_obsidian.py)",
       "Bash(ls ~/.claude/*.json)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(grep -rli \"openclaw\\\\|hetzner\\\\|opencl\" /c/Users/Acer/.claude 2>/dev/null | head -30; echo \"---DESKTOP---\"; grep -rli \"openclaw\\\\|opencl\" \"/c/Users/Acer/Desktop\" 2>/dev/null | head -30)",
+      "Read(//c/Users/Acer/Desktop/**)"
     ]
   }
 }

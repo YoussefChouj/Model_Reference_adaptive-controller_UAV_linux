@@ -565,6 +565,11 @@
               <FilePath>..\BSP\pwm.c</FilePath>
             </File>
             <File>
+              <FileName>rpm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\BSP\rpm.c</FilePath>
+            </File>
+            <File>
               <FileName>spi.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP\spi.c</FilePath>

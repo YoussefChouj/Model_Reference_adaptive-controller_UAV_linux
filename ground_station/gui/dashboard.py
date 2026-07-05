@@ -321,6 +321,15 @@ class Dashboard:
         self._vrc_was_active: Dict[str, bool] = {}
         self._bench_mode_ui: bool = False
 
+        # Motor bench-test (thrust stand, CMD 0x16 / frame 0x04). DISARMED-only.
+        self._motor_test_active: bool = False
+        self._motor_test_id: int = 1            # M1..M4
+        self._motor_test_ccr: int = 2000        # current commanded CCR [2000..4000]
+        self._motor_test_step: int = 100        # fixed CCR step per click (even coverage of T~CCR^2)
+        self._motor_test_allow_high: bool = False  # gate for CCR > 3000
+        self._motor_test_hb_t: float = 0.0      # last heartbeat send time
+        self._bench_csv_path: Optional[Path] = None  # manual-point log (lazily created)
+
         self._flight_logger = FlightLogger()
         self._log_lock = threading.Lock()       # serialize CSV writes across render + telemetry-rx threads
         self._low_batt_warned: bool = False     # one-shot low-battery popup latch (resets on re-arm)
@@ -448,6 +457,8 @@ class Dashboard:
                             self._last_id_counter = c
                             with self._log_lock:
                                 self._flight_logger.log_snapshot("ID", idf)
+                if "bench" in msg and isinstance(msg["bench"], dict):
+                    self._telem["bench"] = {str(k): float(v) for k, v in msg["bench"].items()}
                 if "max_num_basis" in msg:
                     self._telem["max_num_basis"] = int(msg["max_num_basis"])
                 self._last_telem_rx_t = time.monotonic()
@@ -691,7 +702,11 @@ class Dashboard:
         self._vrc_spring_return()
         now = time.monotonic()
         self._sync_telemetry_from_bridge_if_local()
-        
+
+        # Motor bench test: heartbeat (pets the firmware dead-man) + live readout. Must run
+        # every frame, before the ~5 Hz early-return below, so the heartbeat cadence is kept.
+        self._bench_tick(now)
+
         # Smooth high-FPS updates
         if now - self._last_paths_canvas_t >= 0.1:
             self._last_paths_canvas_t = now
@@ -2132,6 +2147,323 @@ class Dashboard:
         self._send_cmd(0x09, 2, float(cfg.get("max_pitch_deg", 15.0)))
         self._send_cmd(0x09, 3, float(cfg.get("max_roll_deg", 15.0)))
 
+    # ---------------- Motor bench test (thrust stand, CMD 0x16 / frame 0x04) ----------------
+    def _build_motor_bench_tab(self) -> None:
+        dpg.add_text("MOTOR BENCH TEST — thrust stand (CMD 0x16 / frame 0x04)",
+                     color=(180, 220, 255, 255))
+        dpg.add_text(
+            "SAFETY: DISARMED only. Bolt the rig down, stay out of the prop plane (props can "
+            "amputate). The firmware dead-man stops the motor if this dashboard stops sending "
+            "heartbeats (~0.5 s). RC/arming stays the final kill. See docs/bench_characterization.md.",
+            color=(220, 140, 60, 255), wrap=900,
+        )
+        dpg.add_separator()
+        with dpg.group(horizontal=True):
+            dpg.add_text("Motor:")
+            dpg.add_combo(tag="bench_motor", items=["M1", "M2", "M3", "M4"],
+                          default_value="M1", width=80, callback=self._bench_set_motor)
+            dpg.add_text("    Step (CCR counts):")
+            dpg.add_input_int(tag="bench_step", default_value=100, min_value=1, max_value=500,
+                              step=10, width=140, callback=self._bench_set_step)
+            dpg.add_text("(fixed steps give even coverage of T~CCR^2)", color=(150, 150, 150, 255))
+        dpg.add_separator()
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="  CCR  -  ", callback=lambda: self._bench_step_ccr(-1))
+            dpg.add_button(label="  CCR  +  ", callback=lambda: self._bench_step_ccr(+1))
+            dpg.add_slider_int(tag="bench_ccr", label="commanded CCR", min_value=2000,
+                               max_value=4000, default_value=2000, width=360,
+                               callback=self._bench_slider_ccr)
+        dpg.add_checkbox(tag="bench_allow_high", label="Allow high power (CCR > 3000)",
+                         default_value=False, callback=self._bench_allow_high_toggle)
+        dpg.add_separator()
+        with dpg.group(horizontal=True):
+            # Poll-driven run/stop (read every frame in _bench_tick). A click toggles the
+            # checkbox's value internally even when DPG drops the click callback, so polling
+            # the value is reliable where button click-callbacks are not — same reason the
+            # CCR slider works. Tick = spin, untick = STOP.
+            dpg.add_checkbox(tag="bench_run", label="RUN motor  (untick = STOP)",
+                             default_value=False)
+            dpg.add_button(label="STOP", tag="bench_stop_btn", callback=lambda: self._bench_stop())
+        dpg.add_text("test: OFF", tag="bench_status", color=(150, 150, 150, 255))
+        dpg.add_text("link: --   vbat: --   ccr(echo): --   motor(echo): --   fw_active: --",
+                     tag="bench_telem", color=(180, 180, 180, 255))
+        # ADR-0010: live RPM readout (one per sensor channel + highlighted max).
+        # Bench uses ONE sensor at a time (physical plugging decides which channel is live).
+        dpg.add_text("RPM: ch1=--   ch2=--   ch3=--   ch4=--   max=--",
+                     tag="bench_rpm", color=(180, 220, 255, 255))
+        dpg.add_text("T_est = k·(ω_meas)² : -- N",
+                     tag="bench_t_est", color=(180, 220, 180, 255))
+        dpg.add_separator()
+        dpg.add_text("Propeller model (T = k*omega^2,  omega ~ a*CCR + b)", color=(200, 200, 200, 255))
+        dpg.add_text("defaults: 2213-935KV, 9045 prop, 4S(14.8V), 25C. a,b,k are PRIORS",
+                     color=(150, 150, 150, 255))
+        dpg.add_text("(no tacho) - real result is the fitted T=K*CCR^2 from logged points",
+                     color=(150, 150, 150, 255))
+        # Priors (no tachometer): D/pitch = 9045 prop. a,b from omega(no-load)=KV*V:
+        #   935*14.8 ~ 1449 rad/s at CCR 4000, 0 at CCR 2000 -> a=0.7245, b=-1449.
+        # k from T=Ct*rho*D^4/(4*pi^2)*omega^2 with Ct~0.11, rho(25C)=1.184, D=0.2286m -> ~9e-6.
+        with dpg.group(horizontal=True):
+            dpg.add_input_float(tag="bench_prop_d", label="D (in)", default_value=9.0, width=130)
+            dpg.add_input_float(tag="bench_prop_pitch", label="pitch (in)", default_value=4.5, width=140)
+        with dpg.group(horizontal=True):
+            dpg.add_input_float(tag="bench_k", label="k", default_value=9.0e-6, width=150, format="%.6g")
+            dpg.add_input_float(tag="bench_a", label="a", default_value=0.7245, width=150, format="%.6g")
+            dpg.add_input_float(tag="bench_b", label="b", default_value=-1449.0, width=130, format="%.6g")
+        dpg.add_separator()
+        dpg.add_text("Manual thrust point (read the scale AFTER it settles, then Log point)",
+                     color=(200, 200, 200, 255))
+        # cal_factor: rig has NO pivot (rigid cantilever, motor 14cm past scale edge),
+        # so there is no lever ratio - vertical force transmits ~1:1. cal_factor absorbs
+        # the off-center / corner-load error of THIS rig. Measure it: place a KNOWN mass
+        # at the motor mount point, read the scale, set cal_factor = known_g / reading_g.
+        # Leave at 1.0 if uncalibrated.  thrust_N = (grams - tare) * 0.00981 * cal_factor.
+        with dpg.group(horizontal=True):
+            dpg.add_input_float(tag="bench_grams", label="scale (g)", default_value=0.0, width=160)
+            dpg.add_input_float(tag="bench_tare_g", label="tare (g, no-throttle)",
+                                default_value=0.0, width=220)
+        with dpg.group(horizontal=True):
+            dpg.add_input_float(tag="bench_cal", label="cal_factor (known_g / reading_g)",
+                                default_value=1.0, width=300, format="%.5g")
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="Log point", callback=lambda: self._bench_log_point())
+            dpg.add_text("", tag="bench_log_status", color=(150, 200, 150, 255))
+
+    def _bench_set_motor(self, sender: Any, app_data: Any) -> None:
+        try:
+            self._motor_test_id = int(str(app_data).replace("M", ""))
+        except Exception:
+            self._motor_test_id = 1
+        if self._motor_test_active:
+            self._send_cmd(0x16, 1, float(self._motor_test_id))
+
+    def _bench_set_step(self, sender: Any, app_data: Any) -> None:
+        try:
+            self._motor_test_step = max(1, int(app_data))
+        except Exception:
+            pass
+
+    def _bench_allow_high_toggle(self, sender: Any, app_data: Any) -> None:
+        self._motor_test_allow_high = bool(app_data)
+
+    def _bench_clamp_ccr(self, ccr: Any) -> int:
+        try:
+            ccr = int(round(float(ccr)))
+        except Exception:
+            ccr = 2000
+        ccr = max(2000, min(4000, ccr))
+        if ccr > 3000 and not self._motor_test_allow_high:
+            ccr = 3000
+        return ccr
+
+    def _bench_slider_ccr(self, sender: Any, app_data: Any) -> None:
+        self._motor_test_ccr = self._bench_clamp_ccr(app_data)
+        try:
+            dpg.set_value("bench_ccr", self._motor_test_ccr)
+        except Exception:
+            pass
+        if self._motor_test_active:
+            self._send_cmd(0x16, 2, float(self._motor_test_ccr))
+
+    def _bench_step_ccr(self, direction: int) -> None:
+        self._motor_test_ccr = self._bench_clamp_ccr(
+            self._motor_test_ccr + direction * self._motor_test_step)
+        try:
+            dpg.set_value("bench_ccr", self._motor_test_ccr)
+        except Exception:
+            pass
+        self._bench_write_row("STEP_UP" if direction > 0 else "STEP_DOWN", grams=0.0, tare=0.0)
+        if self._motor_test_active:
+            self._send_cmd(0x16, 2, float(self._motor_test_ccr))
+
+    def _bench_current_ccr(self) -> int:
+        """Slider widget is the single source of truth for commanded CCR.
+        Read it live (clamped) so the attribute can never desync from what the
+        operator sees — this is the value pushed to the firmware every heartbeat."""
+        try:
+            self._motor_test_ccr = self._bench_clamp_ccr(dpg.get_value("bench_ccr"))
+        except Exception:
+            pass
+        return self._motor_test_ccr
+
+    def _bench_start(self) -> None:
+        a = self._telem.get("a") or {}
+        arm = a.get("status.arm")
+        if arm is not None and int(round(float(arm))) != 0:
+            try:
+                dpg.set_value("bench_run", False)  # bounce the checkbox back off
+                dpg.set_value("bench_status", "REFUSED: vehicle is ARMED — disarm first")
+                dpg.configure_item("bench_status", color=(220, 80, 80, 255))
+            except Exception:
+                pass
+            return
+        self._send_cmd(0x16, 1, float(self._motor_test_id))
+        self._send_cmd(0x16, 2, float(self._bench_current_ccr()))
+        self._send_cmd(0x16, 0, 1.0)
+        self._motor_test_active = True
+        self._motor_test_hb_t = time.monotonic()
+        self._bench_write_row("START", grams=0.0, tare=0.0)
+
+    def _bench_stop(self) -> None:
+        self._send_cmd(0x16, 0, 0.0)
+        self._motor_test_active = False
+        try:
+            dpg.set_value("bench_run", False)
+        except Exception:
+            pass
+        self._bench_write_row("STOP", grams=0.0, tare=0.0)
+
+    def _bench_tick(self, now: float) -> None:
+        # Poll the RUN checkbox every frame and reconcile against actual run state. This is
+        # the authoritative run/stop path (button click-callbacks proved unreliable here).
+        try:
+            want_run = bool(dpg.get_value("bench_run"))
+        except Exception:
+            want_run = self._motor_test_active
+        if want_run and not self._motor_test_active:
+            self._bench_start()            # arm-refusal inside may bounce the checkbox off
+        elif not want_run and self._motor_test_active:
+            self._bench_stop()
+
+        if self._motor_test_active and (now - self._motor_test_hb_t) >= 0.15:
+            self._motor_test_hb_t = now
+            # Re-push the full operating point every heartbeat (not just the enable):
+            # the slider is the source of truth, so the firmware always tracks what the
+            # operator sees, and a dropped motor/CCR packet self-heals within 0.15 s.
+            self._send_cmd(0x16, 1, float(self._motor_test_id))
+            self._send_cmd(0x16, 2, float(self._bench_current_ccr()))
+            self._send_cmd(0x16, 0, 1.0)  # heartbeat — pets the firmware dead-man
+        try:
+            bench = self._telem.get("bench") or {}
+            fresh = self._telemetry_is_fresh()
+            vbat = bench.get("bench.vbat")
+            ccr_echo = bench.get("bench.ccr")
+            mid = bench.get("bench.motor_id")
+            active_echo = bench.get("bench.active")
+            # ADR-0010: per-channel RPM + max (handles v7 zeros and v8 four-channel reads).
+            rpm_chans = (
+                int(bench.get("bench.rpm1") or 0),
+                int(bench.get("bench.rpm2") or 0),
+                int(bench.get("bench.rpm3") or 0),
+                int(bench.get("bench.rpm4") or 0),
+            )
+            rpm_max = int(bench.get("bench.rpm") or max(rpm_chans))
+            link = "OK" if (fresh and bench) else "STALE"
+            dpg.set_value(
+                "bench_telem",
+                f"link: {link}   "
+                f"vbat: {('%.2f V' % vbat) if vbat is not None else '--'}   "
+                f"ccr(echo): {int(ccr_echo) if ccr_echo is not None else '--'}   "
+                f"motor(echo): {('M%d' % int(mid)) if mid else '--'}   "
+                f"fw_active: {int(active_echo) if active_echo is not None else '--'}",
+            )
+            # Highlight the rpm_max value: on the bench only one sensor is plugged,
+            # the others read 0, so max is the live sensor's RPM.
+            max_col = (255, 220, 120, 255) if rpm_max > 0 else (180, 180, 180, 255)
+            dpg.set_value(
+                "bench_rpm",
+                f"RPM: ch1={rpm_chans[0]}   ch2={rpm_chans[1]}   "
+                f"ch3={rpm_chans[2]}   ch4={rpm_chans[3]}   max={rpm_max}",
+            )
+            dpg.configure_item("bench_rpm", color=max_col)
+            # T_est = k * (omega)^2 ; omega = rpm_max * 2*pi/60. Reuse the same k the
+            # CSV row uses, so on-screen T_est matches the next logged point's t_est_N.
+            try:
+                k_val = float(dpg.get_value("bench_k"))
+            except Exception:
+                k_val = 0.0
+            if rpm_max > 0 and k_val > 0.0:
+                omega = rpm_max * 2.0 * math.pi / 60.0
+                t_est = k_val * omega * omega
+                dpg.set_value("bench_t_est", f"T_est = k·(ω_meas)² : {t_est:.4f} N")
+                dpg.configure_item("bench_t_est", color=(120, 220, 120, 255))
+            else:
+                dpg.set_value("bench_t_est", "T_est = k·(ω_meas)² : -- N")
+                dpg.configure_item("bench_t_est", color=(180, 180, 180, 255))
+            st = "ON" if self._motor_test_active else "OFF"
+            col = (90, 200, 90, 255) if self._motor_test_active else (150, 150, 150, 255)
+            dpg.set_value("bench_status",
+                          f"test: {st}   (cmd CCR {self._motor_test_ccr}, M{self._motor_test_id})")
+            dpg.configure_item("bench_status", color=col)
+        except Exception:
+            pass
+
+    def _bench_csv(self) -> Path:
+        if self._bench_csv_path is None:
+            d = self.repo_root / "logs" / "bench"
+            d.mkdir(parents=True, exist_ok=True)
+            self._bench_csv_path = d / f"thrust_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+            # ADR-0010: append rpm1..4, rpm (max of channels), t_est_N (= k * (omega_meas)^2).
+            # Existing column order is preserved; new columns come AFTER the existing ones.
+            header = ("iso_time,monotonic,type,motor_id,ccr_cmd,ccr_echo,vbat,grams,tare_g,"
+                      "cal_factor,thrust_N,omega_est,thrust_formula_N,prop_d_in,prop_pitch_in,k,a,b,"
+                      "rpm1,rpm2,rpm3,rpm4,rpm,t_est_N\n")
+            with self._log_lock:
+                self._bench_csv_path.write_text(header, encoding="utf-8")
+        return self._bench_csv_path
+
+    def _bench_read_floats(self, *tags: str) -> List[float]:
+        out: List[float] = []
+        for t in tags:
+            try:
+                out.append(float(dpg.get_value(t)))
+            except Exception:
+                out.append(0.0)
+        return out
+
+    def _bench_log_point(self) -> None:
+        grams, tare = self._bench_read_floats("bench_grams", "bench_tare_g")
+        self._bench_write_row("POINT", grams=grams, tare=tare)
+        try:
+            dpg.set_value("bench_log_status",
+                          f"logged: CCR {self._motor_test_ccr} -> {(grams - tare):.1f} g net")
+        except Exception:
+            pass
+
+    def _bench_write_row(self, kind: str, *, grams: float, tare: float) -> None:
+        bench = self._telem.get("bench") or {}
+        ccr_echo = bench.get("bench.ccr")
+        vbat = bench.get("bench.vbat")
+        d, pitch, k, a, b, cal = self._bench_read_floats(
+            "bench_prop_d", "bench_prop_pitch", "bench_k", "bench_a", "bench_b", "bench_cal")
+        if cal == 0.0:
+            cal = 1.0
+        thrust_N = (grams - tare) * 0.00981 * cal
+        omega_est = a * self._motor_test_ccr + b
+        thrust_formula = k * omega_est * omega_est
+        # ADR-0010: per-channel measured RPM (0 if no sensor / stopped), and max for the
+        # thrust-from-RPM column. t_est_N uses the measured ω so logged points record
+        # the model-vs-scale error at the actual rotational speed.
+        rpm1 = int(bench.get("bench.rpm1") or 0)
+        rpm2 = int(bench.get("bench.rpm2") or 0)
+        rpm3 = int(bench.get("bench.rpm3") or 0)
+        rpm4 = int(bench.get("bench.rpm4") or 0)
+        rpm_max = int(bench.get("bench.rpm") or max(rpm1, rpm2, rpm3, rpm4))
+        if rpm_max > 0 and k > 0.0:
+            omega_meas = rpm_max * 2.0 * math.pi / 60.0
+            t_est_N = k * omega_meas * omega_meas
+        else:
+            t_est_N = 0.0
+        row = (
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')},{time.monotonic():.3f},{kind},"
+            f"{self._motor_test_id},{self._motor_test_ccr},"
+            f"{int(ccr_echo) if ccr_echo is not None else ''},"
+            f"{('%.3f' % vbat) if vbat is not None else ''},"
+            f"{grams:.3f},{tare:.3f},{cal:.5g},{thrust_N:.5f},{omega_est:.5f},{thrust_formula:.6g},"
+            f"{d:.4g},{pitch:.4g},{k:.6g},{a:.6g},{b:.6g},"
+            f"{rpm1},{rpm2},{rpm3},{rpm4},{rpm_max},{t_est_N:.6g}\n"
+        )
+        try:
+            # Resolve/create the CSV path OUTSIDE the lock. _bench_csv() takes _log_lock
+            # itself on first call to write the header; since threading.Lock is NOT
+            # reentrant, calling it while already holding the lock would self-deadlock and
+            # freeze the whole render loop. Acquire the lock only for the append.
+            path = self._bench_csv()
+            with self._log_lock:
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(row)
+        except Exception:
+            pass
+
     def _build_flight_log_tab(self) -> None:
         logs = self.repo_root / "logs"
         logs.mkdir(parents=True, exist_ok=True)
@@ -2618,6 +2950,8 @@ class Dashboard:
                                 self._build_safety_tab()
                             with dpg.tab(label="Flight Log", tag="tab_flog"):
                                 self._build_flight_log_tab()
+                            with dpg.tab(label="Motor Bench", tag="tab_bench"):
+                                self._build_motor_bench_tab()
                         dpg.add_separator()
                         with dpg.group(horizontal=True):
                             dpg.add_text("Load preset:")

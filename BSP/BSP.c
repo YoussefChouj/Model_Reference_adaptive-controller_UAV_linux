@@ -6,7 +6,7 @@
 	 NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);
 
 	 LED_Init();
-	 PWM_TIM2_Init();
+	 RPM_Init();
 	 PWM_TIM3_Init();
 	 ADC1_Configuration();//ǧ������˳�ʼ����������ϵͳ����
 	 delay_ms(2000);

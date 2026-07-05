@@ -3,3 +3,6 @@
 .agent_reports/
 .agent_memory/
 .agent_scripts/__pycache__/
+
+# Generated simulation run artifacts (ADR-0006 D7)
+sim/runs/

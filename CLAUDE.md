@@ -23,18 +23,19 @@ python .agent_scripts/knowledge_gate.py --unlock
 
 ## Session State
 
-**Last Updated**: 2026-06-20  
-**Goal**: Sim rebuild Phase 1 — build clean `sim/` Python package (plant, ref model, adaptive law, regressor, scenarios, run); firmware-parity with `mrac.c`; `/grill-with-docs` then `/tdd` red-green-refactor.
+**Last Updated**: 2026-06-23  
+**Goal**: Sim rebuild Phase 1 — ✅ COMPLETE. Clean `sim/` package (plant, ref model, adaptive law, regressor, baseline PID, scenarios, run) is firmware-parity with `mrac.c`/`pid.c` and runs closed-loop with per-run artifacts; 44 tests green. Next: Phase 2 (6-DOF/Gazebo plant on Linux partition; offline P-matrix derivation for firmware via `compute_reference_model.py`; larger-mismatch MRAC experiments).
 
 ### Session Tasks
 
 | # | Task | Status |
 |---|------|--------|
-| 1 | `/grill-with-docs` — package design, plant fidelity, regressor alignment, 6-DOF seam | pending |
-| 2 | `/tdd` slice 1 — `plant.py` | pending |
-| 3 | `/tdd` slice 2 — `reference_model.py` | pending |
-| 4 | `/tdd` slice 3 — `adaptive_law.py` + `regressor.py` | pending |
-| 5 | `sim/README.md` + session-end distill | pending |
+| 1 | `/grill-with-docs` — package design, plant fidelity, regressor alignment, 6-DOF seam | ✅ done → ADR-0006 + CONTEXT.md |
+| 2 | `/tdd` slice 1 — `plant.py` | ✅ done → 6 tests green (yaw integrator, roll ramp-slope=K, ZOH+N=3 delay, Plant seam, Gazebo stub) |
+| 3 | `/tdd` slice 2 — `reference_model.py` | ✅ done → 7 tests green (firmware-parity Euler recurrence, scalar P=1/2wn, passthrough/1st/2nd, bumpless reset, for_axis factory) |
+| 4 | `/tdd` slice 3 — `adaptive_law.py` + `regressor.py` | ✅ done → 17 tests green (regressor golden-vector parity mrac.c:65-91 + cross-coupling; adaptive law gradient/projection/freeze/deadzone/tanh-sat/perf-recovery LPF, lower-bound=0 firmware quirk, for_axis gains) |
+| 5 | `/tdd` slice 4 — closed-loop wiring (`baseline.py` + `scenarios.py` + `run.py`) | ✅ done → 14 tests green (RatePID parity pid.c ComputePID incl EMin conditional-integ/clamps/u_nom÷mrac_to_mixer; closed-loop runner mrac.c:424-485 unit chain rad/s↔deg/s↔Nm; per-run artifacts ADR-0006 D7). 44 tests total. |
+| 6 | `sim/README.md` + session-end distill | ✅ done → README (two scenarios, unit chain, findings); ADR-0006 D7 artifacts gitignored |
 
 ### Prior Session (closed) — sysid + inner-loop MRAC 2026-06-16
 

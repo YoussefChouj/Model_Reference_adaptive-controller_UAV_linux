@@ -17,6 +17,12 @@ volatile uint8_t sbus_lost = 0;
 volatile uint32_t sbus_last_valid_tick = 0;
 volatile uint8_t bench_mode_active = 0;
 
+/* Motor bench-test mode (CMD 0x16) — see global_declare.h. */
+volatile uint8_t  motor_test_active   = 0U;
+volatile uint8_t  motor_test_id       = 0U;
+volatile uint16_t motor_test_ccr      = 2000U;
+volatile uint32_t motor_test_watchdog = 0U;
+
 float gs_max_horizontal_speed_mps = 1.0f;
 float gs_max_vertical_speed_mps = 1.0f;
 float gs_max_pitch_deg = 15.0f;

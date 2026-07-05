@@ -36,13 +36,28 @@ I = (m · g · d² · T²) / (16 · π² · L)
     in two directions; the crossing point is the CG. Mark it.
 2.  Attach two strings of **equal length** L, symmetric about the CG, separation d, so the  
     measured axis is **vertical** through the CG.
-3.  Twist **small** (\<10–15°), release, and time **20 full oscillations**, divide by 20 →  
-    `T` (timing many cycles kills stopwatch error; phone slow-mo helps you count).
+3.  Twist **small** (\<10–15°), release, and let it oscillate **20–30 cycles**.
 4.  Repeat 3× per axis, average.
-5.  Rotate the drone to put each axis vertical in turn:
-    *   **Izz (yaw):** drone level, props up.
-    *   **Ixx (roll):** drone on its side (roll axis vertical).
-    *   **Iyy (pitch):** drone on its other side (pitch axis vertical).
+5.  Rotate the drone to put each axis vertical in turn (string pairs at motor centers,
+    symmetric about the axis under test so the twist axis passes through the CG):
+    *   **Izz (yaw):** drone level, props up — strings from two **diagonally opposite** motor centers.
+    *   **Ixx (roll):** nose straight down (roll axis vertical) — strings from the two **rear** motors.
+    *   **Iyy (pitch):** one side straight down (pitch axis vertical) — strings from the two motors of the **upper** side.
+
+**Timing with the onboard gyro (no stopwatch, 2026-07-05):** the drone hangs powered
+and DISARMED with the battery in (that *is* the flight configuration you want). The
+gyro-rate feedbacks stream in **Frame B at 20 Hz regardless of arm state** — ample for
+a ~0.5 Hz oscillation. Over the **wireless telemetry link** (a cable would damp the
+swing), press the dashboard's **"Flight recording (20 Hz merged telemetry → CSV)"
+Start**, twist–release, record 20–30 cycles, Stop. Then
+`python ground_station/scripts/inertia_analysis.py <csv> --axis yaw --mass … --d … --L …`
+extracts T (zero-crossing fit + FFT cross-check), the damping correction, and
+I ± uncertainty, and warns if the off-axis gyros show the rig was swaying. **Zero
+firmware changes needed.**
+
+**Sizing the rig:** with m ≈ 0.99 kg and Izz ≈ 0.03 kg·m², **L ≈ 1.0–1.5 m** and
+**d ≈ 0.4 m** (motor-to-motor) gives T ≈ 2 s — comfortable. Measure d and L to the
+millimeter: they enter as d² and 1/L and dominate the error budget, not the gyro.
 
 Expect Ixx ≈ Iyy (symmetric-ish), Izz a bit different. Sanity-check against the cuboid  
 estimate `J = m/12·(w²+l²)` **recomputed with 988.5 g**, not 366 g.
@@ -57,10 +72,23 @@ estimate `J = m/12·(w²+l²)` **recomputed with 988.5 g**, not 366 g.
 the rig up, so the scale reads **less**; thrust = (static weight) − (reading). Blowing _up_  
 keeps prop-wash off the scale pan (blowing down corrupts the reading with airflow on the pan).
 
-*   Drive the motor at fixed throttle with a **servo tester (~$5)** or the flight controller  
-    in a test mode. Step the command: 0, 10, 20, … 100 %.
-*   At each step, read the scale → one (command, thrust) point. ~10 points = your curve.
-*   Thrust in grams × 0.00981 = newtons.
+*   Drive the motor with the **built-in firmware Motor Bench mode** (ADR-0009): dashboard
+    **"Motor Bench" tab** → pick the motor, step the CCR with the ± buttons (DISARMED-only;
+    firmware dead-man stops it if the dashboard disconnects). CMD `0x16` drives one motor;
+    telemetry frame `0x04` streams CCR + pack voltage at 100 Hz. (A **servo tester (~$5)** is
+    the no-firmware fallback.) Use **fixed CCR steps** (e.g. 100 counts over 2000→4000), not
+    percentage — even coverage of the nonlinear `T ∝ CCR²` curve gives a cleaner fit.
+*   At each step, let the reading settle, then **Log point** → one (CCR, thrust, voltage) row
+    in `logs/bench/thrust_<ts>.csv`. ~20 points = your curve. Sweep **up and down** (hysteresis).
+*   **RPM (ADR-0010):** TCRT5000 reflective module plugged into a spare TIM2 3-pin header
+    (use PB3/PB10/PB11 — avoid the PA5 header until its rail voltage is verified ≤3.3 V or a
+    10k series resistor is added), sensor looking **up at the blade roots from below**, one
+    reflective mark on each blade underside at the same radius. Tune the module trimpot so a
+    bare blade reads LOW and only tape reads HIGH (verify by hand-spinning, watching the module
+    LED, before powering the motor). Frame 0x04 then streams live RPM and each Log-point row
+    gains `rpm` and the `T_est = k·ω²` estimate from measured ω → model-vs-scale error per point.
+*   Thrust in grams × 0.00981 = newtons (the dashboard computes `thrust_N` and the
+    `T = k·ω²` estimate for you if you fill the propeller `k, a, b` fields).
 
 **Battery-voltage caveat (important):** thrust at a given command **drops as the pack**  
 **discharges**. So either (a) do the whole sweep **fast on a freshly-charged pack and note the**  

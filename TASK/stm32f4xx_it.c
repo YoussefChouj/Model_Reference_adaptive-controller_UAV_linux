@@ -1,9 +1,10 @@
 #include "stm32f4xx_it.h"
- 
+#include "rpm.h"
+
 
 USHORT16 Clear_IT = 0;
 /*************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUSART1_IRQHandler
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUSART1_IRQHandler
 *************************************************************************/
 
 extern USART_RX_TypeDef USART1_Rcr;
@@ -25,105 +26,137 @@ void USART1_IRQHandler(void)
 }
 
 ///*************************************************************************
-//ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUSART2_IRQHandler
-//ÖĞ¶Ï²úÉú»úÖÆ£ºUSART2½ÓÊÕµ½Ò»¸ö¿Õ×Ö½Úºó´¥·¢ÖĞ¶Ï
+//ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUSART2_IRQHandler
+//ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šUSART2æ¥æ”¶åˆ°ä¸€ä¸ªç©ºå­—èŠ‚åè§¦å‘ä¸­æ–­
 //*************************************************************************/
 //extern USART_RX_TypeDef USART2_Rcr;
 void USART2_IRQHandler(void)
 { 
     u8 com_data;
 
-	if ( USART2->SR & USART_SR_ORE ) //OREÖĞ¶Ï
+	if ( USART2->SR & USART_SR_ORE ) //OREä¸­æ–­
         com_data = USART2->DR;
-    //½ÓÊÕÖĞ¶Ï
+    //æ¥æ”¶ä¸­æ–­
     if ( USART_GetITStatus ( USART2, USART_IT_RXNE ) )
     {
-        USART_ClearITPendingBit ( USART2, USART_IT_RXNE ); //Çå³ıÖĞ¶Ï±êÖ¾
+        USART_ClearITPendingBit ( USART2, USART_IT_RXNE ); //æ¸…é™¤ä¸­æ–­æ ‡å¿—
 
         com_data = USART2->DR;
 				//====
-				//ÄäÃû¹âÁ÷½âÎö
+				//åŒ¿åå…‰æµè§£æ
 					AnoOF_GetOneByte(com_data);		
        	system_monitor.USART2_task_cnt ++;			
     }
 }
 
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºDMA1_Stream6_IRQHandler
-ÖĞ¶Ï²úÉú»úÖÆ£º´®¿Ú2·¢ËÍÍê³ÉÖĞ¶Ï
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šDMA1_Stream6_IRQHandler
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šä¸²å£2å‘é€å®Œæˆä¸­æ–­
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 void DMA1_Stream6_IRQHandler(void)
 {
    if(DMA_GetITStatus(DMA1_Stream6, DMA_IT_TCIF6))
    {
-      DMA_ClearFlag(DMA1_Stream6, DMA_FLAG_TCIF6);//Çå³ı±êÖ¾Î»
-    	DMA_Cmd(DMA1_Stream6, DISABLE);             //¹Ø±ÕDMA´«Êä 
+      DMA_ClearFlag(DMA1_Stream6, DMA_FLAG_TCIF6);//æ¸…é™¤æ ‡å¿—ä½
+    	DMA_Cmd(DMA1_Stream6, DISABLE);             //å…³é—­DMAä¼ è¾“ 
    }
 }
 
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUSART3_IRQHandler
-ÖĞ¶Ï²úÉú»úÖÆ£º´®¿Ú3½ÓÊÕÍê³ÉÖĞ¶Ï
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUSART3_IRQHandler
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šä¸²å£3æ¥æ”¶å®Œæˆä¸­æ–­
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 void USART3_IRQHandler(void)
 {
   	if(USART_GetITStatus(USART3, USART_IT_IDLE)!= RESET)
 	{
 		Clear_IT = USART3->SR;
-		Clear_IT = USART3->DR;//ÏÈ¶ÁSRºó¶ÁDRÇå³şÖĞ¶Ï±êÖ¾Î»
+		Clear_IT = USART3->DR;//å…ˆè¯»SRåè¯»DRæ¸…æ¥šä¸­æ–­æ ‡å¿—ä½
 		
 	}
 }
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUSART3_IRQHandler1
-ÖĞ¶Ï²úÉú»úÖÆ£º´®¿Ú3·¢ËÍÍê³ÉÖĞ¶Ï
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUSART3_IRQHandler1
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šä¸²å£3å‘é€å®Œæˆä¸­æ–­
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 //void USART3_IRQHandler1(void)
 //{
-//    // ¼ì²éÊÇ·ñÊÇ·¢ËÍÍê³ÉÖĞ¶Ï
+//    // æ£€æŸ¥æ˜¯å¦æ˜¯å‘é€å®Œæˆä¸­æ–­
 //    if (USART_GetITStatus(USART3, USART_IT_TC) != RESET)
 //    {
-//        // Çå³ı·¢ËÍÍê³ÉÖĞ¶Ï±êÖ¾Î»
+//        // æ¸…é™¤å‘é€å®Œæˆä¸­æ–­æ ‡å¿—ä½
 //        USART_ClearITPendingBit(USART3, USART_IT_TC);
 
-//        // ÔÚÕâÀï¿ÉÒÔÌí¼Ó·¢ËÍÍê³ÉºóµÄ´¦ÀíÂß¼­
-//        // ÀıÈç£ºÆô¶¯ÏÂÒ»´Î·¢ËÍ¡¢Í¨ÖªÖ÷³ÌĞò·¢ËÍÍê³ÉµÈ
+//        // åœ¨è¿™é‡Œå¯ä»¥æ·»åŠ å‘é€å®Œæˆåçš„å¤„ç†é€»è¾‘
+//        // ä¾‹å¦‚ï¼šå¯åŠ¨ä¸‹ä¸€æ¬¡å‘é€ã€é€šçŸ¥ä¸»ç¨‹åºå‘é€å®Œæˆç­‰
 //    }
 //}
 
-void DMA1_Stream3_IRQHandler(void)//´®¿Ú3·¢ËÍÍê³ÉÖĞ¶Ï£¬Õâ¸öÒ»¶¨²»ÄÜÉ¾³ı£¬·ñÔòÏµÍ³»á¿¨ËÀ
+void DMA1_Stream3_IRQHandler(void)//ä¸²å£3å‘é€å®Œæˆä¸­æ–­ï¼Œè¿™ä¸ªä¸€å®šä¸èƒ½åˆ é™¤ï¼Œå¦åˆ™ç³»ç»Ÿä¼šå¡æ­»
 {
    if(DMA_GetITStatus(DMA1_Stream3, DMA_IT_TCIF3))
    {
-      DMA_ClearFlag(DMA1_Stream3, DMA_FLAG_TCIF3);//Çå³ı±êÖ¾Î»
-    	DMA_Cmd(DMA1_Stream3, DISABLE);             //¹Ø±ÕDMA´«Êä 
+      DMA_ClearFlag(DMA1_Stream3, DMA_FLAG_TCIF3);//æ¸…é™¤æ ‡å¿—ä½
+    	DMA_Cmd(DMA1_Stream3, DISABLE);             //å…³é—­DMAä¼ è¾“ 
    }
 }
-//void DMA1_Stream1_IRQHandler(void)//´®¿Ú3·¢ËÍÍê³ÉÖĞ¶Ï
+/* ADR-0010: RPM acquisition - EXTI handlers for PA5/PB3/PB10/PB11 */
+void EXTI3_IRQHandler(void)
+{
+	if (EXTI_GetITStatus(RPM_CH1_EXTI_LINE) != RESET)
+	{
+		RPM_EdgeISR(1);
+		EXTI_ClearITPendingBit(RPM_CH1_EXTI_LINE);
+	}
+}
+
+void EXTI9_5_IRQHandler(void)
+{
+	if (EXTI_GetITStatus(RPM_CH0_EXTI_LINE) != RESET)
+	{
+		RPM_EdgeISR(0);
+		EXTI_ClearITPendingBit(RPM_CH0_EXTI_LINE);
+	}
+}
+
+void EXTI15_10_IRQHandler(void)
+{
+	if (EXTI_GetITStatus(RPM_CH2_EXTI_LINE) != RESET)
+	{
+		RPM_EdgeISR(2);
+		EXTI_ClearITPendingBit(RPM_CH2_EXTI_LINE);
+	}
+	if (EXTI_GetITStatus(RPM_CH3_EXTI_LINE) != RESET)
+	{
+		RPM_EdgeISR(3);
+		EXTI_ClearITPendingBit(RPM_CH3_EXTI_LINE);
+	}
+}
+//void DMA1_Stream1_IRQHandler(void)//ä¸²å£3å‘é€å®Œæˆä¸­æ–­
 //{
 //   if(DMA_GetITStatus(DMA1_Stream1, DMA_IT_TCIF3))
 //   {
-//      DMA_ClearFlag(DMA1_Stream1, DMA_FLAG_TCIF1);//Çå³ı±êÖ¾Î»
-//    	DMA_Cmd(DMA1_Stream1, DISABLE);             //¹Ø±ÕDMA´«Êä 
+//      DMA_ClearFlag(DMA1_Stream1, DMA_FLAG_TCIF1);//æ¸…é™¤æ ‡å¿—ä½
+//    	DMA_Cmd(DMA1_Stream1, DISABLE);             //å…³é—­DMAä¼ è¾“ 
 //   }
 //}
 USHORT16 USART_Receive(USART_RX_TypeDef* USARTx)
 { 
-	USARTx->rxConter = USARTx->DMALen - DMA_GetCurrDataCounter(USARTx->DMAy_Streamx);  //±¾´ÎDMA»º³åÇøÌî³äµ½µÄÎ»ÖÃ
+	USARTx->rxConter = USARTx->DMALen - DMA_GetCurrDataCounter(USARTx->DMAy_Streamx);  //æœ¬æ¬¡DMAç¼“å†²åŒºå¡«å……åˆ°çš„ä½ç½®
 
-	USARTx->rxBufferPtr += USARTx->rxSize;  //ÉÏ´ÎDMA»º³åÇøÌî³äµ½µÄÎ»ÖÃ
+	USARTx->rxBufferPtr += USARTx->rxSize;  //ä¸Šæ¬¡DMAç¼“å†²åŒºå¡«å……åˆ°çš„ä½ç½®
 
-	if(USARTx->rxBufferPtr >= USARTx->DMALen)//ËµÃ÷DMA»º³åÇøÒÑ¾­ÂúÁËÒ»´Î
+	if(USARTx->rxBufferPtr >= USARTx->DMALen)//è¯´æ˜DMAç¼“å†²åŒºå·²ç»æ»¡äº†ä¸€æ¬¡
 	{
 		USARTx->rxBufferPtr %= USARTx->DMALen;
 	}
 
 	if(USARTx->rxBufferPtr < USARTx->rxConter)
 	{
-		USARTx->rxSize = USARTx->rxConter - USARTx->rxBufferPtr; //¼ÆËã±¾´Î½ÓÊÕÊı¾İµÄ³¤¶È
+		USARTx->rxSize = USARTx->rxConter - USARTx->rxBufferPtr; //è®¡ç®—æœ¬æ¬¡æ¥æ”¶æ•°æ®çš„é•¿åº¦
 		if(USARTx->rxSize <= USARTx->MbLen) 
 		{
 			for(u16 i=0;i<USARTx->rxSize;i++)  *(USARTx->pMailbox + i) = *(USARTx->pDMAbuf + USARTx->rxBufferPtr + i);
@@ -131,22 +164,22 @@ USHORT16 USART_Receive(USART_RX_TypeDef* USARTx)
 	}
 	else
 	{
-		USARTx->rxSize = USARTx->rxConter + USARTx->DMALen - USARTx->rxBufferPtr;//¼ÆËã±¾´Î½ÓÊÕÊı¾İµÄ³¤¶È
-		if(USARTx->rxSize <= USARTx->MbLen) //½ÓÊÕµÄÊı¾İ³¤¶È²»³¬¹ıÆÚÍûÊı¾İ³¤¶È£¬°ÑÊı¾İĞ´½øÓÊÏä£¬·ÀÖ¹Êı×éÔ½½ç
+		USARTx->rxSize = USARTx->rxConter + USARTx->DMALen - USARTx->rxBufferPtr;//è®¡ç®—æœ¬æ¬¡æ¥æ”¶æ•°æ®çš„é•¿åº¦
+		if(USARTx->rxSize <= USARTx->MbLen) //æ¥æ”¶çš„æ•°æ®é•¿åº¦ä¸è¶…è¿‡æœŸæœ›æ•°æ®é•¿åº¦ï¼ŒæŠŠæ•°æ®å†™è¿›é‚®ç®±ï¼Œé˜²æ­¢æ•°ç»„è¶Šç•Œ
 		
 		{
 			for(u16 i=0;i<USARTx->rxSize-USARTx->rxConter;i++) *(USARTx->pMailbox + i) = *(USARTx->pDMAbuf + USARTx->rxBufferPtr + i);
 			for(u16 i=0;i<USARTx->rxConter;i++) *(USARTx->pMailbox + USARTx->rxSize-USARTx->rxConter + i) = *(USARTx->pDMAbuf + i);
 		}
 	}
-	return USARTx->rxSize;  //·µ»Ø±¾´Î¿ÕÏĞÖĞ¶ÏÒ»¹²½ÓÊÕ¶àÉÙ×Ö½Ú
+	return USARTx->rxSize;  //è¿”å›æœ¬æ¬¡ç©ºé—²ä¸­æ–­ä¸€å…±æ¥æ”¶å¤šå°‘å­—èŠ‚
 }
 
 
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUART4_IRQHandler
-ÖĞ¶Ï²úÉú»úÖÆ£ºÊÓ¾õÍ¨Ñ¶
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUART4_IRQHandler
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šè§†è§‰é€šè®¯
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 extern USART_RX_TypeDef UART4_Rcr;
 void UART4_IRQHandler(void)
@@ -154,7 +187,7 @@ void UART4_IRQHandler(void)
 	if(USART_GetITStatus(UART4, USART_IT_IDLE)!= RESET)
 	{
 		Clear_IT = UART4->SR;
-		Clear_IT = UART4->DR;//ÏÈ¶ÁSRºó¶ÁDRÇå³şÖĞ¶Ï±êÖ¾Î»
+		Clear_IT = UART4->DR;//å…ˆè¯»SRåè¯»DRæ¸…æ¥šä¸­æ–­æ ‡å¿—ä½
 		
 		uint16_t rx_len = USART_Receive(&UART4_Rcr);
 		if(rx_len > 0)
@@ -179,7 +212,7 @@ union
 
 float U4_RX_Data = 0;
 
-void Decode_RX_Data_t265(void) //¸Ä³É×Ô¼º½ÓÊÕµÄÊı¾İ
+void Decode_RX_Data_t265(void) //æ”¹æˆè‡ªå·±æ¥æ”¶çš„æ•°æ®
 {
     if (UA4RxMailbox[0] == 0xAA && UA4RxMailbox[1] == 0xAA)
    {
@@ -188,7 +221,7 @@ void Decode_RX_Data_t265(void) //¸Ä³É×Ô¼º½ÓÊÕµÄÊı¾İ
     data_to_float.cdata[2]  =  UA4RxMailbox[4];
     data_to_float.cdata[3]  =  UA4RxMailbox[5];	
 
-		if(data_to_float.data_float>-1000000.0f && data_to_float.data_float<1000000.0f)  //·¶Î§ÏŞ·ù
+		if(data_to_float.data_float>-1000000.0f && data_to_float.data_float<1000000.0f)  //èŒƒå›´é™å¹…
 		{
 		  U4_RX_Data = data_to_float.data_float*100.0f  ;
 		}
@@ -300,30 +333,30 @@ void Decode_RX_Data_t265(void) //¸Ä³É×Ô¼º½ÓÊÕµÄÊı¾İ
    }
 }
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUART5_IRQHandler
-ÖĞ¶Ï²úÉú»úÖÆ£º¶´²¶ÉãÏñÍ·Í¨Ñ¶
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUART5_IRQHandler
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šæ´æ•æ‘„åƒå¤´é€šè®¯
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 
-float x_pos = 0; // »úÍ·ÏñµçÄÔ£¬xÎªÇ°ºó£¬ÏòÇ°¼õĞ¡£¬ÏòºóÔö¼Ó
-float y_pos = 0;  // yÎª¸ß¶È£¬ÏòÉÏÔö¼Ó  £¬³õÊ¼¸ß¶È164--170
-float z_pos = 0;  //ºáÏò£¬Ïò×óÔö¼Ó
+float x_pos = 0; // æœºå¤´åƒç”µè„‘ï¼Œxä¸ºå‰åï¼Œå‘å‰å‡å°ï¼Œå‘åå¢åŠ 
+float y_pos = 0;  // yä¸ºé«˜åº¦ï¼Œå‘ä¸Šå¢åŠ   ï¼Œåˆå§‹é«˜åº¦164--170
+float z_pos = 0;  //æ¨ªå‘ï¼Œå‘å·¦å¢åŠ 
 float des_x = 0; 
 float des_y = 0;
 float des_z = 0;
 
 
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUART5_IRQHandler
-ÖĞ¶Ï²úÉú»úÖÆ£º
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUART5_IRQHandler
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼š
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 void UART5_IRQHandler(void)
 {
   	if(USART_GetITStatus(UART5, USART_IT_IDLE)!= RESET)
 	{
 		Clear_IT = UART5->SR;
-		Clear_IT = UART5->DR;//ÏÈ¶ÁSRºó¶ÁDRÇå³şÖĞ¶Ï±êÖ¾Î»
+		Clear_IT = UART5->DR;//å…ˆè¯»SRåè¯»DRæ¸…æ¥šä¸­æ–­æ ‡å¿—ä½
 
 		extern USART_RX_TypeDef UART5_Rcr;
 		{
@@ -338,12 +371,12 @@ void UART5_IRQHandler(void)
 	}
 }
 
-void DMA1_Stream7_IRQHandler(void)  //´®¿Ú5 Á÷7
+void DMA1_Stream7_IRQHandler(void)  //ä¸²å£5 æµ7
 {
    if(DMA_GetITStatus(DMA1_Stream7, DMA_IT_TCIF7))
    {
-      DMA_ClearFlag(DMA1_Stream7, DMA_FLAG_TCIF7);//Çå³ı±êÖ¾Î»
-    	DMA_Cmd(DMA1_Stream7, DISABLE);             //¹Ø±ÕDMA´«Êä 
+      DMA_ClearFlag(DMA1_Stream7, DMA_FLAG_TCIF7);//æ¸…é™¤æ ‡å¿—ä½
+    	DMA_Cmd(DMA1_Stream7, DISABLE);             //å…³é—­DMAä¼ è¾“ 
    }
 }
 ////////////////////////////////////////////////////////
@@ -352,9 +385,9 @@ void Decode_RX_Data(void)
 
 }
 /***********************************************************************************
-ÖĞ¶Ï´¦Àíº¯ÊıÃû³Æ£ºUART6_IRQHandler
-ÖĞ¶Ï²úÉú»úÖÆ£ºÊÓ¾õÍ¨Ñ¶
-º¯Êı¹¦ÄÜ£º
+ä¸­æ–­å¤„ç†å‡½æ•°åç§°ï¼šUART6_IRQHandler
+ä¸­æ–­äº§ç”Ÿæœºåˆ¶ï¼šè§†è§‰é€šè®¯
+å‡½æ•°åŠŸèƒ½ï¼š
 ************************************************************************************/
 
 void USART6_IRQHandler(void)
