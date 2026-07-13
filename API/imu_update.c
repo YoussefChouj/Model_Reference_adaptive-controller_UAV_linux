@@ -40,7 +40,12 @@ float invSqrt(float x)
 	y = y * (1.5f - (halfx * y * y));
 	return y;
 }
-void IMU_Update_Mahony(_imu_st *imu,float dt)	
+/* Gravity-removed body-frame linear acceleration (mg), computed from the fresh Mahony
+ * gravity direction each update. Streamed in the 0x05 OF-calibration frame for the
+ * IMU+OF fusion filter (prereq #1, docs/tracking_baseline_and_drift.md). 1 G = 1000 mg. */
+float Lin_Acc_X_body = 0.0f, Lin_Acc_Y_body = 0.0f;
+
+void IMU_Update_Mahony(_imu_st *imu,float dt)
 {
 	float normalise;
 	float nor_acc[VEC_XYZ] = {0};
@@ -132,10 +137,14 @@ void IMU_Update_Mahony(_imu_st *imu,float dt)
 	if (vecxZ<-1) vecxZ=-1;
 	
 	/* roll pitch yaw  */
-	imu->pit = -asinf(vecxZ) *RAD2DEG; 
+	imu->pit = -asinf(vecxZ) *RAD2DEG;
 	imu->rol = atan2f(vecyZ, veczZ) * RAD2DEG;
 	imu->yaw = atan2f(R21, R11) * RAD2DEG;
-	
+
+	/* Remove gravity in body frame: linear accel = measured - G*gravity_direction (mg).
+	 * (vecxZ,vecyZ,veczZ) is the body-frame gravity unit vector; static & level => lin ~ 0. */
+	Lin_Acc_X_body = Acc_X_Real - 1000.0f * vecxZ;
+	Lin_Acc_Y_body = Acc_Y_Real - 1000.0f * vecyZ;
 }
 
 	 

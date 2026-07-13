@@ -85,3 +85,4 @@
 ..\obj\stm32f4xx_it.o: ..\TASK\send_data.h
 ..\obj\stm32f4xx_it.o: ..\API\GPS.h
 ..\obj\stm32f4xx_it.o: ..\BSP\usart5.h
+..\obj\stm32f4xx_it.o: ..\BSP\rpm.h

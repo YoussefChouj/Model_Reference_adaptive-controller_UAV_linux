@@ -380,8 +380,9 @@ class Dashboard:
         self._plot_z_des: List[float] = []
 
         # Unified telemetry: UDP mirror (remote bridge) + direct copy when local SerialBridge in-process.
-        self._telem: Dict[str, Any] = {"a": {}, "b": {}, "id": {}, "max_num_basis": 8}
+        self._telem: Dict[str, Any] = {"a": {}, "b": {}, "id": {}, "of": {}, "max_num_basis": 8}
         self._last_id_counter: float = -1.0  # dedup high-rate ID-frame logging by firmware sample counter
+        self._last_of_counter: float = -1.0  # dedup high-rate OF-calibration-frame (0x05) logging by firmware sample counter
         # Live link-quality: rolling window of firmware sample-counter deltas. recv_frac =
         # (#frames) / (sum of deltas). < 1.0 means dropped frames -> drone too far from receiver.
         self._id_link_gaps: "deque[float]" = deque(maxlen=300)
@@ -459,6 +460,17 @@ class Dashboard:
                                 self._flight_logger.log_snapshot("ID", idf)
                 if "bench" in msg and isinstance(msg["bench"], dict):
                     self._telem["bench"] = {str(k): float(v) for k, v in msg["bench"].items()}
+                if "of" in msg and isinstance(msg["of"], dict):
+                    of = {str(k): float(v) for k, v in msg["of"].items()}
+                    self._telem["of"] = of
+                    # OF calibration frame (0x05) streams at 200 Hz — log here at full link rate
+                    # (this thread fires once per datagram), deduped by the firmware sample counter,
+                    # so the render loop's slower cadence doesn't drop samples. Mirrors the ID path.
+                    oc = of.get("of.sample_counter")
+                    if self._recording_flight and oc is not None and oc != self._last_of_counter:
+                        self._last_of_counter = oc
+                        with self._log_lock:
+                            self._flight_logger.log_snapshot("OF", of)
                 if "max_num_basis" in msg:
                     self._telem["max_num_basis"] = int(msg["max_num_basis"])
                 self._last_telem_rx_t = time.monotonic()
@@ -1044,12 +1056,19 @@ class Dashboard:
             self._plot_t0 = now
         t = now - self._plot_t0
 
-        fbx  = float(b.get("pid.locx.FB",  0.0)) / 100.0  # cm → m
-        desx = float(b.get("pid.locx.Des", 0.0)) / 100.0  # cm → m
-        fby  = float(b.get("pid.locy.FB",  0.0)) / 100.0  # cm → m
-        desy = float(b.get("pid.locy.Des", 0.0)) / 100.0  # cm → m
-        fbz  = float(b.get("pid.z_pos.FB",  0.0))
-        desz = float(b.get("pid.z_pos.Des", 0.0))
+        # NaN/Inf from the firmware (uninitialised OF, div-by-zero, etc.) must never
+        # reach a plot series or fit_axis_data -- DearPyGui hard-crashes natively on
+        # non-finite plot data, which silently kills the whole dashboard.
+        def _finite(key: str, scale: float = 1.0) -> float:
+            v = float(b.get(key, 0.0)) * scale
+            return v if math.isfinite(v) else 0.0
+
+        fbx  = _finite("pid.locx.FB",  0.01)  # cm → m
+        desx = _finite("pid.locx.Des", 0.01)  # cm → m
+        fby  = _finite("pid.locy.FB",  0.01)  # cm → m
+        desy = _finite("pid.locy.Des", 0.01)  # cm → m
+        fbz  = _finite("pid.z_pos.FB")
+        desz = _finite("pid.z_pos.Des")
 
         self._plot_t.append(t)
         self._plot_x_fb.append(fbx);  self._plot_x_des.append(desx)
@@ -2479,6 +2498,18 @@ class Dashboard:
         dpg.add_text("Ready.", tag="txt_diag_status", color=(100, 255, 100, 255))
         
         dpg.add_separator()
+        dpg.add_text("Telemetry frame (what the board streams on the link)", color=(200, 200, 200, 255))
+        dpg.add_text("A/B is normal flight telemetry. OF Calibration streams the 0x05 raw OF+IMU\n"
+                     "frame at 200 Hz for sensor-fusion logging (replaces A/B while active).",
+                     color=(150, 150, 150, 255))
+        dpg.add_combo(
+            ("A/B (default flight telemetry)", "OF Calibration (0x05 @200Hz)"),
+            tag="combo_log_frame",
+            default_value="A/B (default flight telemetry)",
+            width=320,
+            callback=self._on_log_frame_select,
+        )
+        dpg.add_separator()
         dpg.add_text("Flight recording (20 Hz merged telemetry → CSV)", color=(200, 200, 200, 255))
         dpg.add_button(label="Start recording", tag="btn_log_start", callback=self._flight_log_start)
         dpg.add_button(label="Stop", tag="btn_log_stop", callback=self._flight_log_stop)
@@ -2488,6 +2519,24 @@ class Dashboard:
         dpg.add_button(label="Record path", callback=self._path_mem_start)
         dpg.add_button(label="Stop path", callback=self._path_mem_stop)
         dpg.add_listbox(tag="list_log_files", items=[], width=400, num_items=6)
+
+    def _on_log_frame_select(self, sender: Any, app_data: Any) -> None:
+        # Frame selector for the flight-log window: switch the board between normal A/B telemetry
+        # and the OF-calibration 0x05 frame (CMD 0x0F idx 12). The 0x05 frame streams at 200 Hz and
+        # replaces A/B while active; selecting A/B turns it back off. Future high-rate frames can be
+        # added to this combo. Sysid's 0x03 ID frame is driven separately from the System-ID tab.
+        want_of = str(app_data).startswith("OF")
+        if not self.connected:
+            # Snap the combo back so it never claims a state the board isn't in.
+            dpg.set_value("combo_log_frame", "A/B (default flight telemetry)")
+            dpg.set_value("txt_log_status", "Connect first to switch telemetry frame.")
+            return
+        self._send_cmd(0x0F, 12, 1.0 if want_of else 0.0)
+        dpg.set_value(
+            "txt_log_status",
+            "OF calibration frame (0x05 @200Hz) ON — A/B paused." if want_of
+            else "A/B telemetry restored.",
+        )
 
     def _start_diag_recording(self) -> None:
         if not self.connected:
@@ -2614,6 +2663,7 @@ class Dashboard:
         with self._log_lock:
             self._flight_logger.start(fn)
         self._last_id_counter = -1.0
+        self._last_of_counter = -1.0
         self._recording_flight = True
 
     def _flight_log_stop(self) -> None:
@@ -3457,9 +3507,24 @@ class Dashboard:
             dpg.show_viewport()
 
             # Manual render loop so we can poll serial_bridge state on the main thread.
+            # A single exception in _frame() (e.g. bad/unexpected telemetry once the
+            # board is connected) must NOT tear down the viewport and close the
+            # dashboard -- log it and keep rendering.
             while dpg.is_dearpygui_running():
-                self._frame()
+                try:
+                    self._frame()
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
                 dpg.render_dearpygui_frame()
+            # Loop exited on its own: the viewport was closed. Record why so an
+            # unexpected self-close (vs the user hitting the X) is visible.
+            print("dashboard: render loop exited (is_dearpygui_running()==False)", flush=True)
+        except KeyboardInterrupt:
+            pass
+        except BaseException as ex:
+            print(f"dashboard: run() aborted by {type(ex).__name__}: {ex}", flush=True)
+            raise
         finally:
             self._telem_stop.set()
             self._stop_bridge()
@@ -3467,6 +3532,16 @@ class Dashboard:
 
 
 def main() -> None:
+    # Catch even native (segfault-style) crashes from DearPyGui and dump a Python
+    # stack to both stderr and a log file, so a silent self-close leaves evidence.
+    import faulthandler
+    crash_log = Path(__file__).resolve().parents[2] / "logs" / "dashboard_crash.log"
+    try:
+        crash_log.parent.mkdir(parents=True, exist_ok=True)
+        _cf = open(crash_log, "w", encoding="utf-8")
+        faulthandler.enable(file=_cf)
+    except Exception:
+        faulthandler.enable()
     Dashboard().run()
 
 

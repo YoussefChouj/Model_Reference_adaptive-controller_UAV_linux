@@ -1,0 +1,68 @@
+<link rel="stylesheet" href="../assets/lesson.css">
+<title>Reference — Anti-Windup Modes in ComputePID()</title>
+
+<p class="eyebrow">Reference card · pid.c</p>
+<h1>Anti-Windup Modes</h1>
+<p class="muted">Three selectable anti-windup strategies in <code>ComputePID()</code>, chosen per PID loop via
+<code>pPID-&gt;aw_mode</code>. Default 0 = legacy = original firmware.</p>
+
+<h2>The switch</h2>
+<pre><code>typedef enum {         // robot_types.h
+    AW_LEGACY   = 0,   // EMin separation + SumE clamp   (default, unchanged)
+    AW_CLAMP    = 1,   // conditional integration on real saturation
+    AW_BACKCALC = 2    // back-calculation observer (needs Kt &gt; 0)
+} PID_AntiWindup_e;
+
+// per-loop fields appended to PIDTypeDef:
+int   aw_mode;   // 0 by default (zero-init)
+float Kt;        // back-calc gain, AW_BACKCALC only</code></pre>
+
+<h2>Mode 0 — <span style="color:var(--accent)">AW_LEGACY</span></h2>
+<p>Integrate only while <code>|E| &lt; EMin</code>; hard-clamp <code>SumE</code> to <code>±SumEMax</code>.
+Reacts to <em>error size</em>, never to real saturation. Blunt but safe.</p>
+
+<h2>Mode 1 — <span style="color:var(--accent2)">AW_CLAMP</span> (correct clamping)</h2>
+<pre><code>SumE_prev = SumE;
+SumE += E;                              // tentative integrate
+u_presat = Up + Ui + Ud;
+U = clamp(u_presat, ±UMax);
+if (U != u_presat &&                    // actually saturated?
+    sign(u_presat) == sign(E))          // and pushing further in?
+    SumE = SumE_prev;                   // undo — freeze integrator</code></pre>
+<p>No EMin gate. Integrator runs freely until the output <em>truly</em> saturates, then freezes only in the
+offending direction. No tuning knob.</p>
+
+<h2>Mode 2 — <span style="color:var(--accent2)">AW_BACKCALC</span> (observer)</h2>
+<pre><code>SumE += E;                              // always integrate
+u_presat = Up + Ui + Ud;
+U = clamp(u_presat, ±UMax);
+SumE += Kt * (U - u_presat);            // bleed by the saturation error</code></pre>
+<p><code>U - u_presat</code> is 0 when unsaturated, negative when clipped high, positive when clipped low —
+so the accumulator is pulled back toward feasibility, smoothly, in proportion to how much it was denied.
+<strong>Kt must be &gt; 0</strong> or this becomes pure always-integrate (worse than legacy).</p>
+
+<div class="flag">
+<strong>Kt starting point</strong>
+A common heuristic is <code>Kt ≈ 1/Ti = Ki/Kp</code> (in this code's units, try
+<code>Kt</code> near <code>Ki/Kp</code> and tune). Larger Kt → faster unwind but noisier; smaller → gentler.
+Always sweep it in <code>sim/</code> first.
+</div>
+
+<div class="note">
+<strong>Known limitation</strong>
+Saturation here is detected at the rate-PID's own <code>UMax</code>, which is a <em>proxy</em>. The real
+actuator limit is downstream at the motor mixer. Good enough to fix rate-loop windup; a mixer-referenced
+version is a later refinement.
+</div>
+
+<h2>How to enable (per loop)</h2>
+<pre><code>// e.g. in MRAC_Init() or a bench-test init:
+Ctrler.gyroxPID.aw_mode = AW_CLAMP;          // roll rate loop, correct clamping
+Ctrler.gyroyPID.aw_mode = AW_BACKCALC;       // pitch rate loop, observer
+Ctrler.gyroyPID.Kt      = 0.002f;            // required for back-calc</code></pre>
+<p class="muted">Remember: <code>gyrox</code>=roll, <code>gyroy</code>=pitch. Leave a loop at default to keep its legacy behaviour.</p>
+
+<footer>
+  <p class="ask">Related: <a href="../lessons/0002-your-anti-windup-dissected.html">Lesson 2</a> (why legacy
+  is inert) · <a href="../lessons/0003-clamping-and-backcalc-built.html">Lesson 3</a> (building &amp; testing these).</p>
+</footer>

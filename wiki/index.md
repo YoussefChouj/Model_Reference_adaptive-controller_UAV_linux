@@ -29,6 +29,11 @@
 - [Config Reference](concepts/config-reference.md) — config.yaml keys explained
 - [Autonomous Path Generation](concepts/autonomous-path-generation.md) — TWC, sinusoid, and circle trajectory generation
 
+### Research & Thesis Background
+- [Motion Planning Methods (Taxonomy)](concepts/motion-planning-methods.md) — Beginner map: sampling-based / reactive / learning-based planners + MPC, and where the thesis sits
+- [Conformal Prediction](concepts/conformal-prediction.md) — Calibrated uncertainty bounds for any predictor (stub)
+- [Sim-to-Real Gap](concepts/sim-to-real-gap.md) — Why sim-trained policies degrade on hardware; mitigations and the MRAC synergy (stub)
+
 ### Workflow & Recipes
 - [Tuning Workflow](concepts/tuning-workflow.md) — Step-by-step PID/MRAC tuning via dashboard and VOFA
 - [Adding a Command](concepts/adding-a-command.md) — End-to-end recipe for new CMD IDs
@@ -84,3 +89,9 @@
 - [Adaptive Control Tutorial Notebook](sources/adaptive-control-tutorial-notebook.md) — 18-cell scalar→2D progression: fixed-gain→projection→σ-mod→RBF→perf-recovery; known bugs documented (2026-06-20)
 - [Adaptive Control Tutorial 2 Notebook](sources/adaptive-control-tutorial-2-notebook.md) — Integral/PID/DF-MRAC/set-theoretic/LF-learning with equations, tuning table, and error bound gotcha (2026-06-20)
 - [Roll-Pitch-Yaw PID-MRAC Notebook](sources/pid-mrac-notebook.md) — 20-cell hardware bridge: LQR/pole-placement PID design, cascaded + inner-MRAC, DShot mixer, sequential LQR firmware gains, stability margins (2026-06-20)
+- [Motion Planning in Dynamic Environments Survey](sources/motion-planning-dynamic-environments-survey.md) — 138-work survey 2015–2025; planning taxonomy, jargon decoder, thesis positioning (1 source, 2026-07-09)
+
+## Literature (Grabbed Papers — deep briefings from the Discord digest)
+
+- [MRAC for Gust Load Alleviation](literature/arxiv-2603.18584.md) — HIGH relevance: Γ=γQ adaptation-rate tuning, Lyapunov P-matrix design condition, gain-scheduling (2026-07-03)
+- [Motion Planning in Dynamic Environments Survey](literature/openalex-W7163597202.md) — MEDIUM relevance: raw page-cited briefing; wiki-integrated at the source page above (2026-07-09)

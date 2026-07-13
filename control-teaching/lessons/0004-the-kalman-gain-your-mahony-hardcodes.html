@@ -1,0 +1,158 @@
+<link rel="stylesheet" href="../assets/lesson.css">
+<title>Lesson 4 — The Kalman Gain Your Mahony Filter Hard-Codes</title>
+
+<p class="eyebrow">Lesson 04 · Estimation thread · New source: Kalman filter video</p>
+<h1>The Kalman Gain Your Mahony Filter Hard-Codes</h1>
+<p class="lede">You watched a Kalman filter explainer and took good notes. This lesson does two things:
+fixes the one bug in those notes, and shows you that your firmware already runs the Kalman filter's
+predict/correct loop at 1&nbsp;kHz — with the gain frozen to a hand-tuned constant.</p>
+
+<p class="muted">Source: <a href="https://www.youtube.com/watch?v=lIYYJMHAwMU">"This One Equation Powers
+GPS, Rockets, and Robots"</a> (your notes) · grounded in
+<a href="../../API/imu_update.c"><code>imu_update.c</code></a> and
+<a href="../reference/kalman-filter.html">the new reference card</a>.</p>
+
+<h2>1 · Your notes, audited — one bug</h2>
+<p>Your summary is essentially right: fuse two Gaussians, the product is a new Gaussian that is
+<em>more certain than either source</em>, and the whole filter is that idea applied recursively.
+But one line has a typo that will bite you the day you tune a real filter:</p>
+
+<div class="note">
+<strong>The bug:</strong> you wrote <em>"measurement equation: z = Hx + v (uncertainty covariance Q)"</em>.
+The measurement noise <code>v</code> has covariance <strong>R</strong>, not Q. There are two separate
+noise dials and they answer two different questions:
+<ul>
+  <li><strong>Q</strong> (process noise) — <em>how much do I distrust my model</em> between measurements? Inflates P during <span style="color:var(--ok)">PREDICT</span>.</li>
+  <li><strong>R</strong> (measurement noise) — <em>how much do I distrust this sensor</em>? Weighs against P in the <span style="color:var(--accent2)">UPDATE</span> gain.</li>
+</ul>
+Tuning a Kalman filter <em>is</em> choosing the Q:R ratio. Mix them up and every intuition inverts:
+raising Q makes the filter trust the sensor <em>more</em> (jumpier), raising R makes it trust the
+model more (smoother, laggier).
+</div>
+
+<h2>2 · The whole filter is one number</h2>
+<p>Everything in your screenshots collapses into the Kalman gain
+<code>K = &sigma;&#8321;&sup2; / (&sigma;&#8321;&sup2; + &sigma;&#8322;&sup2;)</code> — the fraction
+of the innovation <code>(&mu;&#8322; &minus; &mu;&#8321;)</code> you accept. Drag the two uncertainties
+and watch where the fused belief lands:</p>
+
+<div id="gfusion" style="border:1px solid var(--rule);border-radius:8px;padding:1rem 1.2rem;margin:1.2rem 0"></div>
+
+<p>Three things to verify with your own hands before moving on:</p>
+<ol>
+  <li>Make the measurement very confident (small &sigma;&#8322;) → K&nbsp;&rarr;&nbsp;1, the fused mean snaps to the measurement.</li>
+  <li>Make it garbage (large &sigma;&#8322;) → K&nbsp;&rarr;&nbsp;0, the prediction barely moves. <em>A Kalman filter never has to reject a sensor; a bad sensor simply stops mattering.</em></li>
+  <li>No matter what you do, the fused &sigma; is <strong>smaller than both</strong> sources — <code>&sigma;&sup2; = (1&minus;K)&sigma;&#8321;&sup2;</code>. Even a terrible measurement shrinks uncertainty a little.</li>
+</ol>
+
+<h2>3 · You already run this loop at 1 kHz</h2>
+<p>Here is the payoff. Your firmware's attitude estimator —
+<code>IMU_Update_Mahony()</code> in <a href="../../API/imu_update.c"><code>imu_update.c</code></a>,
+called at 1&nbsp;kHz from <code>IMU_DataDeal_Task</code> — has exactly the predict/correct anatomy
+from your fourth screenshot:</p>
+
+<table>
+  <tr><th></th><th>Kalman filter</th><th>Your Mahony filter</th></tr>
+  <tr>
+    <td><span style="color:var(--ok)"><strong>PREDICT</strong></span></td>
+    <td>x&#770;&#8315; = A x&#770; &nbsp;·&nbsp; P&#8315; = APA&#7488; + Q</td>
+    <td>Propagate quaternion q&#770; with the gyro rates &omega;</td>
+  </tr>
+  <tr>
+    <td><span style="color:var(--accent2)"><strong>INNOVATE</strong></span></td>
+    <td>z &minus; H x&#770;&#8315;</td>
+    <td>&omega;<sub>err</sub> = a&#8407;<sub>meas</sub> &times; v&#770;<sub>down</sub> (accel "down" vs estimated "down")</td>
+  </tr>
+  <tr>
+    <td><span style="color:var(--accent2)"><strong>GAIN</strong></span></td>
+    <td>K<sub>k</sub> = P&#8315;H&#7488;S&#8315;&sup1; — <strong>recomputed every tick</strong> from P, Q, R</td>
+    <td><strong>Kp, Ki — constants you hand-tuned once</strong></td>
+  </tr>
+  <tr>
+    <td><span style="color:var(--accent2)"><strong>UPDATE</strong></span></td>
+    <td>x&#770; = x&#770;&#8315; + K(z &minus; Hx&#770;&#8315;) &nbsp;·&nbsp; P = (I&minus;KH)P&#8315;</td>
+    <td>&omega;<sub>corr</sub> = &omega; + Kp·&omega;<sub>err</sub> + Ki·&int;&omega;<sub>err</sub> — no covariance kept</td>
+  </tr>
+</table>
+
+<p>A fixed-gain complementary filter like Mahony's is, in the classical sense, a
+<strong>steady-state Kalman filter</strong>: if Q and R never change, K<sub>k</sub> converges to a
+constant — so you can skip the covariance bookkeeping entirely and just ship the converged gain.
+That is a <em>choice</em>, and for your firmware it is a good one: at 1&nbsp;kHz on an STM32F4 the
+covariance update is real CPU, and Mahony's cross-product form is provably stable on SO(3) where a
+linear KF is not (attitude isn't a vector space — see
+<a href="https://doi.org/10.1109/TAC.2008.919528">Mahony et&nbsp;al. 2008</a>).</p>
+
+<p>What the fixed gain gives up: the filter can't <em>adapt its trust</em>. During aggressive
+maneuvers the accelerometer measures thrust, not gravity — a Kalman filter would inflate R and
+lower K on its own; your Mahony trusts the accel exactly as much as it does in hover. And it's not
+just attitude: the SINS position corrections
+(<a href="../../API/SINS.h"><code>SINS.h</code></a>, the <code>in_est/in_obs/fix_ki</code> observer
+struct) are fixed-gain too. <strong>Your entire estimator stack is predict/correct with frozen
+gains — there is no Kalman filter anywhere in this firmware.</strong> Knowing precisely what that
+trade-off is, is the win of this lesson.</p>
+
+<div class="note">
+<strong>Mission fence:</strong> rewriting the estimator is explicitly out of scope
+(<a href="../MISSION.md">MISSION.md</a>) — nothing here is a change proposal. This is landscape
+knowledge: when your thesis's digital-twin / Gazebo work needs state estimation, or a paper says
+"we assume an EKF provides state", you now know exactly what that means and what your firmware
+does instead.
+</div>
+
+<h2>4 · Recall check</h2>
+<div class="quiz" id="quiz">
+  <h3>From memory — no scrolling up</h3>
+
+  <div class="q">1. After fusing a prediction with a measurement, the posterior variance is…</div>
+  <div data-correct="2">
+    <button>between the smaller and the larger source variance</button>
+    <button>equal to whichever of the source variances is smaller</button>
+    <button>smaller than both of the two source variances, always</button>
+  </div>
+
+  <div class="q">2. In <code>z = Hx + v</code>, the covariance of the noise <code>v</code> is…</div>
+  <div data-correct="0">
+    <button>R, the measurement noise covariance</button>
+    <button>Q, the process noise covariance</button>
+    <button>P, the state estimate covariance</button>
+  </div>
+
+  <div class="q">3. K &rarr; 0 means the filter is choosing to…</div>
+  <div data-correct="1">
+    <button>trust the incoming sensor measurement, ignore the model</button>
+    <button>trust the model's own prediction, ignore the sensor</button>
+    <button>trust both sources equally and split the difference</button>
+  </div>
+
+  <div class="q">4. In place of the recomputed-every-tick Kalman gain, your firmware's Mahony filter uses…</div>
+  <div data-correct="1">
+    <button>an adaptive gain taken from the MRAC law</button>
+    <button>fixed hand-tuned Kp and Ki correction constants</button>
+    <button>a covariance matrix propagated at one kilohertz</button>
+  </div>
+
+  <p class="fb" id="fb"></p>
+</div>
+
+<h2>5 · Go deeper</h2>
+<p><strong>Primary source for this thread:</strong> Roger Labbe,
+<a href="https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python"><em>Kalman and Bayesian
+Filters in Python</em></a> — free, runnable Jupyter notebooks, builds from exactly the 1-D Gaussian
+fusion you just did up to EKF/UKF. Chapters 1–4 cover everything in this lesson. For a quick
+second angle on any single equation, <a href="https://www.kalmanfilter.net/">kalmanfilter.net</a>.
+The extensions your notes name — EKF, UKF, particle filter — are all answers to one question:
+<em>what if the system isn't linear or the noise isn't Gaussian?</em> That's a future lesson, if
+the thesis pulls you there.</p>
+
+<footer>
+  <p class="ask"><strong>I'm your teacher — ask me.</strong> Want to see where K<sub>k</sub> converging
+  to a constant comes from? Curious whether an EKF for the optical-flow XY drift would be worth
+  prototyping in <code>sim/</code>? Or why attitude "isn't a vector space"? Ask — pushing on these is
+  how this sticks.</p>
+  <div class="nav"><span>← Lesson 3: Clamping &amp; back-calc, built</span><span>Reference → <a href="../reference/kalman-filter.html">Kalman filter card</a></span></div>
+</footer>
+
+<script src="../assets/gaussian-fusion.js"></script>
+<script>GaussianFusion.mount(document.getElementById('gfusion'));</script>
+<script src="../assets/quiz.js"></script>

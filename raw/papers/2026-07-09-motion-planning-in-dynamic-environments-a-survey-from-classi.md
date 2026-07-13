@@ -1,0 +1,43 @@
+# Motion Planning in Dynamic Environments: A Survey from Classical to Modern Methods
+
+- source: OpenAlex
+- url: https://openalex.org/W7163597202
+- published: 
+- digest-date: 2026-07-09
+- channel: #research-planning
+- topic: Learning-based / NN path tracking (thesis core)
+- signal: grabbed (📥 reaction on the Discord digest)
+
+## Abstract
+
+Survey of 138 works (2015-2025) on motion planning in dynamic environments, classical to learning-based.
+
+## My notes (typed on Discord)
+
+- i like this papaer because of how it survey the dynamical planning problem , the methods used and their advantages and limitations, i also like how it represents what an inteligent control system needs to account for in the real world.
+
+## Deep summary (grab pipeline)
+
+## A Survey on Mobile Robot Navigation in Dynamic Environments
+**Relevance to thesis:** MEDIUM — The survey catalogs planning and collision-avoidance methods that could inform future trajectory tracking with dynamic obstacles, but none directly address the current MRAC inner-loop, reference-model design, or sim rebuild priorities.  
+**Contribution:** A comprehensive review of motion planning, control, and perception techniques for mobile robots operating in dynamic, uncertain environments.  
+**Method:** The paper systematically surveys classical sampling-based planners, reactive methods, model predictive control frameworks (e.g., goal-oriented MPC, topology-driven MPC), learning-based approaches (RL, PPO, hierarchical RL), and perception pipelines (camera, LiDAR, sensor fusion, spatiotemporal attention).  
+**Key results:**  
+- Categorises planning methods into sampling-based, reactive, and learning-based families, noting integration trends.  
+- Highlights how MPC with conformal prediction handles deadlocks and uncertainty in dynamic scenes.  
+- RL-based navigation (PPO, hierarchical RL) achieves reactive collision avoidance but requires careful sim-to-real transfer.  
+- Low-latency perception (camera, LiDAR, event-based) is critical for real-time obstacle detection and tracking.  
+
+**Relevant to YOUR work (with pages):**  
+- Topology-driven and goal-oriented MPC frameworks (p8) could inform predictive reference generation for trajectory tracking (priority 4) when dynamic obstacles are present, though not directly for the current lemniscate benchmark (p8).  
+- Reinforcement learning methods (p9, p21) and reciprocal velocity obstacles (p21) illustrate learning-based path tracking and collision avoidance, aligning with the thesis’ behavioral cloning and Transformer direction (priority 5) (p9, p21).  
+- Spatiotemporal attention pipelines for scene dynamics (p9) and low-latency onboard perception (p14) could inspire vision-based drift mitigation strategies (priority 7), though no direct optical-flow solution is given (p9, p14).  
+
+**How to apply / next step:**  
+- Use the survey’s RL taxonomy to position your BC/Transformer path-tracking work against existing learned planners; note the sim-to-real gap as a future challenge.  
+- Review the MPC frameworks for deadlock mitigation as a potential augmentation of the MRAC outer-loop reference generation only *after* Phase‑2 sim validation.  
+- Explore spatiotemporal perception concepts (p9) for a possible secondary vision pipeline to supplement optical-flow positioning in later hardware tests.
+
+---
+*source:* https://openalex.org/W7163597202 · *22 pp* · *reviewer:* `deepseek/deepseek-v4-pro`
+

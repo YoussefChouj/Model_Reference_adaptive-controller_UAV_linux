@@ -286,6 +286,13 @@ void usart3_send(void)
 /* Max frame: 6-byte header + payload + 1 CRC; Frame B payload up to ~326 bytes @ MAX_NUM_BASIS=8 */
 UCHAR8 Buf_Telemetry_UART4[512] = {0};
 
+/* OF-calibration frame 0x05 sources: body-frame accel (bmi088_driver.c, mg) and the v3 OF
+ * velocity bias (StabilizerTask.c). FP32 is float; the extern re-declares are type-compatible. */
+extern FP32 Acc_X_Real;
+extern FP32 Acc_Y_Real;
+extern float s_of_bias_x, s_of_bias_y;
+extern float Lin_Acc_X_body, Lin_Acc_Y_body;   /* gravity-removed body accel (mg), imu_update.c */
+
 void Send_Groundstation_Telemetry_UART4(void)
 {
     static uint8_t frame_counter = 0;
@@ -417,6 +424,68 @@ void Send_Groundstation_Telemetry_UART4(void)
         Buf_Telemetry_UART4[len++] = DroneStatus.FlyMode;
         Buf_Telemetry_UART4[len++] = SysID_GetState(); // live FSM state for the GS System ID tab (ADR-0004 dec.6)
         id_sample_counter++;
+    }
+    else if (mrac_flags.of_frame_on) // FRAME 0x05 — OF calibration/fusion raw stream @200Hz (replaces A/B while active)
+    {
+        // Payload (39 B): u16 sample_counter, s16 of2_dx_fix/dy_fix (tilt-comp body-frame velocity),
+        // s16 of2_dx/dy (raw velocity cross-check), s16 Acc_X/Y_Real (body accel incl gravity, mg),
+        // s16 Lin_Acc_X/Y_body (gravity-removed body accel, mg — fusion input),
+        // s16 yaw/pit/rol (0.01 deg; yaw is atan2 so ±180 fits s16 at 0.01), s16 s_of_bias_x/y
+        // (0.01 raw units; firmware v3 bias), u16 of_alt_cm (cm), f earth_x/earth_y (firmware-
+        // integrated world position), u8 of_quality.
+        // Purpose: RAW log (no filter) for offline IMU+OF fusion — derive the of2_dx_fix→m/s scale,
+        // tune complementary/Kalman filters offline, and validate firmware integration vs offline.
+        // Streams at 200 Hz via Send_Task's high-rate path (main.c). sample_counter detects dropped
+        // frames (u16 wraps ~5.5 min @200Hz — fine for gap detection). See docs/tracking_baseline_and_drift.md.
+        static uint16_t of_sample_counter = 0;
+        uint16_t payload_len = 39U;
+        int16_t s16v;
+        float ex, ey;
+
+        Buf_Telemetry_UART4[2] = 0x05; // OF calibration frame type
+        Buf_Telemetry_UART4[3] = (uint8_t)(payload_len >> 8);
+        Buf_Telemetry_UART4[4] = (uint8_t)(payload_len & 0xFFU);
+        Buf_Telemetry_UART4[5] = MAX_NUM_BASIS;
+        len = 6;
+
+        Buf_Telemetry_UART4[len++] = (uint8_t)(of_sample_counter & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((of_sample_counter >> 8) & 0xFFU);
+
+        #define OF_PUT_S16(_v) do { s16v = (int16_t)(_v); \
+            Buf_Telemetry_UART4[len++] = (uint8_t)((uint16_t)s16v & 0xFFU); \
+            Buf_Telemetry_UART4[len++] = (uint8_t)(((uint16_t)s16v >> 8) & 0xFFU); } while(0)
+
+        OF_PUT_S16(ano_of.of2_dx_fix);
+        OF_PUT_S16(ano_of.of2_dy_fix);
+        OF_PUT_S16(ano_of.of2_dx);
+        OF_PUT_S16(ano_of.of2_dy);
+        OF_PUT_S16(Acc_X_Real);            // body-frame accel, mg (gravity-included)
+        OF_PUT_S16(Acc_Y_Real);
+        OF_PUT_S16(Lin_Acc_X_body);        // gravity-removed body accel, mg (fusion input)
+        OF_PUT_S16(Lin_Acc_Y_body);
+        OF_PUT_S16(imu_data.yaw * 100.0f); // 0.01 deg
+        OF_PUT_S16(imu_data.pit * 100.0f);
+        OF_PUT_S16(imu_data.rol * 100.0f);
+        OF_PUT_S16(s_of_bias_x * 100.0f);  // 0.01 raw units
+        OF_PUT_S16(s_of_bias_y * 100.0f);
+        #undef OF_PUT_S16
+
+        Buf_Telemetry_UART4[len++] = (uint8_t)(ano_of.of_alt_cm & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((ano_of.of_alt_cm >> 8) & 0xFFU);
+
+        ex = ano_of.earth_x;
+        Buf_Telemetry_UART4[len++] = BYTE0(ex);
+        Buf_Telemetry_UART4[len++] = BYTE1(ex);
+        Buf_Telemetry_UART4[len++] = BYTE2(ex);
+        Buf_Telemetry_UART4[len++] = BYTE3(ex);
+        ey = ano_of.earth_y;
+        Buf_Telemetry_UART4[len++] = BYTE0(ey);
+        Buf_Telemetry_UART4[len++] = BYTE1(ey);
+        Buf_Telemetry_UART4[len++] = BYTE2(ey);
+        Buf_Telemetry_UART4[len++] = BYTE3(ey);
+
+        Buf_Telemetry_UART4[len++] = ano_of.of_quality;
+        of_sample_counter++;
     }
     else if (frame_counter % 5 != 0) // 100Hz Frame A
     {
@@ -854,7 +923,8 @@ void Process_GroundStation_Command(void)
          *      4=tanh_saturation_on  5=e_modification_on  6=l1_filtering_on
          *      7=axis_enable_pitch  8=axis_enable_roll  9=axis_enable_yaw
          *      10=output_injection_on (shadow-mode gate: 0=motors see pure PID)
-         *      11=id_frame_on (high-rate system-ID telemetry frame 0x03 @100Hz, replaces A/B)  */
+         *      11=id_frame_on (high-rate system-ID telemetry frame 0x03 @100Hz, replaces A/B)
+         *      12=of_frame_on (OF calibration/fusion telemetry frame 0x05 @200Hz, replaces A/B)  */
         else if (id == 0x0F) {
             uint8_t on = ((uint8_t)(val + 0.5f)) != 0U ? 1U : 0U;
             switch (idx) {
@@ -870,6 +940,7 @@ void Process_GroundStation_Command(void)
                 case 9: mrac_flags.axis_enable_yaw    = on; break;
                 case 10: mrac_flags.output_injection_on = on; break;
                 case 11: mrac_flags.id_frame_on         = on; break;
+                case 12: mrac_flags.of_frame_on         = on; break;
                 default: break;
             }
         }

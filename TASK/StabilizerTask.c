@@ -43,6 +43,43 @@ TargetSet_WorldReal_Coordinate TWC;
  * Reset on every landing exit so it starts fresh each attempt. */
 static float s_land_sink_bias = 0.0f;
 
+/* OF velocity-bias calibration (docs/tracking_baseline_and_drift.md, mitigation #1).
+ * of2_dx_fix/of2_dy_fix carry a small constant offset (measured ~12-14 / ~2-3 raw
+ * units on the bench) that integrates into unbounded locx/locyPID.FB drift.
+ *
+ * Gated on quiescence rather than the arm edge: arming (stick gesture) happens
+ * before the drone is physically settled (still being placed/held), so a fixed
+ * 2 s window starting at arm captures placement motion, not the true bias
+ * (confirmed on the bench 2026-07-12 — drift was unchanged by an arm-edge-triggered
+ * version of this calibration).
+ *
+ * "Quiescent" = gyro rate below OF_BIAS_STILL_THRESH_RADPS on all 3 axes AND
+ * pitch/roll RC sticks centered (RCInput_IsActive false) — the same condition
+ * under which case_Update_loc_Des already latches locxPID.Des = locxPID.FB
+ * (StabilizerTask.c ~line 629), i.e. the moments position hold assumes the drone
+ * is holding still. Requiring sticks-centered (not just gyro-still) avoids folding
+ * a real, constant-velocity manual translation into the bias estimate.
+ *
+ * Once OF_BIAS_STILL_TICKS of quiescence is seen, average of2_dx_fix/dy_fix for
+ * OF_BIAS_CAL_TICKS; if quiescence breaks mid-average, discard and re-wait. Unlike
+ * a one-shot arm-time calibration, completing a window does NOT freeze the bias —
+ * it goes back to waiting so the next quiescent moment (e.g. every time the pilot
+ * releases the sticks to hover) refreshes it, tracking the slow thermal drift
+ * observed on the bench (~13% bias drift over 13 min) throughout a flight instead
+ * of only at t=0. */
+#define OF_BIAS_STILL_THRESH_RADPS  0.05236f /* ~3 deg/s */
+#define OF_BIAS_STILL_TICKS         100U     /* 100 ticks @ 200 Hz = 0.5 s settled before starting */
+#define OF_BIAS_CAL_TICKS           400U     /* 400 ticks @ 200 Hz = 2.0 s averaging window */
+typedef enum { OF_BIAS_WAIT_STILL = 0, OF_BIAS_ACCUMULATING = 1 } OfBiasState_t;
+static u8            s_of_bias_prev_armed = 0;
+static OfBiasState_t s_of_bias_state      = OF_BIAS_WAIT_STILL;
+static u16           s_of_bias_still_tick = 0;
+static u16           s_of_bias_cal_tick   = 0;
+static float s_of_bias_sum_x = 0.0f, s_of_bias_sum_y = 0.0f;
+/* Non-static: streamed in the 0x05 OF-calibration frame (send_data.c) to validate the v3
+ * bias against an offline-derived Kalman estimate. See docs/tracking_baseline_and_drift.md. */
+float s_of_bias_x = 0.0f, s_of_bias_y = 0.0f;
+
 //
 void stabilizer_Task(void)
 {
@@ -75,14 +112,66 @@ void Update_Data(void)
 	Sin_pitch_01 = sin(imu_data.pit* DEG2RAD);
 	
 	//////////////////λ�û�����ֵ����/////////////////////////
-		ano_of.DISTANCE_X = ano_of.DISTANCE_X+ano_of.of2_dx_fix*0.005f;
-	  ano_of.DISTANCE_Y = ano_of.DISTANCE_Y+ano_of.of2_dy_fix*0.005f;
+		{
+			u8 armed_now = (DroneStatus.ARM_Status == Armed);
+			if (armed_now && !s_of_bias_prev_armed) {
+				/* Just armed: (re)start the stillness-gated calibration sequence. */
+				s_of_bias_state      = OF_BIAS_WAIT_STILL;
+				s_of_bias_still_tick = 0;
+				s_of_bias_cal_tick   = 0;
+				s_of_bias_sum_x = 0.0f;
+				s_of_bias_sum_y = 0.0f;
+			}
+			s_of_bias_prev_armed = armed_now;
 
-	
+			if (armed_now) {
+				u8 is_quiescent = (fabsf(Gyro_X_Real) < OF_BIAS_STILL_THRESH_RADPS)
+				               && (fabsf(Gyro_Y_Real) < OF_BIAS_STILL_THRESH_RADPS)
+				               && (fabsf(Gyro_Z_Real) < OF_BIAS_STILL_THRESH_RADPS)
+				               && !RCInput_IsActive(RC_AXIS_PITCH)
+				               && !RCInput_IsActive(RC_AXIS_ROLL);
+
+				if (s_of_bias_state == OF_BIAS_WAIT_STILL) {
+					s_of_bias_still_tick = is_quiescent ? (s_of_bias_still_tick + 1U) : 0U;
+					if (s_of_bias_still_tick >= OF_BIAS_STILL_TICKS) {
+						s_of_bias_state = OF_BIAS_ACCUMULATING;
+						s_of_bias_cal_tick = 0;
+						s_of_bias_sum_x = 0.0f;
+						s_of_bias_sum_y = 0.0f;
+					}
+				} else { /* OF_BIAS_ACCUMULATING */
+					if (!is_quiescent) {
+						/* Motion resumed before the window finished: discard and re-wait. */
+						s_of_bias_state      = OF_BIAS_WAIT_STILL;
+						s_of_bias_still_tick = 0;
+					} else {
+						s_of_bias_sum_x += (float)ano_of.of2_dx_fix;
+						s_of_bias_sum_y += (float)ano_of.of2_dy_fix;
+						s_of_bias_cal_tick++;
+						if (s_of_bias_cal_tick >= OF_BIAS_CAL_TICKS) {
+							s_of_bias_x = s_of_bias_sum_x / (float)OF_BIAS_CAL_TICKS;
+							s_of_bias_y = s_of_bias_sum_y / (float)OF_BIAS_CAL_TICKS;
+							/* Refreshed, not frozen: go back and look for the next
+							 * quiescent window so slow bias drift keeps getting tracked. */
+							s_of_bias_state      = OF_BIAS_WAIT_STILL;
+							s_of_bias_still_tick = 0;
+						}
+					}
+				}
+			}
+		}
+		{
+			float of_dx_deb = ano_of.of2_dx_fix - s_of_bias_x;
+			float of_dy_deb = ano_of.of2_dy_fix - s_of_bias_y;
+
+			ano_of.DISTANCE_X = ano_of.DISTANCE_X+of_dx_deb*0.005f;
+			ano_of.DISTANCE_Y = ano_of.DISTANCE_Y+of_dy_deb*0.005f;
+
 			//��������������ϵ�µ�ֵ
-	  ano_of.earth_x = ano_of.earth_x + (ano_of.of2_dx_fix*0.005f*Cos_Yaw_01 + ano_of.of2_dy_fix*0.005f*Sin_Yaw_01 );
-	
-	  ano_of.earth_y = ano_of.earth_y + (ano_of.of2_dy_fix*0.005f*Cos_Yaw_01 - ano_of.of2_dx_fix*0.005f*Sin_Yaw_01 );
+			ano_of.earth_x = ano_of.earth_x + (of_dx_deb*0.005f*Cos_Yaw_01 + of_dy_deb*0.005f*Sin_Yaw_01 );
+
+			ano_of.earth_y = ano_of.earth_y + (of_dy_deb*0.005f*Cos_Yaw_01 - of_dx_deb*0.005f*Sin_Yaw_01 );
+		}
 	  ano_of.earth_x_ture  =  ano_of.earth_y;
 	  ano_of.earth_y_ture  =  -ano_of.earth_x;
 	

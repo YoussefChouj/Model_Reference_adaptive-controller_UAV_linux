@@ -230,6 +230,7 @@ typedef struct {
     uint8_t axis_enable_yaw;
     uint8_t output_injection_on;    // Runtime shadow-mode gate: 0 = MRAC learns but motors see pure PID; 1 = u_ad injected
     uint8_t id_frame_on;            // High-rate system-ID telemetry frame (0x03 @ 100Hz, replaces A/B while set)
+    uint8_t of_frame_on;            // OF calibration/fusion raw telemetry frame (0x05 @ 200Hz, replaces A/B while set)
     uint8_t ref_model_type;         // Reference model: 0 = passthrough (xm=r), 1 = first-order, 2 = second-order
 } MRAC_FeatureFlags_t;
 

@@ -139,8 +139,8 @@ void Send_Task(void *pvParameters)
         // DMA completes during that sleep, so the next busy-wait is ~0, the link sits at ~75 %
         // (8.6 KB/s of 11.52 KB/s) with margin, and the rate cannot run away. (For >200 Hz you must
         // raise the UART5 baud or shrink the frame; 115200 + 43 B caps clean capture near 200 Hz.)
-        if (mrac_flags.id_frame_on) {
-            Send_Groundstation_Telemetry_UART4(); // single-axis ID frame -> UART5 (DMA1_Stream7)
+        if (mrac_flags.id_frame_on || mrac_flags.of_frame_on) {
+            Send_Groundstation_Telemetry_UART4(); // single-axis ID frame (0x03) or OF-cal frame (0x05) -> UART5 (DMA1_Stream7)
             Process_GroundStation_Command();      // still service START/ABORT/flag commands
             vTaskDelay(pdMS_TO_TICKS(5));          // hard 5 ms floor = stable ~200 Hz, no runaway
             PreviousWakeTime = xTaskGetTickCount(); // re-base so the 100 Hz path resumes cleanly after a run

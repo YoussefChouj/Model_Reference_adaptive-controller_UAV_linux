@@ -29,6 +29,7 @@
 "..\obj\adc.o"
 "..\obj\bsp.o"
 "..\obj\pwm.o"
+"..\obj\rpm.o"
 "..\obj\spi.o"
 "..\obj\usart1.o"
 "..\obj\usart4.o"

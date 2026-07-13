@@ -91,3 +91,4 @@
 ..\obj\send_data.o: ..\API\sysid.h
 ..\obj\send_data.o: ..\API\rc_input.h
 ..\obj\send_data.o: ..\API\flight_fsm.h
+..\obj\send_data.o: ..\BSP\rpm.h

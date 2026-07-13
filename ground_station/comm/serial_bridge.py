@@ -42,6 +42,8 @@ except ImportError:  # pragma: no cover
 #   0x0F MRAC flags — idx: 0=adaptation_on 1=projection_on 2=deadzone_on 3=hard_freeze_on
 #                          4=tanh_saturation_on 5=e_modification_on 6=l1_filtering_on
 #                          7=axis_enable_pitch 8=axis_enable_roll 9=axis_enable_yaw
+#                          10=output_injection_on 11=id_frame_on (0x03 @100Hz)
+#                          12=of_frame_on (OF calibration frame 0x05 @200Hz, replaces A/B)
 #                          val>=0.5 = ON, val<0.5 = OFF
 #   0x10 reset world-frame optical-flow origin — idx 0 (value ignored; use 1.0)
 #   0x11 figure-8 (lemniscate) path — FlyMode_SDK only:
@@ -57,7 +59,7 @@ except ImportError:  # pragma: no cover
 #        Dashboard sends 0x10 (OF-origin reset) immediately before idx 6 start.
 # Must match GS_PROTO_VERSION in Global_file/global_declare.h.
 # Increment both when the telemetry frame layout or CMD semantics change.
-GS_PROTO_VERSION: int = 8
+GS_PROTO_VERSION: int = 10
 
 cmd_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
 
@@ -236,6 +238,7 @@ class SerialBridge:
         self._last_telemetry_b: Dict[str, float] = {}
         self._last_telemetry_id: Dict[str, float] = {}
         self._last_telemetry_bench: Dict[str, float] = {}
+        self._last_telemetry_of: Dict[str, float] = {}
         self._telemetry_lock = threading.Lock()
 
         # Debug printing throttle (simulate mode can be very chatty).
@@ -709,6 +712,57 @@ class SerialBridge:
             ("bench.rpm4", float(rpm_tuple[3])),
         ]
 
+    def _unpack_frame_of(self, payload: bytes) -> List[Tuple[str, float]]:
+        # FRAME 0x05 — OF calibration/fusion raw stream (200 Hz, replaces A/B while active).
+        # Fixed 39-byte layout (little-endian), all RAW (no filtering) for offline fusion work:
+        #   u16 sample_counter
+        #   s16 of2_dx_fix, of2_dy_fix   tilt-comp body-frame velocity (raw sensor units)
+        #   s16 of2_dx, of2_dy           raw (non-tilt-comp) velocity cross-check
+        #   s16 acc_x, acc_y             FC body-frame accel, mg (gravity-included)
+        #   s16 lin_acc_x, lin_acc_y     gravity-removed body-frame accel, mg (fusion input)
+        #   s16 yaw, pit, rol            0.01 deg (FC Mahony Euler)
+        #   s16 bias_x, bias_y           firmware v3 OF velocity bias, 0.01 raw units
+        #   u16 of_alt_cm                OF rangefinder height, cm
+        #   f   earth_x, earth_y         firmware-integrated world position (raw*s accumulator; *0.0124 -> m)
+        #   u8  of_quality
+        # Purpose: derive the of2_dx_fix→m/s scale (Scenario 1 hand-slide), tune complementary/Kalman
+        # filters offline, and validate firmware integration vs offline. See
+        # docs/tracking_baseline_and_drift.md. Emitted as of.* so the flight logger can capture it.
+        if len(payload) != 39:
+            return []
+        (
+            counter,
+            of2_dx_fix, of2_dy_fix,
+            of2_dx, of2_dy,
+            acc_x, acc_y,
+            lin_acc_x, lin_acc_y,
+            yaw_c, pit_c, rol_c,
+            bias_x_c, bias_y_c,
+            alt_cm,
+        ) = struct.unpack_from("<H13hH", payload, 0)
+        (earth_x, earth_y) = struct.unpack_from("<2f", payload, 30)
+        of_quality = payload[38]
+        return [
+            ("of.sample_counter", float(counter)),
+            ("of.of2_dx_fix", float(of2_dx_fix)),
+            ("of.of2_dy_fix", float(of2_dy_fix)),
+            ("of.of2_dx", float(of2_dx)),
+            ("of.of2_dy", float(of2_dy)),
+            ("of.acc_x_mg", float(acc_x)),
+            ("of.acc_y_mg", float(acc_y)),
+            ("of.lin_acc_x_mg", float(lin_acc_x)),
+            ("of.lin_acc_y_mg", float(lin_acc_y)),
+            ("of.yaw", float(yaw_c) * 0.01),
+            ("of.pit", float(pit_c) * 0.01),
+            ("of.rol", float(rol_c) * 0.01),
+            ("of.bias_x", float(bias_x_c) * 0.01),
+            ("of.bias_y", float(bias_y_c) * 0.01),
+            ("of.alt_cm", float(alt_cm)),
+            ("of.earth_x", float(earth_x)),
+            ("of.earth_y", float(earth_y)),
+            ("of.quality", float(of_quality)),
+        ]
+
     def _handle_frame(self, frame_type: int, max_num_basis: int, payload: bytes) -> None:
         if frame_type == 0x01:
             lines = self._unpack_frame_a(max_num_basis, payload)
@@ -718,6 +772,8 @@ class SerialBridge:
             lines = self._unpack_frame_id(payload)
         elif frame_type == 0x04:
             lines = self._unpack_frame_bench(payload)
+        elif frame_type == 0x05:
+            lines = self._unpack_frame_of(payload)
         else:
             return
 
@@ -730,6 +786,8 @@ class SerialBridge:
                     self._last_telemetry_id = mp
                 elif frame_type == 0x04:
                     self._last_telemetry_bench = mp
+                elif frame_type == 0x05:
+                    self._last_telemetry_of = mp
                 else:
                     self._last_telemetry_b = mp
             self._maybe_debug_print_telemetry(frame_type, lines)
@@ -744,10 +802,11 @@ class SerialBridge:
                 b = dict(self._last_telemetry_b)
                 idf = dict(self._last_telemetry_id)
                 bench = dict(self._last_telemetry_bench)
+                of = dict(self._last_telemetry_of)
             with self._state_lock:
                 mb = int(self._last_max_num_basis)
             payload = json.dumps(
-                {"a": a, "b": b, "id": idf, "bench": bench, "max_num_basis": mb},
+                {"a": a, "b": b, "id": idf, "bench": bench, "of": of, "max_num_basis": mb},
                 separators=(",", ":"),
             ).encode("utf-8")
             if len(payload) > 65000:
@@ -887,6 +946,9 @@ class SerialBridge:
             # so the bridge still parses pre-reflash firmware.
             if len_payload not in (12, 20):
                 return
+        elif frame_type == 0x05:
+            if len_payload != 39:
+                return
         else:
             return
 
@@ -978,6 +1040,10 @@ class SerialBridge:
                 # v7 = 12 B (no RPM), v8 = 20 B (4x u16 RPM appended). Accept both
                 # so the bridge still parses pre-reflash firmware.
                 if len_payload not in (12, 20):
+                    sync_seen = False
+                    continue
+            elif frame_type == 0x05:
+                if len_payload != 39:
                     sync_seen = False
                     continue
             else:

@@ -1,6 +1,6 @@
 # Global Cross-Run Analysis
 
-_Generated 2026-06-15 21:29:51 from 2 path mode(s)._
+_Generated 2026-07-12 13:27:14 from 3 path mode(s)._
 
 ## Best per mode
 
@@ -8,6 +8,7 @@ _Generated 2026-06-15 21:29:51 from 2 path mode(s)._
 |------|------|-----------|--------|--------------|
 | sinusoid | 1 | - | - | - |
 | twc | 14 | 20.94 | planar_rmse_cm | exp_flight_twc_1781526842 |
+| unknown | 1 | - | - | - |
 
 ## sinusoid
 
@@ -38,3 +39,12 @@ _Generated 2026-06-15 21:29:51 from 2 path mode(s)._
 | Rank | Score | Metric | Cross-track mean (cm) | Config hash | Run |
 |------|-------|--------|----------------------|-------------|-----|
 | 1 | 20.94 | planar_rmse_cm | - | `f0474734a0` | exp_flight_twc_1781526842 |
+
+## unknown
+
+**Latest run**: exp_flight_1783833738
+
+| | rank score | crit | warn |
+|--|--|--|--|
+| latest | 293.67 | 1 | 9 |
+

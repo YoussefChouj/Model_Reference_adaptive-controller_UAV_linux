@@ -4,30 +4,42 @@
 #include "data_types.h"
 #include "stm32f4xx.h"
 
-typedef struct 
+/* Anti-windup mode selector for ComputePID(). Default 0 = original behaviour. */
+typedef enum
 {
-  float Des;//¿ØÖÆ±äÁ¿Ä¿±êÖµ
-  float FB;//¿ØÖÆ±äÁ¿·´À¡Öµ
+	AW_LEGACY   = 0,   // EMin integral-separation + SumE clamp (unchanged default)
+	AW_CLAMP    = 1,   // conditional integration keyed on ACTUAL output saturation
+	AW_BACKCALC = 2    // back-calculation observer (requires Kt > 0)
+} PID_AntiWindup_e;
+
+typedef struct
+{
+  float Des;//ï¿½ï¿½ï¿½Æ±ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Öµ
+  float FB;//ï¿½ï¿½ï¿½Æ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
 	
-	float Kp;//±ÈÀýÏµÊýKp
-	float Ki;//»ý·ÖÏµÊýKi
-	float Kd;//Î¢·ÖÏµÊýKd
+	float Kp;//ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½Kp
+	float Ki;//ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½Ki
+	float Kd;//Î¢ï¿½ï¿½Ïµï¿½ï¿½Kd
 	
-	float Up;//±ÈÀýÊä³ö
-	float Ui;//»ý·ÖÊä³ö
-	float Ud;//Î¢·ÖÊä³ö
+	float Up;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	float Ui;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	float Ud;//Î¢ï¿½ï¿½ï¿½ï¿½ï¿½
 	
-	float E;//±¾´ÎÆ«²î
-	float PreE;//ÉÏ´ÎÆ«²î
-  float SumE;//×ÜÆ«²î
-	float U;//±¾´ÎPIDÔËËã½á¹û
+	float E;//ï¿½ï¿½ï¿½ï¿½Æ«ï¿½ï¿½
+	float PreE;//ï¿½Ï´ï¿½Æ«ï¿½ï¿½
+  float SumE;//ï¿½ï¿½Æ«ï¿½ï¿½
+	float U;//ï¿½ï¿½ï¿½ï¿½PIDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	
-	float UMax;//PIDÔËËãºóÊä³ö×î´óÖµ¼°×öÓöÏÞÏ÷ÈõÊ±µÄÉÏÏÞÖµ
-	float UpMax;//±ÈÀýÏîÊä³ö×î´óÖµ
-	float UiMax;//»ý·ÖÏîÊä³ö×î´óÖµ
-	float UdMax;//Î¢·ÖÏîÊä³ö×î´óÖµ
-	float SumEMax;//»ý·Ö±¥ºÍÖµ
-	float EMin;//»ý·Ö·ÖÀëãÐÖµ
+	float UMax;//PIDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	float UpMax;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	float UiMax;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	float UdMax;//Î¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	float SumEMax;//ï¿½ï¿½ï¿½Ö±ï¿½ï¿½ï¿½Öµ
+	float EMin;//ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+
+	/* --- Anti-windup extension (appended; zero-init keeps legacy default) --- */
+	int   aw_mode;   // PID_AntiWindup_e: 0=legacy(default), 1=clamp, 2=back-calc
+	float Kt;        // back-calculation gain, used only when aw_mode==AW_BACKCALC
 }PIDTypeDef;
 
 typedef struct 
@@ -114,15 +126,15 @@ typedef struct
 
 typedef struct
 {
-	USART_TypeDef* USARTx;            //´®¿Ú
-	DMA_Stream_TypeDef* DMAy_Streamx; //DMAÊý¾ÝÁ÷
-	UCHAR8* pMailbox;                 //ÓÊÏä(ÓÐÐ§Êý¾Ý)Êý×é
-  __IO UCHAR8* pDMAbuf;             //DMAÊý×é
-	USHORT16 MbLen;                   //mailbox³¤¶È
-	USHORT16 DMALen;                  //DMA³¤¶È
-	USHORT16 rxConter;                //±¾´ÎDMA³¤¶È
-	USHORT16 rxBufferPtr;             //ÉÏ´ÎµÄ³¤¶È  ³¤¶ÈÒ²´ú±íÎ»ÖÃ
-  USHORT16 rxSize;                  //±¾´Î½ÓÊÕµÄ³¤¶È
+	USART_TypeDef* USARTx;            //ï¿½ï¿½ï¿½ï¿½
+	DMA_Stream_TypeDef* DMAy_Streamx; //DMAï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	UCHAR8* pMailbox;                 //ï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½Ð§ï¿½ï¿½ï¿½ï¿½)ï¿½ï¿½ï¿½ï¿½
+  __IO UCHAR8* pDMAbuf;             //DMAï¿½ï¿½ï¿½ï¿½
+	USHORT16 MbLen;                   //mailboxï¿½ï¿½ï¿½ï¿½
+	USHORT16 DMALen;                  //DMAï¿½ï¿½ï¿½ï¿½
+	USHORT16 rxConter;                //ï¿½ï¿½ï¿½ï¿½DMAï¿½ï¿½ï¿½ï¿½
+	USHORT16 rxBufferPtr;             //ï¿½Ï´ÎµÄ³ï¿½ï¿½ï¿½  ï¿½ï¿½ï¿½ï¿½Ò²ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½
+  USHORT16 rxSize;                  //ï¿½ï¿½ï¿½Î½ï¿½ï¿½ÕµÄ³ï¿½ï¿½ï¿½
 }USART_RX_TypeDef;
 
 typedef struct
@@ -134,7 +146,7 @@ typedef struct
 	FP32 wy;
 	FP32 wz;
 }ST_IMU_DATA;
-//ÊÓ¾õÊý¾Ý´¦Àí½á¹¹Ìå
+//ï¿½Ó¾ï¿½ï¿½ï¿½ï¿½Ý´ï¿½ï¿½ï¿½ï¿½á¹¹ï¿½ï¿½
 
 
 typedef union
@@ -158,7 +170,7 @@ typedef struct
 }PID_Param;
 
 
-//ÍÓÂÝÒÇ
+//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 typedef enum {OFF = 0, ON = 1, TWINKLE = 2}LED_MODE;
 typedef enum {INIT = 0, NORMAL = 1, CALIBRATION = 2}IMU_MODE;
 typedef enum {LOOP = 0, IDENTIFY = 1}CTRL_MODE;
@@ -174,40 +186,40 @@ typedef struct
 
 
 
-/*PID¿ØÖÆÆ÷½á¹¹Ìå*/
+/*PIDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½á¹¹ï¿½ï¿½*/
 typedef struct 
 {
-  FP32 fpDes;//¿ØÖÆ±äÁ¿Ä¿±êÖµ
-  FP32 fpFB;//¿ØÖÆ±äÁ¿·´À¡Öµ
+  FP32 fpDes;//ï¿½ï¿½ï¿½Æ±ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Öµ
+  FP32 fpFB;//ï¿½ï¿½ï¿½Æ±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
 	
-	FP32 fpKp;//±ÈÀýÏµÊýKp
-	FP32 fpKi;//»ý·ÖÏµÊýKi
-	FP32 fpKd;//Î¢·ÖÏµÊýKd
+	FP32 fpKp;//ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½Kp
+	FP32 fpKi;//ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½Ki
+	FP32 fpKd;//Î¢ï¿½ï¿½Ïµï¿½ï¿½Kd
 	
-	FP32 fpUp;//±ÈÀýÊä³ö
-	FP32 fpUi;//»ý·ÖÊä³ö
-	FP32 fpUd;//Î¢·ÖÊä³ö
+	FP32 fpUp;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	FP32 fpUi;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	FP32 fpUd;//Î¢ï¿½ï¿½ï¿½ï¿½ï¿½
 	
-	FP32 fpE;//±¾´ÎÆ«²î
-	FP32 fpPreE;//ÉÏ´ÎÆ«²î
-  FP32 fpSumE;//×ÜÆ«²î
-	FP32 fpU;//±¾´ÎPIDÔËËã½á¹û
+	FP32 fpE;//ï¿½ï¿½ï¿½ï¿½Æ«ï¿½ï¿½
+	FP32 fpPreE;//ï¿½Ï´ï¿½Æ«ï¿½ï¿½
+  FP32 fpSumE;//ï¿½ï¿½Æ«ï¿½ï¿½
+	FP32 fpU;//ï¿½ï¿½ï¿½ï¿½PIDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	
-	FP32 fpUMax;//PIDÔËËãºóÊä³ö×î´óÖµ¼°×öÓöÏÞÏ÷ÈõÊ±µÄÉÏÏÞÖµ
-	FP32 fpEpMax;//±ÈÀýÏîÊä³ö×î´óÖµ
-	FP32 fpEiMax;//»ý·ÖÏîÊä³ö×î´óÖµ
-	FP32 fpEdMax;//Î¢·ÖÏîÊä³ö×î´óÖµ
-	FP32 fpEMin;//»ý·ÖÉÏÏÞ
+	FP32 fpUMax;//PIDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	FP32 fpEpMax;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	FP32 fpEiMax;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	FP32 fpEdMax;//Î¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	FP32 fpEMin;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 }ST_PID;
 
 typedef struct
 {
-	FP32 fpRawValue; //µ±Ç°²ÉÑùÖµ
-	FP32 fpPreRawValue; // ÉÏ´Î²ÉÑùÖµ
-	FP32 fpDiff;  //Á½´Î²ÉÑùÆ«²î
-	FP32 fpSumValue; //×îÖÕÊä³öÖµ
-	FP32 fpOffsetValue; //±ê¶¨¸´Î»Öµ
-	bool InitState; //³õÊ¼»¯Íê³É±êÖ¾
+	FP32 fpRawValue; //ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½Öµ
+	FP32 fpPreRawValue; // ï¿½Ï´Î²ï¿½ï¿½ï¿½Öµ
+	FP32 fpDiff;  //ï¿½ï¿½ï¿½Î²ï¿½ï¿½ï¿½Æ«ï¿½ï¿½
+	FP32 fpSumValue; //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+	FP32 fpOffsetValue; //ï¿½ê¶¨ï¿½ï¿½Î»Öµ
+	bool InitState; //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½É±ï¿½Ö¾
 }ST_GYRO;
 
 typedef struct
@@ -227,7 +239,7 @@ typedef union
 typedef struct
 {
 	FP32 Is_Rcg_FLAG;  //led_flag
-	FP32 E_Pitch;   //·äÃùÆ÷
+	FP32 E_Pitch;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	FP32 E_Yaw;     //openmv
 }ST_ENEMY_Aim;
 

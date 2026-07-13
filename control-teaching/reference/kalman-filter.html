@@ -1,0 +1,74 @@
+<link rel="stylesheet" href="../assets/lesson.css">
+<title>Reference — Kalman Filter</title>
+
+<p class="eyebrow">Reference card · Estimation</p>
+<h1>Kalman Filter</h1>
+<p class="lede">The optimal way to combine an uncertain model with a noisy sensor — for linear
+systems with Gaussian noise. Everything reduces to one gain, K.</p>
+
+<h2>Symbols</h2>
+<table>
+  <tr><th>Symbol</th><th>Name</th><th>Answers</th></tr>
+  <tr><td class="mono">x</td><td>state</td><td>what you want to know (can't measure directly)</td></tr>
+  <tr><td class="mono">z</td><td>measurement</td><td>what the sensor actually gives you</td></tr>
+  <tr><td class="mono">A</td><td>state transition</td><td>how the state evolves one step on its own</td></tr>
+  <tr><td class="mono">B, u</td><td>input model, input</td><td>how your commands push the state</td></tr>
+  <tr><td class="mono">H</td><td>observation model</td><td>which mix of states the sensor sees</td></tr>
+  <tr><td class="mono">w ~ N(0, <strong>Q</strong>)</td><td>process noise</td><td>how much you distrust the <em>model</em> per step</td></tr>
+  <tr><td class="mono">v ~ N(0, <strong>R</strong>)</td><td>measurement noise</td><td>how much you distrust the <em>sensor</em></td></tr>
+  <tr><td class="mono">P</td><td>estimate covariance</td><td>how uncertain the current estimate is</td></tr>
+  <tr><td class="mono">K</td><td>Kalman gain</td><td>what fraction of the innovation to accept</td></tr>
+  <tr><td class="mono">x&#770;&#8315;, P&#8315;</td><td>prior (superscript &minus;)</td><td>after PREDICT, before the measurement</td></tr>
+</table>
+<p class="muted">Common trap: Q and R both describe noise, but Q belongs to the process equation and
+R to the measurement equation. Tuning = choosing the Q:R ratio.</p>
+
+<h2>1-D Gaussian fusion (the core idea)</h2>
+<pre><code>fuse N(&mu;&#8321;, &sigma;&#8321;&sup2;) with N(&mu;&#8322;, &sigma;&#8322;&sup2;):
+
+  K  = &sigma;&#8321;&sup2; / (&sigma;&#8321;&sup2; + &sigma;&#8322;&sup2;)          // the Kalman gain
+  &mu;  = &mu;&#8321; + K (&mu;&#8322; &minus; &mu;&#8321;)             // move toward the measurement by fraction K
+  &sigma;&sup2; = (1 &minus; K) &sigma;&#8321;&sup2;                 // ALWAYS smaller than both inputs</code></pre>
+<ul>
+  <li>K &rarr; 0: trust the model. &nbsp; K &rarr; 1: trust the measurement. &nbsp; The noisier a source, the less it contributes.</li>
+  <li>Every measurement — even a bad one — shrinks uncertainty by the factor (1 &minus; K).</li>
+</ul>
+
+<h2>The full recursion</h2>
+<pre><code>model:        x&#8342; = A x&#8342;&#8331;&#8321; + B u&#8342;&#8331;&#8321; + w,   w ~ N(0, Q)
+measurement:  z&#8342; = H x&#8342; + v,               v ~ N(0, R)   // R here — not Q!
+
+PREDICT  (every tick):
+  x&#770;&#8315; = A x&#770; + B u
+  P&#8315; = A P A&#7488; + Q                    // uncertainty GROWS
+
+UPDATE  (when a measurement arrives):
+  S  = H P&#8315; H&#7488; + R                   // innovation covariance
+  K  = P&#8315; H&#7488; S&#8315;&sup1;
+  x&#770;  = x&#770;&#8315; + K (z &minus; H x&#770;&#8315;)
+  P  = (I &minus; K H) P&#8315;                  // uncertainty SHRINKS</code></pre>
+<p>Predict and update can run at different rates: predict at the model rate, update whenever a
+sensor sample lands. Multiple sensors = multiple update steps, each with its own H and R.</p>
+
+<h2>This firmware</h2>
+<ul>
+  <li><strong>No Kalman filter exists in the firmware.</strong> All estimators are fixed-gain predict/correct loops.</li>
+  <li>Attitude: Mahony complementary filter, <a href="../../API/imu_update.c"><code>imu_update.c</code></a>, 1&nbsp;kHz. Predict = gyro quaternion propagation; update = accel cross-product error &times; constant Kp/Ki. Equivalent to a steady-state (converged-K) Kalman filter, made stable on SO(3).</li>
+  <li>Position/velocity: SINS fixed-gain observer corrections (<a href="../../API/SINS.h"><code>SINS.h</code></a> <code>in_est/in_obs/fix_ki</code>).</li>
+  <li>Trade-off of fixed gain: no covariance CPU cost, but trust can't adapt (e.g. accel corrupted by maneuvers still gets full weight).</li>
+</ul>
+
+<h2>Extensions (one line each)</h2>
+<ul>
+  <li><strong>EKF</strong> — nonlinear f(x), h(x); linearize with Jacobians each tick. The workhorse of drone autopilots (PX4/ArduPilot).</li>
+  <li><strong>UKF</strong> — propagate a handful of sigma points through the true nonlinearity instead of linearizing.</li>
+  <li><strong>Particle filter</strong> — drop Gaussians entirely; represent belief as weighted samples.</li>
+</ul>
+
+<h2>Sources</h2>
+<ul>
+  <li>Video (intuition): <a href="https://www.youtube.com/watch?v=lIYYJMHAwMU">"This One Equation Powers GPS, Rockets, and Robots"</a></li>
+  <li>Deep + runnable: Labbe, <a href="https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python"><em>Kalman and Bayesian Filters in Python</em></a></li>
+  <li>Equation-by-equation: <a href="https://www.kalmanfilter.net/">kalmanfilter.net</a></li>
+  <li>Why not a KF for attitude: <a href="https://doi.org/10.1109/TAC.2008.919528">Mahony et&nbsp;al. 2008</a> + <a href="../../wiki/theory/mahony-filter.md">wiki/theory/mahony-filter.md</a></li>
+</ul>

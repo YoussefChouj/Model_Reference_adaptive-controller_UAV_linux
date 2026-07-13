@@ -31,8 +31,10 @@
 
 /* Ground-station protocol version (uint8, appended as last byte of Frame A payload).
  * Increment when the frame layout or CMD semantics change. Must match GS_PROTO_VERSION
- * in ground_station/comm/serial_bridge.py. v8: bench frame 0x04 payload grew 12->20 B (4x u16 RPM). */
-#define GS_PROTO_VERSION             8U
+ * in ground_station/comm/serial_bridge.py. v8: bench frame 0x04 payload grew 12->20 B (4x u16 RPM).
+ * v9: added OF calibration/fusion frame 0x05 (35 B, CMD 0x0F idx 12).
+ * v10: 0x05 grew 35->39 B (added s16 Lin_Acc_X/Y_body, gravity-removed body accel, mg). */
+#define GS_PROTO_VERSION             10U
 
 #define ARM_Delay_time  150
 #define DISARM_Delay_time  50// 50*20ms = 1s

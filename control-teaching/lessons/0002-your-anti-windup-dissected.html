@@ -1,0 +1,149 @@
+<link rel="stylesheet" href="../assets/lesson.css">
+<title>Lesson 2 — Your Anti-Windup, Dissected</title>
+
+<p class="eyebrow">Lesson 02 · The Rate loop, up close</p>
+<h1>Your Anti-Windup, Dissected</h1>
+<p class="lede">Brian Douglas showed you two ways to stop integrator windup: clamping and
+back-calculation. Your firmware appears to do clamping. Read it closely and you'll find it
+mostly doesn't — and that gap is your first real improvement.</p>
+
+<p>This is the whole point of the mission in one lesson: <strong>never assume a feature works because
+it's there. Trace it.</strong> We'll walk every line of <code>ComputePID()</code>
+(<a href="../../API/pid.c">pid.c:32–55</a>), find what actually protects you, and mark exactly where
+a genuine anti-windup would bolt on behind a flag.</p>
+
+<h2>The windup problem (30-second recap)</h2>
+<p>The integrator sums error every tick to kill steady-state offset. But when the output is
+<em>saturated</em> — motor already maxed — pushing harder does nothing, yet the integrator keeps
+piling up error. When the setpoint is finally reached, that huge stored sum overshoots wildly before it
+bleeds off. That overshoot <em>is</em> windup.
+(<a href="https://www.youtube.com/watch?v=NVLXCwc8HzM">Brian Douglas, Part 2</a>.)</p>
+
+<h2>What your code claims to do</h2>
+<pre><code>void ComputePID(PIDTypeDef *pPID) {
+    pPID-&gt;E = pPID-&gt;Des - pPID-&gt;FB;                       // error
+
+    if(((pPID-&gt;U &lt;= pPID-&gt;UMax  &amp;&amp; pPID-&gt;E &gt; 0) ||        // [A] "not saturated high"?
+        (pPID-&gt;U &gt;= -pPID-&gt;UMax &amp;&amp; pPID-&gt;E &lt; 0))           // [A] "not saturated low"?
+        &amp;&amp; ABS(pPID-&gt;E) &lt; pPID-&gt;EMin)                      // [B] integral separation
+    {
+        pPID-&gt;SumE += pPID-&gt;E;                            // accumulate
+    }
+    value_limit(pPID-&gt;SumE, -pPID-&gt;SumEMax, pPID-&gt;SumEMax); // [C] clamp accumulator
+    pPID-&gt;Ui = pPID-&gt;Ki * pPID-&gt;SumE;
+    value_limit(pPID-&gt;Ui, -pPID-&gt;UiMax, pPID-&gt;UiMax);      // [D] clamp I-term
+    ...
+    pPID-&gt;U = pPID-&gt;Up + pPID-&gt;Ui + pPID-&gt;Ud;
+    value_limit(pPID-&gt;U, -pPID-&gt;UMax, pPID-&gt;UMax);        // [E] clamp total output
+}</code></pre>
+
+<p>Four clamps and one gate. On paper: <strong>[A]</strong> is the "stop integrating when saturated"
+rule (Brian Douglas's clamping), <strong>[B]</strong> is integral separation, <strong>[C]/[D]/[E]</strong>
+are hard limits. Now let's check whether [A] actually fires.</p>
+
+<h2>The catch: gate [A] can never block</h2>
+<p>Look at what <code>pPID-&gt;U</code> is <em>on entry</em>. It was written only at line [E] last tick,
+and [E] clamped it into <code>[-UMax, +UMax]</code>. Nothing else in the firmware writes it. So this
+invariant always holds when the <code>if</code> runs:</p>
+<pre><code>-UMax  &lt;=  pPID-&gt;U  &lt;=  UMax        // guaranteed, every single tick</code></pre>
+
+<p>Now substitute:</p>
+<ul>
+  <li>If <code>E &gt; 0</code>: <code>U &lt;= UMax</code> is <strong>always true</strong> → clause [A] passes.</li>
+  <li>If <code>E &lt; 0</code>: <code>U &gt;= -UMax</code> is <strong>always true</strong> → clause [A] passes.</li>
+</ul>
+<p>So <strong>[A] reduces to <code>E ≠ 0</code></strong> — it never actually detects saturation, because it
+compares <code>U</code> against the very limit it was just clamped to. The whole accumulation condition
+collapses to:</p>
+<pre><code>if ( ABS(pPID-&gt;E) &lt; pPID-&gt;EMin )   // ...that's all [A]+[B] really amount to</code></pre>
+
+<div class="note">
+<strong>Why this happens</strong>
+True clamping needs <em>two different</em> numbers: the output the controller <em>wanted</em>
+(pre-saturation) and the output the actuator <em>allowed</em> (post-saturation). Here they're the same
+variable clamped to the same constant, so their difference is always zero — no windup signal exists.
+Real saturation in your drone happens downstream at the <strong>motor mixer</strong>, which
+<code>UMax</code> never sees.
+</div>
+
+<div class="win">
+<strong>Your win</strong>
+What's <em>actually</em> protecting your rate loops from windup is <strong>[B] integral separation</strong>
+(only integrate when <code>|E| &lt; EMin</code> — for the rate loops <code>EMin</code> is tiny, ~2 deg/s,
+so the integrator only works near steady state) plus <strong>[C] the accumulator clamp
+<code>SumEMax</code></strong>. Not the saturation gate. You now know your firmware better than the wiki does.
+</div>
+
+<h2>Where your first improvement bolts on</h2>
+<p>This is a textbook flag-gated upgrade, and it lands at exactly one spot: <strong>right after line [E]</strong>,
+where the pre- and post-clamp outputs both exist for one instant. That difference is the back-calculation
+signal Brian Douglas drew:</p>
+<pre><code>pPID-&gt;U = pPID-&gt;Up + pPID-&gt;Ui + pPID-&gt;Ud;
+float u_presat = pPID-&gt;U;                          // what we wanted
+value_limit(pPID-&gt;U, -pPID-&gt;UMax, pPID-&gt;UMax);      // what we're allowed
+
+if (antiwindup_backcalc_on)                        // FLAG — default OFF = today
+    pPID-&gt;SumE += pPID-&gt;Kt * (pPID-&gt;U - u_presat);  // bleed the integrator toward feasibility</code></pre>
+<div class="flag">
+<strong>Mission rule check</strong>
+<em>(1) Which box?</em> Rate PID. <em>(2) Flag whose OFF = today?</em> Yes —
+<code>antiwindup_backcalc_on = 0</code> skips the line, behaviour is bit-identical to now.
+<em>(3) Test ON vs OFF?</em> Yes — <code>sim/</code>'s <code>RatePID</code> is parity with this function;
+drive a saturating step and compare overshoot. We'll build this in a later lesson.
+</div>
+
+<div class="quiz" id="quiz">
+  <h3>Recall check</h3>
+  <p class="muted">From memory — this is the lesson that pays off later.</p>
+
+  <div class="q">1. Why does the saturation clause [A] never block integration?</div>
+  <div data-correct="1">
+    <button>Because EMin is always set larger than the rate error signal</button>
+    <button>Because U is compared to the same limit it was just clamped into</button>
+    <button>Because SumEMax already caps the integrator before clause A runs</button>
+  </div>
+
+  <div class="q">2. What is actually preventing windup in your rate loops today?</div>
+  <div data-correct="2">
+    <button>The saturation-aware gate plus back-calculation feedback into sum</button>
+    <button>The final total-output clamp on U doing all the real protection</button>
+    <button>Integral separation on EMin plus the accumulator clamp on SumE</button>
+  </div>
+
+  <div class="q">3. Back-calculation needs which two numbers to work correctly?</div>
+  <div data-correct="0">
+    <button>The pre-saturation output and the post-saturation output values</button>
+    <button>The proportional term output and the derivative term output value</button>
+    <button>The current error signal and the previous error signal remembered</button>
+  </div>
+  <p class="fb" id="fb"></p>
+</div>
+
+<hr>
+<h2>Go deeper</h2>
+<p><strong>Watch:</strong> <a href="https://www.youtube.com/watch?v=NVLXCwc8HzM">Brian Douglas — Anti-windup,
+Part 2</a>, and notice he draws the pre/post-saturation split explicitly — the split your code is missing.
+<strong>Verify for yourself:</strong> open <a href="../../API/pid.c">pid.c:36</a> and trace the invariant.
+Don't take my word for it — that habit <em>is</em> the skill.</p>
+
+<footer>
+  <p class="ask"><strong>I'm your teacher — ask me.</strong> Not convinced the gate is really inert? Push
+  back — bring a case where <code>U</code> could exceed <code>UMax</code> on entry and we'll check it
+  together. Wondering what <code>Kt</code> should be, or whether integral separation alone is enough for
+  your thesis flights? Ask.</p>
+  <div class="nav"><span>← Lesson 1: The Control-Law Map</span><span>Next → Back-calculation, built &amp; flagged</span></div>
+</footer>
+
+<script>
+document.querySelectorAll('#quiz [data-correct]').forEach(function(group){
+  var correct = +group.dataset.correct;
+  var btns = group.querySelectorAll('button');
+  btns.forEach(function(b,i){
+    b.addEventListener('click', function(){
+      btns.forEach(function(x){ x.disabled = true; });
+      if (i === correct) { b.classList.add('correct'); document.getElementById('fb').textContent = 'Correct — you traced it, you didn’t assume it.'; }
+      else { b.classList.add('wrong'); btns[correct].classList.add('correct'); document.getElementById('fb').textContent = 'Re-read the highlighted answer, then trace the invariant in pid.c yourself.'; }
+    });
+  });
+});
+</script>

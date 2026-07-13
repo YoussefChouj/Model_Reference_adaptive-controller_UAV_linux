@@ -1,0 +1,120 @@
+<link rel="stylesheet" href="../assets/lesson.css">
+<title>Lesson 1 — The Control-Law Map</title>
+
+<p class="eyebrow">Lesson 01 · Foundation</p>
+<h1>The Control-Law Map</h1>
+<p class="lede">Before you fold in a single idea from the video series, you need one picture in
+your head: where the signal flows, and where a new idea would bolt on.</p>
+
+<p>Your firmware doesn't have <em>one</em> controller. It has a <strong>cascade</strong> of nested
+PID loops, fastest on the inside, and an adaptive layer (MRAC) that rides on the fastest loop.
+Every technique from the series attaches at exactly one point in this chain. If you can name that
+point, you can add the technique safely. That is the whole game.</p>
+
+<h2>The chain, top to bottom</h2>
+<p class="muted">Read a setpoint entering at the top; each box turns it into the setpoint for the box below.
+The bottom box drives the motors. Runs in <code>Compute_Motor()</code>, <code>StabilizerTask.c</code>, at 200&nbsp;Hz.</p>
+
+<div class="cascade">
+  <div class="stage"><div class="box">Position PID <span class="sig">locxPID / locyPID</span></div><span class="arrow">→</span><span class="sig">wants a velocity</span></div>
+  <div class="stage"><div class="box">Velocity PID</div><span class="arrow">→</span><span class="sig">wants a lean angle</span></div>
+  <div class="stage"><div class="box">Angle PID <span class="sig">roll / pitch / yaw</span></div><span class="arrow">→</span><span class="sig">wants an angular rate</span></div>
+  <div class="stage"><div class="box rate">Rate PID <span class="sig">gyrox / gyroy / gyrozPID</span></div><span class="arrow">→</span><span class="sig">wants a torque</span></div>
+  <div class="stage"><div class="box mrac">+ MRAC adaptive term <span class="sig">u_ad</span></div><span class="arrow">→</span><span class="sig">corrects the torque</span></div>
+  <div class="stage"><div class="box">Motor Mixer</div><span class="arrow">→</span><span class="sig">4 motor PWMs</span></div>
+</div>
+
+<div class="legend">
+  <span class="sw-default">Rate loop — the inner loop, where torque is born (and where anti-windup matters most)</span>
+  <span class="sw-new">MRAC — the adaptive layer that <em>learns</em> a correction on top of the rate PID</span>
+</div>
+
+<div class="note">
+<strong>Naming trap</strong>
+In this firmware <code>gyrox</code> = <strong>roll</strong> rate and <code>gyroy</code> = <strong>pitch</strong> rate
+(<code>StabilizerTask.c:619–620</code>). Wire a change to the wrong one and you'll tune pitch while
+watching roll. Keep this taped to your monitor.
+</div>
+
+<h2>How MRAC rides the rate loop</h2>
+<p>MRAC does not replace the rate PID. It reads the rate PID's output as a <em>nominal</em> command,
+then adds a learned correction:</p>
+<pre><code>// mrac.c:501  — nominal torque comes straight from the rate PID
+mrac_state.pitch.u_nom = current_state->gyroyPID.U / mrac_config_pitch.mrac_to_mixer;
+
+// mrac.c:511  — learn+add the adaptive term u_ad  (this axis only if its flag is on)
+if (mrac_flags.axis_enable_pitch)
+    MRAC_UpdateAxis(MRAC_AXIS_PITCH, &mrac_state.pitch, &mrac_config_pitch, cross_pitch, r_pitch);
+else
+    mrac_state.pitch.u_ad = 0.0f;   // flag OFF → adaptive term is exactly zero → pure PID</code></pre>
+
+<div class="win">
+<strong>Your win</strong>
+The flag pattern your mission needs <em>already exists</em>. <code>mrac_flags.axis_enable_pitch</code>
+(and <code>_roll</code>, <code>_yaw</code>) is a runtime switch: OFF ⇒ the adaptive term is forced to
+zero ⇒ the vehicle flies on the untouched baseline PID. Every improvement you add from the series
+should copy this shape: <strong>a flag whose OFF state reproduces today's behaviour bit-for-bit.</strong>
+</div>
+
+<div class="flag">
+<strong>The rule for every future lesson</strong>
+When we add technique X, we will ask three questions: <em>(1) Which box does it attach to?</em>
+<em>(2) What flag gates it, and does OFF equal today?</em> <em>(3) How do we test ON vs OFF in <code>sim/</code> before flying?</em>
+Anti-windup — the video-2 topic — attaches to the <strong>Rate PID</strong> box, and it already ships ON. We'll dissect it next.
+</div>
+
+<div class="quiz" id="quiz">
+  <h3>Recall check</h3>
+  <p class="muted">Answer from memory — retrieval is what makes it stick.</p>
+
+  <div class="q">1. The MRAC adaptive term is added at which point in the cascade?</div>
+  <div data-correct="1">
+    <button>On top of the Position PID output signal today</button>
+    <button>On top of the inner Rate PID output signal now</button>
+    <button>In place of the Motor Mixer stage entirely now</button>
+  </div>
+
+  <div class="q">2. With <code>axis_enable_pitch</code> OFF, the pitch axis flies on…</div>
+  <div data-correct="0">
+    <button>The untouched baseline Rate PID alone here</button>
+    <button>The learned adaptive correction alone instead</button>
+    <button>The outer Position PID driving motors direct</button>
+  </div>
+
+  <div class="q">3. In this firmware, <code>gyroy</code> is the rate of which axis?</div>
+  <div data-correct="2">
+    <button>Yaw, the rotation about the vertical axis</button>
+    <button>Roll, the rotation about the forward axis</button>
+    <button>Pitch, the nose up-and-down tilt motion</button>
+  </div>
+  <p class="fb" id="fb"></p>
+</div>
+
+<hr>
+<h2>Go deeper</h2>
+<p><strong>Primary source (watch):</strong> Brian Douglas,
+<a href="https://youtube.com/playlist?list=PLn8PRpmsu08pQBgjxYFXSsODEF3Jqmm-y">Understanding PID Control</a>
+— Parts 1–2 for cascade intuition and anti-windup. <strong>In this repo:</strong>
+<code>wiki/theory/cascaded-pid.md</code> maps every gain to its line in <code>pid.c</code>;
+<code>wiki/concepts/mrac-control-law.md</code> covers the adaptive layer.</p>
+
+<footer>
+  <p class="ask"><strong>I'm your teacher — ask me.</strong> Confused about why the rate loop is the
+  fastest, or what <code>mrac_to_mixer</code> is dividing by? Ask in chat before moving on. A question
+  answered now saves a wrong assumption baked into firmware later.</p>
+  <div class="nav"><span>· Lesson 1 of the series ·</span><span>Next → Anti-windup, dissected</span></div>
+</footer>
+
+<script>
+document.querySelectorAll('#quiz [data-correct]').forEach(function(group){
+  var correct = +group.dataset.correct;
+  var btns = group.querySelectorAll('button');
+  btns.forEach(function(b,i){
+    b.addEventListener('click', function(){
+      btns.forEach(function(x){ x.disabled = true; });
+      if (i === correct) { b.classList.add('correct'); document.getElementById('fb').textContent = 'Correct — that is the anchor for everything that follows.'; }
+      else { b.classList.add('wrong'); btns[correct].classList.add('correct'); document.getElementById('fb').textContent = 'Not quite — the highlighted answer is right. Re-read the map above.'; }
+    });
+  });
+});
+</script>

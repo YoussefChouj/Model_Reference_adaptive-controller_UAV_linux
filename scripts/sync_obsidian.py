@@ -35,10 +35,18 @@ def sync():
             print(f"  {f.relative_to(WIKI_DIR)}")
         return
 
+    # OneDrive/Obsidian hold locks on directories, so never delete dirs.
+    # Remove only files that no longer exist in the source wiki, skip
+    # .obsidian (vault config), then copy everything over in place.
     if OBSIDIAN_WIKI.exists():
-        shutil.rmtree(OBSIDIAN_WIKI)
+        for f in OBSIDIAN_WIKI.rglob("*"):
+            rel = f.relative_to(OBSIDIAN_WIKI)
+            if ".obsidian" in rel.parts:
+                continue
+            if f.is_file() and not (WIKI_DIR / rel).exists():
+                f.unlink()
 
-    shutil.copytree(WIKI_DIR, OBSIDIAN_WIKI)
+    shutil.copytree(WIKI_DIR, OBSIDIAN_WIKI, dirs_exist_ok=True)
 
     files = list(OBSIDIAN_WIKI.rglob("*.md"))
     print(f"[sync_obsidian] Synced {len(files)} wiki pages -> {OBSIDIAN_WIKI}")

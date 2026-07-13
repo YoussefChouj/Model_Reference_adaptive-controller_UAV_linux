@@ -86,5 +86,6 @@
 ..\obj\bsp.o: ..\BSP\usart5.h
 ..\obj\bsp.o: ..\API\GPS.h
 ..\obj\bsp.o: ..\TASK\send_data.h
+..\obj\bsp.o: ..\BSP\rpm.h
 ..\obj\bsp.o: ..\TASK\led.h
 ..\obj\bsp.o: ..\USER\ADC.h

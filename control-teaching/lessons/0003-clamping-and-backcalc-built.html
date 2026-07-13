@@ -1,0 +1,116 @@
+<link rel="stylesheet" href="../assets/lesson.css">
+<title>Lesson 3 — Clamping & Back-Calculation, Built and Flagged</title>
+
+<p class="eyebrow">Lesson 03 · You shipped code</p>
+<h1>Clamping &amp; Back-Calculation, Built and Flagged</h1>
+<p class="lede">You now have two proper anti-windup mechanisms in the firmware — both behind a flag,
+both default OFF. This lesson is the map of what changed and how to prove it before it flies.</p>
+
+<p>We added a per-loop switch <code>aw_mode</code> to every PID. It defaults to <code>0</code>
+(<code>AW_LEGACY</code>) via zero-initialisation, so <strong>every loop still behaves exactly as before
+until you opt one in.</strong> That is the mission rule satisfied: OFF = today, bit-for-bit.</p>
+
+<h2>What changed (two files)</h2>
+<ul>
+  <li><a href="../../Global_file/robot_types.h">robot_types.h</a> — new enum <code>PID_AntiWindup_e</code>;
+      two fields appended to <code>PIDTypeDef</code>: <code>int aw_mode</code>, <code>float Kt</code>.
+      Appended, so the big positional initializer in <code>pid.c</code> zero-fills them.</li>
+  <li><a href="../../API/pid.c">pid.c</a> — <code>ComputePID()</code> now branches on <code>aw_mode</code>.
+      The <code>else</code> branch is the untouched legacy code.</li>
+</ul>
+
+<h2>The two new mechanisms, side by side</h2>
+<div class="legend">
+  <span class="sw-new">AW_CLAMP — freeze the integrator the instant the output <em>really</em> saturates</span>
+  <span class="sw-new">AW_BACKCALC — let it integrate, then bleed it back by the saturation error</span>
+</div>
+<p><strong>Clamp</strong> is parameter-free: integrate tentatively, and if <code>U</code> hit its limit while
+the error would push it further in, undo that tick's accumulation. <strong>Back-calc</strong> is smoother
+and tunable: it always integrates, then subtracts <code>Kt·(U − U_presat)</code> from the accumulator —
+zero when unsaturated, a pull-back when clipped. Full code on the
+<a href="../reference/anti-windup-modes.html">reference card</a>.</p>
+
+<div class="note">
+<strong>Watch this with back-calc</strong>
+<code>Kt</code> defaults to <code>0</code>. With <code>aw_mode = AW_BACKCALC</code> and <code>Kt = 0</code> you
+get <em>pure always-integrate</em> — worse than legacy. You <em>must</em> set <code>Kt &gt; 0</code>. Start
+near <code>Ki/Kp</code> and sweep in sim.
+</div>
+
+<h2>Turn one loop on</h2>
+<pre><code>// pitch rate loop → observer anti-windup   (gyroy = PITCH)
+Ctrler.gyroyPID.aw_mode = AW_BACKCALC;
+Ctrler.gyroyPID.Kt      = 0.002f;      // tune me
+
+// roll rate loop → correct clamping        (gyrox = ROLL)
+Ctrler.gyroxPID.aw_mode = AW_CLAMP;</code></pre>
+
+<h2>Prove it before you fly it (mission rule 3)</h2>
+<p>Do <strong>not</strong> flip these on and take off. The test loop:</p>
+<ol>
+  <li>Mirror the same branch in <code>sim/</code>'s <code>RatePID</code> (it's parity with <code>ComputePID</code>).</li>
+  <li>Drive a <strong>saturating step</strong> — a setpoint big enough to peg <code>U</code> at <code>UMax</code> for a while.</li>
+  <li>Plot the integrator <code>SumE</code> and the response for all three modes on one chart.</li>
+  <li>You want to see: legacy holds a frozen sum and overshoots on release; clamp/back-calc keep the sum feasible and settle cleaner. If back-calc rings, lower <code>Kt</code>.</li>
+</ol>
+
+<div class="win">
+<strong>Your win</strong>
+You turned a diagnosis (Lesson 2: the gate is inert) into two real, flag-gated fixes — without touching
+the default flight path. That is the exact loop the whole mission repeats: understand → implement behind a
+flag → A/B in sim → then fly.
+</div>
+
+<div class="quiz" id="quiz">
+  <h3>Recall check</h3>
+
+  <div class="q">1. With no code touched after the update, a rate loop behaves how?</div>
+  <div data-correct="0">
+    <button>Exactly as before, because aw_mode zero-inits to legacy mode</button>
+    <button>With clamping active, because that is the safer default choice</button>
+    <button>With back-calc active, but only once Kt is left at its zero value</button>
+  </div>
+
+  <div class="q">2. What breaks if you set AW_BACKCALC but leave Kt at zero?</div>
+  <div data-correct="2">
+    <button>Nothing changes at all, the loop silently stays on legacy mode</button>
+    <button>The integrator is frozen permanently and offset never gets killed</button>
+    <button>It becomes pure always-integrate, which winds up worse than legacy</button>
+  </div>
+
+  <div class="q">3. Before flying either new mode, the required step is to…</div>
+  <div data-correct="1">
+    <button>Sweep every gain on the real drone during a slow hover test</button>
+    <button>A/B all three modes on a saturating step inside the sim first</button>
+    <button>Delete the legacy branch so the new path cannot be bypassed</button>
+  </div>
+  <p class="fb" id="fb"></p>
+</div>
+
+<hr>
+<h2>Go deeper</h2>
+<p><strong>Reference:</strong> <a href="../reference/anti-windup-modes.html">Anti-Windup Modes card</a> — full
+code for all three, Kt heuristic, the known mixer-vs-UMax limitation. <strong>Rewatch:</strong>
+<a href="https://www.youtube.com/watch?v=NVLXCwc8HzM">Brian Douglas, Part 2</a> — your back-calc matches his
+observer diagram exactly now.</p>
+
+<footer>
+  <p class="ask"><strong>I'm your teacher — ask me.</strong> Want me to mirror these in <code>sim/</code> and
+  build the three-mode A/B plot? Or add a ground-station command so you can switch modes on the bench
+  without reflashing? Say the word.</p>
+  <div class="nav"><span>← Lesson 2: Anti-windup dissected</span><span>Next → Sim A/B, or GS toggle</span></div>
+</footer>
+
+<script>
+document.querySelectorAll('#quiz [data-correct]').forEach(function(group){
+  var correct = +group.dataset.correct;
+  var btns = group.querySelectorAll('button');
+  btns.forEach(function(b,i){
+    b.addEventListener('click', function(){
+      btns.forEach(function(x){ x.disabled = true; });
+      if (i === correct) { b.classList.add('correct'); document.getElementById('fb').textContent = 'Correct.'; }
+      else { b.classList.add('wrong'); btns[correct].classList.add('correct'); document.getElementById('fb').textContent = 'Re-read the highlighted answer.'; }
+    });
+  });
+});
+</script>

@@ -430,6 +430,7 @@ void MRAC_Init(void)
     // until the operator explicitly enables injection from the dashboard (CMD 0x0F idx 10).
     mrac_flags.output_injection_on = 0;
     mrac_flags.id_frame_on        = 0;                       // high-rate system-ID frame off by default (CMD 0x0F idx 11)
+    mrac_flags.of_frame_on        = 0;                       // OF calibration frame off by default (CMD 0x0F idx 12)
     mrac_flags.ref_model_type     = DEFAULT_REF_MODEL_TYPE;  // reference model type (CMD 0x13); 0 = passthrough
 
     MRAC_Reset();

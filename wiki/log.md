@@ -70,3 +70,13 @@
 - Created: concepts/adaptive-simulation-theory-to-code-deep-dive.md
 - Expanded: sources/direct-mrac-ff-projection-simulation-notebook.md with end-to-end architecture diagram and theory-to-code mapping
 - Updated: index.md (added deep-dive concept entry)
+
+## [2026-07-09] ingest | Motion Planning in Dynamic Environments Survey (grabbed via Discord digest)
+- Pulled from server wiki_inbox → raw/papers/2026-07-09-motion-planning-in-dynamic-environments-a-survey-from-classi.md
+- Created: literature/openalex-W7163597202.md (raw page-cited grab briefing, parity with server summary)
+- Created: sources/motion-planning-dynamic-environments-survey.md (comprehensive beginner-level source page: mental model, taxonomy, jargon decoder, thesis positioning, user's Discord notes)
+- Created: concepts/motion-planning-methods.md (planning taxonomy: sampling-based/reactive/learning-based + MPC)
+- Created: concepts/conformal-prediction.md (stub — calibrated uncertainty bounds)
+- Created: concepts/sim-to-real-gap.md (stub — thesis-central; digital twin + MRAC synergy)
+- Updated: index.md (new "Research & Thesis Background" concept section; new "Literature" section — also indexed previously-orphaned literature/arxiv-2603.18584.md)
+- Convention note: first ingest using the comprehensive beginner-level digestion convention (jargon glossary + prerequisite primer + concept stubs per grabbed paper)
