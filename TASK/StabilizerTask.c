@@ -7,6 +7,8 @@
 #include "sysid.h"
 #include "rc_input.h"
 #include "flight_fsm.h"
+#include "calib.h"          /* ADR-0011 Phase 3 (acc-trim) + Phase 4 (gyro-hot) FSMs */
+#include "RemoterTask.h"   /* OFHOLD_CH (ch6 OF-hold enable switch), sbus_channel[] */
 
 /**
  * @module  StabilizerTask.c
@@ -30,6 +32,8 @@ short Throttle_th = 2200;
 #define MOTOR_TEST_DEADMAN_TICKS  100U
 float Cos_Yaw_01= 0;
 float Sin_Yaw_01= 0;
+/* OF position-hold applied state (see case_Update_pitrol_Des); telemetered as status.of_hold. */
+uint8_t g_of_hold_active = 0;
 
 float Sin_roll_01= 0;
 float Cos_roll_01= 0;
@@ -70,6 +74,10 @@ static float s_land_sink_bias = 0.0f;
 #define OF_BIAS_STILL_THRESH_RADPS  0.05236f /* ~3 deg/s */
 #define OF_BIAS_STILL_TICKS         100U     /* 100 ticks @ 200 Hz = 0.5 s settled before starting */
 #define OF_BIAS_CAL_TICKS           400U     /* 400 ticks @ 200 Hz = 2.0 s averaging window */
+/* OF lock gate (rec 3). of_quality is 0..255 (higher = better); a real lock sits at
+ * ~250-255 on the bench. Below this we treat the sensor as unlocked: freeze both the
+ * bias calibration and the earth_x/y integration so we never integrate garbage flow. */
+#define OF_MIN_QUALITY              50U
 typedef enum { OF_BIAS_WAIT_STILL = 0, OF_BIAS_ACCUMULATING = 1 } OfBiasState_t;
 static u8            s_of_bias_prev_armed = 0;
 static OfBiasState_t s_of_bias_state      = OF_BIAS_WAIT_STILL;
@@ -80,20 +88,92 @@ static float s_of_bias_sum_x = 0.0f, s_of_bias_sum_y = 0.0f;
  * bias against an offline-derived Kalman estimate. See docs/tracking_baseline_and_drift.md. */
 float s_of_bias_x = 0.0f, s_of_bias_y = 0.0f;
 
+/* ADR-0011 Phase 3 (CAL_AIRBORNE_HOVER_TRIM) + Phase 4 (CAL_HOT_HOVER).
+ * Initialised once at boot by CalTrim_Init / CalHot_Init, ticked each control
+ * cycle from Update_Data. CalHot_TickState_t reused below for the FSM transitions. */
+/* ADR-0011 Phase 3 + 4 calibrator instances — non-static so send_data.c can read them
+ * for the always-on telemetry surface (CMD 0x05 v14 frame, fields 7-12). */
+CalTrim_t s_cal_trim;
+CalHot_t  s_cal_hot;
+uint16_t g_cal_health = 0U;   /* bitmask: 0x01 BOOT_OK | 0x02 COLD_OK | 0x04 COLD_DEGRADED
+                               *         0x08 AIRBORNE_OK | 0x10 AIRBORNE_DEGRADED
+                               *         0x20 HOT_HOVER_OK | 0x40 HOT_REJECTED
+                               *         0x80 MANUAL_ORIGIN_RESET | 0x100 BOOT_TIMEOUT
+                               *         0x200 ESTIMATOR_READY */
+
+/* One-shot bias capture (CMD 0x17). g_of_bias_capture_req is set from the ground
+ * station (Send_Task) when the drone is placed level and still; the accumulation and
+ * store all happen here in the stabilizer task, so s_of_bias_x/y is only ever written
+ * from one context. Unlike the auto-estimator this has NO quiescence gate — the pilot
+ * guarantees stillness — which is why it works where the auto path logged bias 0. */
+volatile uint8_t g_of_bias_capture_req = 0;
+static uint8_t s_of_cap_active = 0;
+static u16     s_of_cap_tick   = 0;
+static float   s_of_cap_sum_x  = 0.0f, s_of_cap_sum_y = 0.0f;
+
 //
+/* Zero the world-frame optical-flow origin: the drone's current location becomes
+ * the new (0,0) and position setpoints are synced so the next control tick sees
+ * no jump. Shared by CMD 0x10 (manual reset) and the estimator-warmup auto-pin
+ * (A4). Mirrors the former inline CMD 0x10 body in send_data.c. */
+void Reset_World_Origin(void)
+{
+	ano_of.earth_x       = 0.0f;
+	ano_of.earth_y       = 0.0f;
+	ano_of.earth_x_ture  = 0.0f;
+	ano_of.earth_y_ture  = 0.0f;
+	ano_of.DISTANCE_X    = 0.0f;
+	ano_of.DISTANCE_Y    = 0.0f;
+	Ctrler.locxPID.FB    = 0.0f;
+	Ctrler.locyPID.FB    = 0.0f;
+	Ctrler.locxPID.Des   = 0.0f;
+	Ctrler.locyPID.Des   = 0.0f;
+	Ctrler.locxsPID.Des  = 0.0f;
+	Ctrler.locysPID.Des  = 0.0f;
+}
+
 void stabilizer_Task(void)
 {
+	 /* A4: while the attitude estimator is still converging, hold the OF world
+	  * origin pinned at zero every tick. A tilted mid-warmup estimate would
+	  * otherwise let optical flow integrate phantom drift; pinning removes the
+	  * need to reset the origin by hand. On the tick the estimator goes ready
+	  * this stops, so position accumulates from a clean, trustworthy origin. */
+	 if (!g_estimator_ready) {
+		 Reset_World_Origin();
+	 }
+
 	 Check_Fly_Mode(); //�ж����˻���״̬
-	
+
+	 /* ADR-0011: set BOOT_OK + COLD_OK on the rising edge of g_estimator_ready.
+	  * Cold-cal degraded/timeout detection is left to the dashboard via the
+	  * g_imu_settle_metric telemetry value (high value = didn't settle cleanly).
+	  * Lazy one-shot init of the calibrators on cold-cal completion. */
+	 {
+		 static uint8_t s_prev_ready = 0U;
+		 if (g_estimator_ready && !s_prev_ready) {
+			 g_cal_health |= 0x01U;                          /* BOOT_OK rising edge */
+			 g_cal_health |= 0x02U;                          /* COLD_OK (Phase 2 done) */
+			 if (g_imu_settle_metric >= 0.0009f /* IMU_SETTLE_E2 */) {
+				 g_cal_health |= 0x04U;                      /* COLD_DEGRADED */
+				 g_cal_health |= 0x100U;                     /* BOOT_TIMEOUT */
+			 }
+			 CalTrim_Init(&s_cal_trim, 2000U);               /* 10 s @ 200 Hz */
+			 CalHot_Init(&s_cal_hot);
+		 }
+		 s_prev_ready = g_estimator_ready;
+		 if (g_estimator_ready) g_cal_health |= 0x200U;
+	 }
+
 	 Update_Data();
-	 
+
 	 Compute_Motor();
-	 
+
 	 Update_Motor();
-	
+
 //	 Get_Voltage();//�����ѹ
 
-} 
+}
 
 /*************************************************************************
 �� �� ����void Update_Data(void);
@@ -114,8 +194,10 @@ void Update_Data(void)
 	//////////////////λ�û�����ֵ����/////////////////////////
 		{
 			u8 armed_now = (DroneStatus.ARM_Status == Armed);
-			if (armed_now && !s_of_bias_prev_armed) {
-				/* Just armed: (re)start the stillness-gated calibration sequence. */
+			u8 of_ok     = (ano_of.of_quality >= OF_MIN_QUALITY);
+			/* Restart the stillness-gated window on the arm edge, OR whenever OF drops
+			 * its lock, so a fresh average is always taken from a known-good state. */
+			if ((armed_now && !s_of_bias_prev_armed) || !of_ok) {
 				s_of_bias_state      = OF_BIAS_WAIT_STILL;
 				s_of_bias_still_tick = 0;
 				s_of_bias_cal_tick   = 0;
@@ -124,7 +206,14 @@ void Update_Data(void)
 			}
 			s_of_bias_prev_armed = armed_now;
 
-			if (armed_now) {
+			/* Calibrate whenever OF has a good lock — NOT only while armed (rec 1).
+			 * A bolted, disarmed drone on the bench is the ideal (perfectly still)
+			 * condition to measure the stationary velocity bias, and it is exactly
+			 * when the pilot validates that the estimate holds. Gating this on the
+			 * armed state was why of.bias_x/y stayed 0 in every bench log (drone
+			 * disarmed, or sticks moved before an armed window could complete), so the
+			 * estimate kept drifting at the raw ~3/~4.8-unit bias. */
+			if (of_ok) {
 				u8 is_quiescent = (fabsf(Gyro_X_Real) < OF_BIAS_STILL_THRESH_RADPS)
 				               && (fabsf(Gyro_Y_Real) < OF_BIAS_STILL_THRESH_RADPS)
 				               && (fabsf(Gyro_Z_Real) < OF_BIAS_STILL_THRESH_RADPS)
@@ -159,7 +248,34 @@ void Update_Data(void)
 					}
 				}
 			}
+
+			/* CMD 0x17 one-shot bias capture. Latch the request, then average
+			 * of2_dx_fix/dy_fix over OF_BIAS_CAL_TICKS (~2 s) while OF holds lock and
+			 * store the result. No quiescence gate: the pilot has placed the drone
+			 * level and still, so every sample in the window is valid bias. */
+			if (g_of_bias_capture_req) {
+				g_of_bias_capture_req = 0;
+				s_of_cap_active = 1;
+				s_of_cap_tick   = 0;
+				s_of_cap_sum_x  = 0.0f;
+				s_of_cap_sum_y  = 0.0f;
+			}
+			if (s_of_cap_active && of_ok) {
+				s_of_cap_sum_x += (float)ano_of.of2_dx_fix;
+				s_of_cap_sum_y += (float)ano_of.of2_dy_fix;
+				s_of_cap_tick++;
+				if (s_of_cap_tick >= OF_BIAS_CAL_TICKS) {
+					s_of_bias_x = s_of_cap_sum_x / (float)OF_BIAS_CAL_TICKS;
+					s_of_bias_y = s_of_cap_sum_y / (float)OF_BIAS_CAL_TICKS;
+					s_of_cap_active = 0;
+				}
+			}
 		}
+		/* Only integrate flow into position when OF has a good lock (rec 3). On lock
+		 * loss, earth_x/y (hence locx/locyPID.FB) hold their last value instead of
+		 * accumulating garbage flow — position hold simply coasts rather than being
+		 * yanked by an unreliable sensor. */
+		if (ano_of.of_quality >= OF_MIN_QUALITY)
 		{
 			float of_dx_deb = ano_of.of2_dx_fix - s_of_bias_x;
 			float of_dy_deb = ano_of.of2_dy_fix - s_of_bias_y;
@@ -179,6 +295,52 @@ void Update_Data(void)
 	  Ctrler.locyPID.FB= ano_of.earth_y_ture ; //x (����)<----
 		//                                                     |
 		//                                                     | y(����)
+
+		/* ADR-0011 Phase 3 (CAL_AIRBORNE_HOVER_TRIM) — closed-form accel-bias LS trim.
+		 * Runs only while flying. The body-frame accel measurement in static hover is
+		 *     a_meas_body = 1000 * Gravity_Body + b_a   (mg, Gravity_Body is unit vector)
+		 * The estimator reconstructs a_meas = Lin_Acc + 1000*Gravity_Body (gravity-removed
+		 * reading + gravity vector = raw body accel) and applies the LS step
+		 *     b_a <- b_a + mu * (g_ref_world - a_meas_world)
+		 * where g_ref_world = (0, 0, +1000) mg and a_meas_world is rotated to world frame.
+		 * Approximated here as body-frame directly (small-angle assumption in stable hover;
+		 * the rotation error is <5 % at 10 deg tilt and the slow mu keeps convergence well-
+		 * behaved under that error). */
+		if (flight_phase == FLIGHT_PHASE_FLYING) {
+			float a_meas_x = Lin_Acc_X_body + 1000.0f * Gravity_Body_X;
+			float a_meas_y = Lin_Acc_Y_body + 1000.0f * Gravity_Body_Y;
+			float a_meas_z = Lin_Acc_Z_body + 1000.0f * Gravity_Body_Z;
+			CalTrim_Step(&s_cal_trim,
+			             0.0f, 0.0f, 1000.0f,
+			             a_meas_x, a_meas_y, a_meas_z,
+			             1U);
+			if (s_cal_trim.state == CAL_TRIM_STATE_SETTLED) {
+				g_cal_health |= 0x08U;
+			} else if (s_cal_trim.state == CAL_TRIM_STATE_DEGRADED) {
+				g_cal_health |= 0x10U;
+			}
+		}
+
+		/* ADR-0011 Phase 4 (CAL_HOT_HOVER) — gyro hot-bias FSM. Always ticked so the
+		 * quiescence gate can detect a still-window anywhere in the flight. */
+		{
+			uint8_t rc_q = !RCInput_IsActive(RC_AXIS_THR) &&
+			               !RCInput_IsActive(RC_AXIS_PITCH) &&
+			               !RCInput_IsActive(RC_AXIS_ROLL) &&
+			               !RCInput_IsActive(RC_AXIS_YAW);
+			CalHot_Step(&s_cal_hot,
+			            Gyro_X_Real, Gyro_Y_Real, Gyro_Z_Real,
+			            Lin_Acc_X_body, Lin_Acc_Y_body,
+			            (uint8_t)(flight_phase == FLIGHT_PHASE_FLYING),
+			            rc_q);
+			if (s_cal_hot.rejected) {
+				g_cal_health |= 0x40U;  /* HOT_REJECTED — sticky until next quiescent cycle */
+			} else if (s_cal_hot.state == CAL_HOT_STATE_WAIT_STILL && !s_cal_hot.cleared) {
+				/* One-shot commit fired: HOT_HOVER_OK. */
+				g_cal_health |= 0x20U;
+				s_cal_hot.cleared = 1U;
+			}
+		}
 		//�����Դ�ʩ  //t265���װ�Ĵ���
 //		if(linux_data.t265posy>-1000000.0f && linux_data.t265posy<1000000.0f)
 //		{
@@ -196,9 +358,31 @@ void Update_Data(void)
 		Ctrler.locxsPID.FB= (ano_of.of2_dy) *Cos_Yaw_01 +(-ano_of.of2_dx)*Sin_Yaw_01;
     Ctrler.locysPID.FB=  (-ano_of.of2_dx) * Cos_Yaw_01 - (ano_of.of2_dy)*Sin_Yaw_01; //��������ϵ��
 	
-	  if( ano_of.of_alt_cm>0.5f &&ano_of.of_alt_cm<500.0f)
-		{
-			ano_of.of2_raw_h = ano_of.of_alt_cm*0.01f*Cos_roll_01*Cos_pitch_01;
+	  /* Altitude sanity gate (of_alt_cm is cm, u32). Reject and freeze of2_raw_h at
+	   * its last good value when the reading is out of band OR a non-physical per-tick
+	   * jump. The upper bound already rejects 65535 (0xFFFF, sensor no-reading). The
+	   * 5 cm floor rejects the sub-band 1 cm dropouts, and the 0.10 m/tick (=20 m/s,
+	   * far above this drone's ~1 m/s climb) jump limit rejects in-band spikes - both
+	   * were seen collapsing of2_h and spiking the z-rate derivative into saturation. */
+	  {
+			static u16 s_alt_reject_cnt = 0U;
+			if( ano_of.of_alt_cm >= 5U && ano_of.of_alt_cm <= 500U )
+			{
+				float h_new = ano_of.of_alt_cm*0.01f*Cos_roll_01*Cos_pitch_01;
+				/* Accept if within the per-tick jump limit, OR force a resync after
+				 * 20 consecutive rejects (100 ms) so a genuine sustained level change
+				 * (boot at altitude, flying over a surface step) is not locked out —
+				 * while a 1-tick spike, which returns before 20 ticks, stays filtered. */
+				if( fabsf(h_new - ano_of.of2_raw_h) < 0.10f || s_alt_reject_cnt >= 20U )
+				{
+					ano_of.of2_raw_h = h_new;
+					s_alt_reject_cnt = 0U;
+				}
+				else
+				{
+					s_alt_reject_cnt++;
+				}
+			}
 		}
 	
 	ano_of.of2_h =ano_of.of2_raw_h; 
@@ -685,13 +869,40 @@ TWC.real_yaw = Ctrler.yawPID.FB; //�ṹ���Ա������ʼ��һ
 		////////////////////////��̬����////////////////////////////////////////////////////	
 		
 		case case_Update_pitrol_Des://���� pitch roll����
-			
-			des_pitch = (Ctrler.locysPID.U)*Cos_Yaw_01 + (Ctrler.locxsPID.U)*Sin_Yaw_01;
-		  des_roll = (Ctrler.locxsPID.U)*Cos_Yaw_01 - (Ctrler.locysPID.U)*Sin_Yaw_01;
-				
-     	accel_to_lean_angles( des_pitch,-des_roll,
-			  &Ctrler.pitchPID.Des,&Ctrler.rollPID.Des); 	
-	
+		{
+			/* OF position-hold enable switch on ch6 (OFHOLD_CH = sbus_channel[5]).
+			 * HIGH (>1000, ~1694) = OF hold ON; LOW (~306) or signal-lost = ANGLE MODE.
+			 * Angle mode bypasses ALL optical-flow loops (position AND velocity): the
+			 * sticks command a body-frame lean angle directly and centered sticks = level
+			 * (held by the IMU angle loop), so a bad OF velocity/position estimate can no
+			 * longer drive tilt - this is the loop that ran the drone away on takeoff.
+			 * Default at boot / on failsafe is angle mode: the drone never lifts off into
+			 * OF hold unless the pilot deliberately flips ch6 high while already stable. */
+			u8 of_hold_on = (sbus_lost == 0U) && (OFHOLD_CH > 1000);
+			g_of_hold_active = of_hold_on;   /* publish for Frame 0x01 status.of_hold */
+			if (of_hold_on)
+			{
+				/* BUGFIX 2026-07-20: sign flip on velocity PID outputs.
+				 * locxsPID.U > 0 = moving forward (positive X). Desired: decelerate
+				 * by pitching nose DOWN (negative des_pitch). Current code produced the
+				 * opposite sign -> positive feedback -> runaway on arm.
+				 * Fix: negate both velocity PID outputs before the world->body lean
+				 * rotation so that positive velocity error produces correcting lean. */
+				des_pitch = -(Ctrler.locysPID.U)*Cos_Yaw_01 - (Ctrler.locxsPID.U)*Sin_Yaw_01;
+				des_roll  = -(Ctrler.locxsPID.U)*Cos_Yaw_01 + (Ctrler.locysPID.U)*Sin_Yaw_01;
+			}
+			else
+			{
+				/* Stick -> accel that maps full deflection to exactly the configured lean
+				 * limit (gs_max_pitch/roll_deg), which accel_to_lean_angles then re-clamps.
+				 * Sign matches the OF manual path (minus stick). No yaw rotation: body frame. */
+				des_pitch = -RCInput_Get(RC_AXIS_PITCH) * tanf(gs_max_pitch_deg*DEG2RAD) * (GRAVITY_MSS*100.0f);
+				des_roll  = -RCInput_Get(RC_AXIS_ROLL)  * tanf(gs_max_roll_deg *DEG2RAD) * (GRAVITY_MSS*100.0f);
+			}
+
+			accel_to_lean_angles( des_pitch,-des_roll,
+			  &Ctrler.pitchPID.Des,&Ctrler.rollPID.Des);
+		}
     break;
 			
 		case case_Update_yaw_Des://����yaw����

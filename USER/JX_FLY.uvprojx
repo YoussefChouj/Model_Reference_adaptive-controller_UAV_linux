@@ -490,6 +490,16 @@
               <FilePath>..\API\gyro_filter.c</FilePath>
             </File>
             <File>
+              <FileName>ekf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\API\ekf.c</FilePath>
+            </File>
+            <File>
+              <FileName>calib.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\API\calib.c</FilePath>
+            </File>
+            <File>
               <FileName>rc_input.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\API\rc_input.c</FilePath>
