@@ -6,7 +6,7 @@ description: >
   shifted because of recent code changes. Drives `knowledge_loop.py` (or its underlying
   stages) and applies the rewrites itself. Pinned to a real Cursor-managed model so the
   loop does not depend on OpenRouter or any external API key.
-model: cursor-grok-4.5-high
+model: claude-opus-5-high
 ---
 
 # UAV pipeline — knowledge writer

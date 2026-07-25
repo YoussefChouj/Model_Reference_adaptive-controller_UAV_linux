@@ -366,6 +366,16 @@ extern FP32 Acc_Y_Real;
 extern float s_of_bias_x, s_of_bias_y;
 extern float Lin_Acc_X_body, Lin_Acc_Y_body;   /* gravity-removed body accel (mg), imu_update.c */
 
+/* Optical-flow scale: metres/second per raw of2_dx_fix count, for the EKF measurement.
+ * UNRESOLVED INCONSISTENCY — left at the historical 0.01 deliberately, do not change
+ * without deciding: docs/tracking_baseline_and_drift.md:224 measured X = 0.0124 +/- 0.0009
+ * m per raw*s from ~92 cm hand-slides, and ADR-0011:131 derives this EKF's own
+ * R_of = 6.16e-4 = 0.0124^2 * 4 raw^2 from that same number. So R_of assumes 0.0124 while
+ * the measurement it scales uses 0.01 — the filter is fed a velocity ~19 % small relative
+ * to the noise model tuned for it. sim/tools/replay_ekf_flight.py:39 has the same 0.01, so
+ * the golden replay inherits the mismatch rather than contradicting it. */
+#define OF_LSB_MPS  0.01f
+
 void Send_Groundstation_Telemetry_UART4(void)
 {
     static uint8_t frame_counter = 0;
@@ -381,13 +391,14 @@ void Send_Groundstation_Telemetry_UART4(void)
     Buf_Telemetry_UART4[0] = 0xAA;
     Buf_Telemetry_UART4[1] = 0xBB;
 
-    /* EKF step: runs every 200 Hz Send_Task tick, unconditionally — independent of
-     * which telemetry frame this tick happens to emit. Previously this lived inside
+    /* EKF step: runs every Send_Task tick, unconditionally — independent of which
+     * telemetry frame this tick happens to emit. NOTE the tick is 100 Hz in normal
+     * flight, not 200 Hz (main.c pacing); see the dt comment below. Previously this lived inside
      * the `of_frame_on` branch below, which meant the estimator only ran while the
      * ground station had frame 0x05 selected (nothing toggles that in normal
      * operation), silently defeating the EKF_RUN_ENABLED/EKF_TELEM_ENABLED split
      * meant to decouple "does it run" from "do we transmit it" (ADR-0011).
-     * dt = 0.005 s (5 ms, 200 Hz control tick). IMU accel is in mg -> convert to m/s^2. */
+     * IMU accel is in mg -> convert to m/s^2. */
     if (!s_ekf_inited) {
         Ekf9_Init(&s_ekf, EKF_RUN_ENABLED);
         s_ekf_inited = 1U;
@@ -396,11 +407,35 @@ void Send_Groundstation_Telemetry_UART4(void)
         float ax = Acc_X_Real * 0.001f;  /* mg -> m/s^2 */
         float ay = Acc_Y_Real * 0.001f;
         float az = Acc_Z_Real * 0.001f;
-        Ekf9_Predict(&s_ekf, ax, ay, az, Gyro_X_Real, Gyro_Y_Real, Gyro_Z_Real, 0.005f);
-        /* OF measurement: quality gate (same threshold as control loop) */
+        /* dt is MEASURED, not assumed. This function is called from Send_Task, which
+         * paces at 10 ms (100 Hz) in normal flight and only ~5 ms (200 Hz) while
+         * id_frame_on/of_frame_on is set (main.c) — and the 73 B EKF-telemetry variant
+         * of frame 0x05 needs ~6.7 ms on the 115200 link, so it overruns even that 5 ms
+         * budget via the DMA busy-wait at the bottom of this function. A hardcoded
+         * 0.005f was therefore wrong by 2x in normal flight and by ~1.3x while logging,
+         * and it CHANGED when logging was switched on — i.e. observing the estimator
+         * altered it. Tick resolution is 1 ms (configTICK_RATE_HZ=1000); per-sample
+         * quantisation is harmless because tick deltas sum to exact elapsed time. */
+        static TickType_t s_ekf_last_tick = 0;
+        TickType_t now_tick = xTaskGetTickCount();
+        float dt = (s_ekf_last_tick == 0)
+                 ? (1.0f / configTICK_RATE_HZ) * 10.0f   /* first call: assume 100 Hz */
+                 : (float)(now_tick - s_ekf_last_tick) * (1.0f / configTICK_RATE_HZ);
+        s_ekf_last_tick = now_tick;
+        if (dt < 0.001f) { dt = 0.001f; }   /* guard against tick wrap / scheduler hiccup */
+        if (dt > 0.050f) { dt = 0.050f; }
+        Ekf9_Predict(&s_ekf, ax, ay, az, Gyro_X_Real, Gyro_Y_Real, Gyro_Z_Real, dt);
+        /* OF measurement: quality gate (same threshold as control loop).
+         * Must be DEBIASED. of2_dx_fix carries a power-cycle-dependent zero-point
+         * offset (observed 6..7 raw counts one session, 1 the next); the 9-state vector
+         * is [v(3), b_a(3), b_g(3)] with NO optical-flow bias state, so feeding the raw
+         * value gives the filter an unmodellable constant velocity error that it can
+         * only absorb into b_a — which is why b_a read ~10.8 mg on the bench against a
+         * <2 mg golden-replay expectation. Subtracting s_of_bias_x/y is also what the
+         * control path does (StabilizerTask.c), so both estimators now see one signal. */
         if (ano_of.of_quality >= 50) {
-            float ofx = (float)ano_of.of2_dx_fix * 0.01f; /* s16 0.01 m/s -> float m/s */
-            float ofy = (float)ano_of.of2_dy_fix * 0.01f;
+            float ofx = ((float)ano_of.of2_dx_fix - s_of_bias_x) * OF_LSB_MPS;
+            float ofy = ((float)ano_of.of2_dy_fix - s_of_bias_y) * OF_LSB_MPS;
             Ekf9_UpdateOf(&s_ekf, ofx, ofy);
         }
         /* Accel measurement: gravity-removed, mg -> m/s^2 */

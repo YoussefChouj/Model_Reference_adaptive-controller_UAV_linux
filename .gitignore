@@ -12,3 +12,13 @@ sim/runs/
 
 # Graphify AST cache — regenerable, hash-keyed, churns every rebuild
 graphify-out/cache/
+
+# CocoIndex vector DB — regenerable via /refresh; blobs exceed GitHub's 100 MB limit
+.cocoindex_code/
+
+# Keil build output — regenerated on every uVision build
+OBJ/
+
+# Python bytecode
+__pycache__/
+*.pyc

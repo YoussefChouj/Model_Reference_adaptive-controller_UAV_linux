@@ -63,12 +63,8 @@ def _trail_path(session_id: str) -> Path:
 
 # ------------------------------------------------------------------ CLI
 
-def cmd_add(args: argparse.Namespace) -> int:
-    session = args.session or _session_id()
-    path = args.path
-    if not path:
-        print('trail.py: --path is required', file=sys.stderr)
-        return 2
+def _record(session: str, tool: str, path: str, note: str = '') -> str:
+    """Append one event; returns the normalized relative path."""
     # Normalize to a relative path under ROOT if possible
     try:
         rel = str(Path(path).resolve().relative_to(ROOT)).replace('\\', '/')
@@ -77,14 +73,68 @@ def cmd_add(args: argparse.Namespace) -> int:
     event = {
         'ts':      datetime.now(timezone.utc).isoformat(timespec='seconds'),
         'session': session,
-        'tool':    args.tool,
+        'tool':    tool,
         'path':    rel,
-        'note':    args.note or '',
+        'note':    note or '',
     }
     trail = _trail_path(session)
     with trail.open('a', encoding='utf-8') as f:
         f.write(json.dumps(event, ensure_ascii=False) + '\n')
+    return rel
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    session = args.session or _session_id()
+    path = args.path
+    if not path:
+        print('trail.py: --path is required', file=sys.stderr)
+        return 2
+    rel = _record(session, args.tool, path, args.note)
     print(f'trail: {args.tool} {rel}  (session={session})')
+    return 0
+
+
+def cmd_hook(args: argparse.Namespace) -> int:
+    """Record one event from a PostToolUse hook payload on stdin.
+
+    Claude Code passes hooks a JSON object on stdin -- it does NOT substitute
+    placeholders into the command string, which is why the previous
+    `add __TOOL__ __FILE_PATH__` form failed on every single tool call.
+    Relevant keys: session_id, tool_name, tool_input.{file_path,notebook_path}.
+
+    Always exits 0. A trail recorder must never block or noisily fail the edit
+    it is merely observing.
+    """
+    try:
+        raw = sys.stdin.read()
+    except Exception:
+        return 0
+    if not raw.strip():
+        return 0
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+
+    tool = str(payload.get('tool_name') or '')
+    if tool not in TOOLS_OF_INTEREST:
+        return 0
+    tool_input = payload.get('tool_input')
+    if not isinstance(tool_input, dict):
+        return 0
+    path = tool_input.get('file_path') or tool_input.get('notebook_path') or ''
+    if not path:
+        return 0
+
+    session = args.session or payload.get('session_id') or _session_id()
+    try:
+        rel = _record(str(session), tool, str(path), args.note)
+    except Exception as exc:  # disk full, permissions, race -- never propagate
+        print(f'trail: skipped ({type(exc).__name__})', file=sys.stderr)
+        return 0
+    print(f'trail: {tool} {rel}')
     return 0
 
 
@@ -180,6 +230,10 @@ def main(argv: list[str] | None = None) -> int:
     pa.add_argument('path')
     pa.add_argument('--note', default='')
 
+    ph = sub.add_parser('hook',
+                        help='record one event from a PostToolUse JSON payload on stdin')
+    ph.add_argument('--note', default='')
+
     pl = sub.add_parser('list', help='list events')
     pu = sub.add_parser('summary', help='session summary')
     pc = sub.add_parser('clear', help='wipe a session trail')
@@ -189,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     if args.cmd == 'add':
         return cmd_add(args)
+    if args.cmd == 'hook':
+        return cmd_hook(args)
     if args.cmd == 'list':
         return cmd_list(args)
     if args.cmd == 'summary':
