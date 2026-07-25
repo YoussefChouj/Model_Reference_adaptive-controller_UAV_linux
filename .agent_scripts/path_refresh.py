@@ -159,6 +159,14 @@ def _annotate_graph(graph: dict, touched_ids: list[str],
 
 # ------------------------------------------------------------------ LLM-powered deltas
 
+def _read_file_safe(path: Path, max_bytes: int = 12000) -> str:
+    try:
+        text = path.read_text(encoding='utf-8', errors='replace')
+        return text if len(text) <= max_bytes else text[:max_bytes] + '\n/* ...truncated... */\n'
+    except Exception as e:
+        return f'/* could not read {path}: {e} */'
+
+
 # IMPORTANT: This module never makes HTTP calls itself. It only **structures** the
 # work. The actual LLM call is performed by the agent (or by the dedicated
 # `uav-knowledge-writer` subagent) that invokes this script. The reasons:
