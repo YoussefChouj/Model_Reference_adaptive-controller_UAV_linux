@@ -55,6 +55,7 @@ void remoter_task(void)
 		}
 	}
 
+	RCInput_UpdateNeutral();
 	RCInput_Update();
 }
 

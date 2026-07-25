@@ -18,6 +18,15 @@
 #include "ekf.h"
 #include <math.h>
 
+/* Scratch covariance snapshots. These are file-scope (BSS) rather than stack
+ * locals on purpose: Send_Task's stack is SENDTASK_STK_SIZE = 500 words = 2 kB
+ * (Global_file/creat_task.h), and a 324-byte 9x9 float snapshot per frame is
+ * ~16 % of it. NOT re-entrant — the EKF is a single instance driven only from
+ * send_data.c inside Send_Task, so this is safe. If a second EKF instance or a
+ * second calling task is ever added, these must move back onto the stack. */
+static float s_Po[81];   /* predict:  pre-update P snapshot */
+static float s_AP[81];   /* update:   (I - K H) P intermediate */
+
 /* ------------------------------------------------------------------ */
 /* Init                                                                 */
 /* ------------------------------------------------------------------ */
@@ -73,21 +82,47 @@ void Ekf9_Predict(Ekf9_t *e,
     e->x[2] += (a_body_z - e->x[5]) * dt;
     /* b_a_body and b_g_body are random-walk — x[3..8] unchanged */
 
-    /* Covariance: diagonal-block approximation
-     * P_vv += dt^2 * Q_v  (indices 0,1,2)
-     * P_ba += Q_ba         (indices 3,4,5)
-     * P_bg += Q_bg         (indices 6,7,8)
-     * Cross terms F[i,j]*dt are dropped at v0 (they are O(dt^2) vs dt^2*Q_v). */
+    /* Covariance: P = F P F^T + Q, with F = I except F[0,3]=F[1,4]=F[2,5]=-dt.
+     * Writing F = I + N (N sparse), F P F^T = P + N P + P N^T + N P N^T.
+     * These cross terms are NOT negligible: F[0,3]=-dt is the ONLY path that
+     * builds the v-b_a cross-covariance P[0,3], and that off-diagonal is what
+     * makes accel bias observable through the OF/acc velocity update
+     * (K = P H^T S^-1 has zero rows 3..5 without it). Dropping it pins b_a at
+     * its init value forever. Matches sim/ekf.py F @ P @ F.T exactly.
+     * Snapshot P first so every term reads the pre-update covariance. */
     {
-        float dt2_qv = dt * dt * e->Q_diag[0];
-        e->P[0 * 9U + 0U] += dt2_qv;
+        uint8_t a;
+        for (a = 0U; a < 81U; a++) s_Po[a] = e->P[a];
+
+        {
+            uint8_t i, j;
+            /* N P : rows 0..2, all cols.  (N P)[i,j] = -dt * Po[i+3, j] */
+            for (i = 0U; i < 3U; i++) {
+                for (j = 0U; j < 9U; j++) {
+                    e->P[i * 9U + j] += -dt * s_Po[(i + 3U) * 9U + j];
+                }
+            }
+            /* P N^T : all rows, cols 0..2.  (P N^T)[i,j] = -dt * Po[i, j+3] */
+            for (i = 0U; i < 9U; i++) {
+                for (j = 0U; j < 3U; j++) {
+                    e->P[i * 9U + j] += -dt * s_Po[i * 9U + (j + 3U)];
+                }
+            }
+            /* N P N^T : 3x3 corner.  = dt^2 * Po[i+3, j+3] */
+            for (i = 0U; i < 3U; i++) {
+                for (j = 0U; j < 3U; j++) {
+                    e->P[i * 9U + j] += dt * dt * s_Po[(i + 3U) * 9U + (j + 3U)];
+                }
+            }
+        }
+
+        /* + Q : Q_v scaled by dt^2 (velocity), Q_ba/Q_bg as random-walk. */
+        e->P[0 * 9U + 0U] += dt * dt * e->Q_diag[0];
         e->P[1 * 9U + 1U] += dt * dt * e->Q_diag[1];
         e->P[2 * 9U + 2U] += dt * dt * e->Q_diag[2];
-        /* Q_ba adds to diagonal only (random-walk, no dt factor) */
         e->P[3 * 9U + 3U] += e->Q_diag[3];
         e->P[4 * 9U + 4U] += e->Q_diag[4];
         e->P[5 * 9U + 5U] += e->Q_diag[5];
-        /* Q_bg */
         e->P[6 * 9U + 6U] += e->Q_diag[6];
         e->P[7 * 9U + 7U] += e->Q_diag[7];
         e->P[8 * 9U + 8U] += e->Q_diag[8];
@@ -140,26 +175,31 @@ static void s_Update2x2(Ekf9_t *e,
         }
     }
 
-    /* P = (I - K H) P (I - K H)^T + K R K^T
-     * = P - K*H*P - P*H^T*K^T + K*(R*I2 + H*P*H^T)*K^T
-     * Using Joseph form: P_new = P - K*H*P (overwrites P in-place row by row).
-     * H selects cols 0 and 1. */
+    /* P = (I - K H) P (I - K H)^T + K R K^T  — full Joseph form, matches sim/ekf.py.
+     * H selects cols 0,1.  With A = I - K H (A[i,0]-=K[i,0], A[i,1]-=K[i,1]):
+     *   s_AP[i,j] = P[i,j] - K[i,0]*P[0,j] - K[i,1]*P[1,j]
+     *   P+[i,j] = s_AP[i,j] - s_AP[i,0]*K[j,0] - s_AP[i,1]*K[j,1]
+     *                     + R*(K[i,0]*K[j,0] + K[i,1]*K[j,1])
+     * AP is a full snapshot so the second pass never reads a half-updated row
+     * (the previous in-place form corrupted rows 0/1 before later rows used them),
+     * and the full quadratic term keeps P symmetric positive-definite. */
     {
-        uint8_t i;
+        uint8_t i, j;
         for (i = 0U; i < 9U; i++) {
-            uint8_t j;
             for (j = 0U; j < 9U; j++) {
-                float kp0 = e->K[i * 3U + 0U] * e->P[0U * 9U + j];
-                float kp1 = e->K[i * 3U + 1U] * e->P[1U * 9U + j];
-                e->P[i * 9U + j] -= (kp0 + kp1);
+                s_AP[i * 9U + j] = e->P[i * 9U + j]
+                               - e->K[i * 3U + 0U] * e->P[0U * 9U + j]
+                               - e->K[i * 3U + 1U] * e->P[1U * 9U + j];
             }
         }
-        /* Add K R K^T = K * R*I2 * K^T (diagonal R, so K*R*K^T = R * (k_col0*k_col0' + k_col1*k_col1')) */
-        {
-            uint8_t i;
-            for (i = 0U; i < 9U; i++) {
-                e->P[i * 9U + i] += R * (e->K[i * 3U + 0U] * e->K[i * 3U + 0U]
-                                         + e->K[i * 3U + 1U] * e->K[i * 3U + 1U]);
+        for (i = 0U; i < 9U; i++) {
+            for (j = 0U; j < 9U; j++) {
+                e->P[i * 9U + j] =
+                      s_AP[i * 9U + j]
+                    - s_AP[i * 9U + 0U] * e->K[j * 3U + 0U]
+                    - s_AP[i * 9U + 1U] * e->K[j * 3U + 1U]
+                    + R * (e->K[i * 3U + 0U] * e->K[j * 3U + 0U]
+                         + e->K[i * 3U + 1U] * e->K[j * 3U + 1U]);
             }
         }
     }
@@ -227,26 +267,27 @@ void Ekf9_UpdateZRate(Ekf9_t *e, float z_rate)
         }
     }
 
-    /* P = (I - K H) P (I - K H)^T + K R K^T,  H = [0,0,1,0,...]
-     * I-KH has H row 2 non-zero: (I-KH)[i][2] = -K[i]*1 for all i.
-     * P_new[i,j] = P[i,j] - K[i]*P[2,j] - P[i,2]*K[j] + R_z*K[i]*K[j]
-     * Symmetric form (Joseph): P_new = P - K*P[2,:] - P[:,2]*K^T + R_z*K*K^T
-     * In-place (same as 2x2 case above): */
+    /* P = (I - K H) P (I - K H)^T + K R K^T,  H = [0,0,1,0,...]  — full Joseph.
+     * A = I - K H (A[i,2]-=K[i]):
+     *   s_AP[i,j] = P[i,j] - K[i]*P[2,j]
+     *   P+[i,j] = s_AP[i,j] - s_AP[i,2]*K[j] + R_z*K[i]*K[j]
+     * Snapshot AP so the second pass sees the pre-update covariance (the previous
+     * in-place form corrupted row 2 before later rows read it), and the full
+     * quadratic term keeps P symmetric positive-definite. */
     {
-        uint8_t i;
+        uint8_t i, j;
         for (i = 0U; i < 9U; i++) {
-            uint8_t j;
             float ki = e->K[i * 3U + 2U];
             for (j = 0U; j < 9U; j++) {
-                e->P[i * 9U + j] -= ki * e->P[2U * 9U + j];
+                s_AP[i * 9U + j] = e->P[i * 9U + j] - ki * e->P[2U * 9U + j];
             }
         }
-        /* Add R_z * K * K^T to diagonal */
-        {
-            uint8_t i;
-            for (i = 0U; i < 9U; i++) {
-                float ki = e->K[i * 3U + 2U];
-                e->P[i * 9U + i] += e->R_z * ki * ki;
+        for (i = 0U; i < 9U; i++) {
+            for (j = 0U; j < 9U; j++) {
+                e->P[i * 9U + j] =
+                      s_AP[i * 9U + j]
+                    - s_AP[i * 9U + 2U] * e->K[j * 3U + 2U]
+                    + e->R_z * e->K[i * 3U + 2U] * e->K[j * 3U + 2U];
             }
         }
     }

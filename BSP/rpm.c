@@ -5,7 +5,9 @@
  * @subsystem  drivers
  * @depends  rpm.h, stm32f4xx.h, stm32f4xx_syscfg.h (SYSCFG_EXTILineConfig),
  *           stm32f4xx_gpio.h, misc.h (NVIC), core_cm4.h (DWT / CoreDebug)
- * @owns  GPIO + SYSCFG + EXTI + NVIC init for PA5/PB3/PB10/PB11; per-channel
+ * @owns  GPIO + SYSCFG + EXTI + NVIC init for PA0/PA1/PC6/PC7 (re-targeted
+ *        2026-07-21 from PA5/PB3/PB10/PB11 — the old pins shared the ESC
+ *        signal-return header and could not be used as inputs); per-channel
  *        period ring buffer + averaged RPM readout; DWT cycle counter enable.
  * @caution  ARMCC V5.06 is not C99-friendly in this project's config — keep
  *           locals at the top of every block.
@@ -26,6 +28,12 @@ typedef struct {
 
 static RPM_ChannelState_t rpm_ch[RPM_NUM_CH];
 
+/* Debug counters (see rpm.h). Non-static so the Keil debugger resolves them by name.
+ * rpm_dbg_edges is monotonic — a live "are edges arriving?" indicator you can watch
+ * in the Watch window while waving a mark past the sensor. */
+volatile uint32_t rpm_dbg_edges[RPM_NUM_CH]     = {0};
+volatile uint32_t rpm_dbg_period_cyc[RPM_NUM_CH] = {0};
+
 /* ----------------------------- init ----------------------------- */
 
 static void RPM_GpioInit(void)
@@ -37,7 +45,7 @@ static void RPM_GpioInit(void)
     /* Per the existing pattern in BSP/pwm.c: GPIO_StructInit then init. */
     GPIO_StructInit(&gpio);
 
-    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_GPIOB, ENABLE);
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_GPIOC, ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
 
     /* Module output is active-HIGH on reflection, idles LOW; pull-down keeps
@@ -94,9 +102,11 @@ static void RPM_NvicInit(void)
     nvic.NVIC_IRQChannelSubPriority        = 0;
     nvic.NVIC_IRQChannelCmd                = ENABLE;
 
-    nvic.NVIC_IRQChannel = EXTI3_IRQn;     NVIC_Init(&nvic);
-    nvic.NVIC_IRQChannel = EXTI9_5_IRQn;   NVIC_Init(&nvic);
-    nvic.NVIC_IRQChannel = EXTI15_10_IRQn; NVIC_Init(&nvic);
+    /* EXTI0 (PA0), EXTI1 (PA1) get their own IRQ vectors; EXTI9_5 covers
+     * PC6 (line 6) and PC7 (line 7).  EXTI3 / EXTI15_10 are no longer used. */
+    nvic.NVIC_IRQChannel = EXTI0_IRQn;      NVIC_Init(&nvic);
+    nvic.NVIC_IRQChannel = EXTI1_IRQn;      NVIC_Init(&nvic);
+    nvic.NVIC_IRQChannel = EXTI9_5_IRQn;    NVIC_Init(&nvic);
 }
 
 static void RPM_DwtInit(void)
@@ -136,6 +146,9 @@ void RPM_EdgeISR(uint8_t ch)
     /* Stash every-edge timestamp for the staleness watchdog in RPM_Get. */
     s->last_any_edge_stamp = now;
 
+    /* Debug: monotonic every-edge counter (watch in Keil to confirm edges arrive). */
+    rpm_dbg_edges[ch]++;
+
     /* Period is measured every RPM_PULSES_PER_REV-th edge so a full revolution
      * is captured regardless of mark-to-mark asymmetry. */
     s->edge_count++;
@@ -167,6 +180,9 @@ void RPM_EdgeISR(uint8_t ch)
     if (period < RPM_MIN_PERIOD_CYCLES) {
         return;
     }
+
+    /* Debug: last accepted revolution period (cycles) — RPM = 60*f_cpu/this. */
+    rpm_dbg_period_cyc[ch] = period;
 
     s->ring[s->ring_idx] = period;
     s->ring_idx = (uint8_t)((s->ring_idx + 1U) % RPM_RING_DEPTH);

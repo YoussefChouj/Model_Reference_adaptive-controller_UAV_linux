@@ -33,8 +33,19 @@
  * Increment when the frame layout or CMD semantics change. Must match GS_PROTO_VERSION
  * in ground_station/comm/serial_bridge.py. v8: bench frame 0x04 payload grew 12->20 B (4x u16 RPM).
  * v9: added OF calibration/fusion frame 0x05 (35 B, CMD 0x0F idx 12).
- * v10: 0x05 grew 35->39 B (added s16 Lin_Acc_X/Y_body, gravity-removed body accel, mg). */
-#define GS_PROTO_VERSION             10U
+ * v10: 0x05 grew 35->39 B (added s16 Lin_Acc_X/Y_body, gravity-removed body accel, mg).
+ * v11: Frame 0x01 grew 39->40 B (added u8 status.of_hold before proto_version): 1=OF
+ *      position-hold active, 0=angle mode (ch6 OFHOLD_CH switch state actually applied).
+ * v12: Frame 0x01 grew 40->41 B (added u8 status.estimator_ready before proto_version):
+ *      1=attitude estimator converged / armable, 0=warming up (blocks arming).
+ * v13: Added Frame 0x06 body-rate/attitude/RPM frame (50 B payload, 50 Hz, CRC16-checksummed).
+ *      SerialBridge silently ignores 0x06 on firmware older than v13. New fields: rol/pit/yaw
+ *      (deg), gyro_rad[3] (rad/s), earth_x/y (m), altitude (m), rpm[4] (RPM, u16 each), seq (u16).
+ *      v13a: Added 4x u16 RPM channels to Frame C payload (50 B payload total).
+ * v14: Frame 0x05 grew 39->53 B always-on (added acc_bias[3] mg, gyro_bias[3] 1e-4 rad/s,
+ *      cal_health u16). With EKF_TELEM_ENABLED=1: 53->73 B (added v_body[3] mm/s, P_diag[3]
+ *      1e-3, NIS 1e-3, K_last[3] 1e-3). Added CMD 0x18 force_recal. */
+#define GS_PROTO_VERSION             14U
 
 #define ARM_Delay_time  150
 #define DISARM_Delay_time  50// 50*20ms = 1s
@@ -141,6 +152,19 @@ extern StickMotionTypeDef StickMotion;
 /* Hybrid RC / computer control (see RemoterTask, rc_input) */
 extern volatile uint8_t sbus_lost;
 extern volatile uint32_t sbus_last_valid_tick;
+
+/* OF position-hold applied state (StabilizerTask case_Update_pitrol_Des): 1=OF hold
+ * engaged, 0=angle mode. Telemetered as status.of_hold in Frame 0x01 for diagnosis. */
+extern uint8_t g_of_hold_active;
+/* Attitude-estimator convergence flag (imu_update.c). 1=converged/ready to arm,
+ * 0=warming up. Telemetered as status.estimator_ready in Frame 0x01 and used by
+ * the flight FSM to block arming until the estimate has settled. */
+extern uint8_t g_estimator_ready;
+/* One-shot OF velocity-bias capture request (CMD 0x17). Set by send_data.c when the
+ * pilot triggers a calibration with the drone placed level and still; consumed in
+ * StabilizerTask Update_Data, which averages of2_dx_fix/dy_fix over ~2 s into
+ * s_of_bias_x/y. Deterministic alternative to the quiescence-gated auto-estimator. */
+extern volatile uint8_t g_of_bias_capture_req;
 extern volatile uint8_t bench_mode_active;
 
 /* Motor bench-test mode (CMD 0x16, DISARMED-only) — drives a single chosen motor
@@ -243,5 +267,62 @@ extern void AutoflyTask_WaypointReset(void);
 
 /* Ground station: parallel trigger for SDK state machine (see AutoflyTask, CMD 0x0E) */
 extern volatile uint8_t GS_KeySDKflag;
+
+/* Per-motor IR reflective sensors (PC2–PC5, pull-down idle).
+ * Reading passes through a majority-of-5 sample-and-vote filter (IRSensor_ReadVoted)
+ * to reject short transients caused by bus contention / slow open-collector
+ * pull-ups on the IR modules. */
+typedef enum {
+    IRSensorMotor_1 = GPIO_Pin_2,   /* PC2 */
+    IRSensorMotor_2 = GPIO_Pin_3,   /* PC3 */
+    IRSensorMotor_3 = GPIO_Pin_4,   /* PC4 */
+    IRSensorMotor_4 = GPIO_Pin_5,   /* PC5 */
+} IRSensorMotor_e;
+
+/* Raw read — single sample, for tight loops / DMA paths. */
+#define IRSensorMotor_ReadRaw(pin) \
+    GPIO_ReadInputDataBit(GPIOC, (pin))
+
+/* Voted read — 5 samples spread ~5us apart; majority wins. Rejects contention
+ * transients where one module's OUT briefly drives the bus the wrong way. */
+static inline uint8_t IRSensorMotor_IsDetected(IRSensorMotor_e pin)
+{
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < 5; i++) {
+        if (GPIO_ReadInputDataBit(GPIOC, (uint16_t)pin) == Bit_SET) count++;
+        /* ~5us @ 168MHz Cortex-M4 — tight loop, no need for SysTick */
+        __asm volatile("mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0");
+    }
+    return (count >= 3) ? Bit_SET : Bit_RESET;
+}
+
+/* Same treatment for landing-pad sensors on PC0/PC1. */
+static inline uint8_t IRSensor_IsDetected(GPIO_TypeDef* port, uint16_t pin)
+{
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < 5; i++) {
+        if (GPIO_ReadInputDataBit(port, pin) == Bit_SET) count++;
+        __asm volatile("mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0\n" \
+                       "mov r0, r0");
+    }
+    return (count >= 3) ? Bit_SET : Bit_RESET;
+}
 
 #endif

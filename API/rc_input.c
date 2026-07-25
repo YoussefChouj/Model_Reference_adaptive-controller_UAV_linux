@@ -38,6 +38,22 @@ static uint8_t    s_heartbeat_active = 0U;
 static uint8_t    s_heartbeat_lost   = 0U;
 static uint16_t   s_authority_grace  = 0U;
 
+/* Physical stick neutral auto-calibration.
+ * The transmitter's mechanical stick centre can sit off the nominal 3000 raw
+ * units (measured: a standing ~+0.95 deg pitch-lean command with sticks
+ * released across several flights). We capture the resting centre of pitch/roll/
+ * yaw once at boot and subtract it in RCInput_Get so released sticks read true
+ * zero. Throttle is never offset (its rest position is stick-down, not centre).
+ * Capture is gated on a valid SBUS link and every axis sitting within a small
+ * window of 3000, so a stick held off-centre during boot cannot poison it. */
+#define RC_NEUTRAL_WINDOW   200.0f   /* max |raw-3000| accepted as "at rest"      */
+#define RC_NEUTRAL_FRAMES   50U      /* ~0.5 s of stable frames averaged (10 ms)  */
+
+static float      s_neutral[4]   = {0.0f, 0.0f, 0.0f, 0.0f}; /* raw-unit centre offset; [thr,pit,rol,yaw] */
+static uint8_t    s_neutral_done = 0U;
+static uint16_t   s_neutral_cnt  = 0U;
+static float      s_neutral_acc[3] = {0.0f, 0.0f, 0.0f};     /* pit,rol,yaw sums */
+
 /* ------------------------------------------------------------------
  * Internal helpers
  * ------------------------------------------------------------------ */
@@ -78,9 +94,9 @@ float RCInput_Get(RC_Axis_t axis)
         /* Pilot mode: physical RC sticks. */
         switch (axis) {
             case RC_AXIS_THR:   v = s_normalize((float)Remoter.ThrCtrler); break;
-            case RC_AXIS_PITCH: v = s_normalize((float)Remoter.PitCtrler); break;
-            case RC_AXIS_ROLL:  v = s_normalize((float)Remoter.RolCtrler); break;
-            case RC_AXIS_YAW:   v = s_normalize((float)Remoter.YawCtrler); break;
+            case RC_AXIS_PITCH: v = s_normalize((float)Remoter.PitCtrler - s_neutral[1]); break;
+            case RC_AXIS_ROLL:  v = s_normalize((float)Remoter.RolCtrler - s_neutral[2]); break;
+            case RC_AXIS_YAW:   v = s_normalize((float)Remoter.YawCtrler - s_neutral[3]); break;
             default:            v = 0.0f; break;
         }
     }
@@ -239,6 +255,51 @@ void RCInput_Update(void)
         s_virtual[2]       = 0.0f;
         s_virtual[3]       = 0.0f;
         s_heartbeat_lost   = 1U;
+    }
+}
+
+void RCInput_UpdateNeutral(void)
+{
+    float pit, rol, yaw;
+
+    if (s_neutral_done) {
+        return;
+    }
+
+    /* Need a live SBUS link; stale readings must never be captured as neutral. */
+    if (sbus_lost) {
+        s_neutral_cnt    = 0U;
+        s_neutral_acc[0] = 0.0f;
+        s_neutral_acc[1] = 0.0f;
+        s_neutral_acc[2] = 0.0f;
+        return;
+    }
+
+    pit = (float)Remoter.PitCtrler - 3000.0f;
+    rol = (float)Remoter.RolCtrler - 3000.0f;
+    yaw = (float)Remoter.YawCtrler - 3000.0f;
+
+    /* Any axis deflected past the rest window => a stick is being held; restart. */
+    if (pit >  RC_NEUTRAL_WINDOW || pit < -RC_NEUTRAL_WINDOW ||
+        rol >  RC_NEUTRAL_WINDOW || rol < -RC_NEUTRAL_WINDOW ||
+        yaw >  RC_NEUTRAL_WINDOW || yaw < -RC_NEUTRAL_WINDOW) {
+        s_neutral_cnt    = 0U;
+        s_neutral_acc[0] = 0.0f;
+        s_neutral_acc[1] = 0.0f;
+        s_neutral_acc[2] = 0.0f;
+        return;
+    }
+
+    s_neutral_acc[0] += pit;
+    s_neutral_acc[1] += rol;
+    s_neutral_acc[2] += yaw;
+    s_neutral_cnt++;
+
+    if (s_neutral_cnt >= RC_NEUTRAL_FRAMES) {
+        s_neutral[1] = s_neutral_acc[0] / (float)RC_NEUTRAL_FRAMES; /* pitch */
+        s_neutral[2] = s_neutral_acc[1] / (float)RC_NEUTRAL_FRAMES; /* roll  */
+        s_neutral[3] = s_neutral_acc[2] / (float)RC_NEUTRAL_FRAMES; /* yaw   */
+        s_neutral_done = 1U;
     }
 }
 

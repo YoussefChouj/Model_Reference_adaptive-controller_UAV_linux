@@ -15,6 +15,7 @@
 #include "Filter.h"
 #include "GPS.h"
 void BSP_Init(void);
+void IRSensors_Init(void);
 
 #endif
 

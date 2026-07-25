@@ -29,7 +29,8 @@
 #define TAN_MAP_RES     0.003921569f     /* (smallest non-zero value in table) */
 
 void stabilizer_Task(void);
-void Update_Motor(void); 
+void Reset_World_Origin(void);
+void Update_Motor(void);
 void Compute_Motor(void);
 void Update_Des(unsigned char which_level);
 void Update_Data(void);
@@ -43,19 +44,19 @@ REAL fast_atan2(REAL y, REAL x);
 
 typedef struct 
 {
-float target_x;//Éè¶¨Ä¿±êµãx×ø±ê
-float target_y;//Éè¶¨Ä¿±êµãy×ø±ê
-float target_z;//Éè¶¨Ä¿±êµãz×ø±ê
-float world_x; //ÕæÊµÊÀ½ç×ø±ê
-float world_y; //ÕæÊµÊÀ½ç×ø±ê
-float world_z; //ÕæÊµÊÀ½ç×ø±ê
-int execute;//ÖÃ0¿ÉÒÔÐÞ¸ÄÄ¿±ê×ø±ê£¬ÖÃ1·ÉÐÐÆ÷·ÉÏòÄ¿±ê	
-float set_yaw;//Éè¶¨Æ«º½½Ç
-float real_yaw;//Êµ¼ÊÆ«º½½Ç
+float target_x;//ï¿½è¶¨Ä¿ï¿½ï¿½ï¿½xï¿½ï¿½ï¿½ï¿½
+float target_y;//ï¿½è¶¨Ä¿ï¿½ï¿½ï¿½yï¿½ï¿½ï¿½ï¿½
+float target_z;//ï¿½è¶¨Ä¿ï¿½ï¿½ï¿½zï¿½ï¿½ï¿½ï¿½
+float world_x; //ï¿½ï¿½Êµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+float world_y; //ï¿½ï¿½Êµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+float world_z; //ï¿½ï¿½Êµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+int execute;//ï¿½ï¿½0ï¿½ï¿½ï¿½ï¿½ï¿½Þ¸ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ê£¬ï¿½ï¿½1ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½	
+float set_yaw;//ï¿½è¶¨Æ«ï¿½ï¿½ï¿½ï¿½
+float real_yaw;//Êµï¿½ï¿½Æ«ï¿½ï¿½ï¿½ï¿½
 }TargetSet_WorldReal_Coordinate;
 extern TargetSet_WorldReal_Coordinate TWC;
 
-extern float real_voltage; //²âÁ¿µç³ØÊµ¼ÊµçÑ¹
+extern float real_voltage; //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Êµï¿½Êµï¿½Ñ¹
 extern float earth_x;
 extern float earth_y;
 extern float Cos_Yaw_01;

@@ -3,19 +3,22 @@
 CtrlerTypeDef Ctrler={
 
 /*des FB  Kp   Ki    Kd Up Ui Ud E preE SumE U Umax Upmax Uimax Udmax SumEmax Emin***/
-	{ 0,  0, 3.0, 0.1,  8, 0, 0, 0, 0, 0,   0,  0, 200,  200,  0,  10,  1000,     3},//pitch//p=15
-	{ 0,  0, 3.0, 0.1,  8, 0, 0, 0, 0, 0,   0,  0, 200,  200,  0,  10,  1000,     3},//roll
-	{ 0,  0, 6.0, 0.04,  0, 0, 0, 0, 0, 0,   0,  0, 120,  120,  2,  0,     50,     2},//yaw
+	//pitch: reduced Kp 3.0->2.6 for more phase margin, increased Kd 8.0->9.5 for better damping (PM=30° fix, flight_1784538359)
+	{ 0,  0, 2.6, 0.1,  9.5, 0, 0, 0, 0, 0,   0,  0, 200,  200,  10,  10,  120,     3},
+	//roll: same tuning as pitch (PM=30° fix, flight_1784538359)
+	{ 0,  0, 2.6, 0.1,  9.5, 0, 0, 0, 0, 0,   0,  0, 200,  200,  10,  10,  120,     3},
+	//yaw: increased Kp 6.0->6.5 for tracking, added Kd 0->1.5 to damp 0.4Hz oscillation (flight_1784538359)
+	{ 0,  0, 6.5, 0.04,  1.5, 0, 0, 0, 0, 0,   0,  0, 160,  160,  2,  10,     50,     2},
 	//skywalker  4         letian40A    3       pitch/roll KP
 	//yaw KP   3   -> 4
 	
 
 	{ 0,  0, 5   , 0.01 ,10, 0,0, 0, 0, 0,   0,  0, 300,  300,  20,  100,  1000,   2},//gyrox
 	{ 0,  0, 5   , 0.01 ,10, 0,0, 0, 0, 0,   0,  0, 300,  300,  20,  100,  1000,   2},//gyroy
-	{ 0,  0, 8.0, 0.001 ,0.02, 0,0, 0, 0, 0,  0,  0, 250,  250,  60,  10,   2000,     20},//gyroz
+	{ 0,  0, 8.0, 0.001 ,0.02, 0,0, 0, 0, 0,  0,  0, 350,  350,  60,  10,   2000,     20},//gyroz  Umax/Upmax 250->350: raise yaw mixer-command ceiling to test headroom vs motor saturation (2026-07-19)
 	
 	{ 0,  0, 0.7, 0.005 ,0.1, 0,0, 0, 0, 0,   0,  0, 1.0 , 0.9,  0.3,  0.3,  30,     0.3},//h
-	{ 0,  0, 400,  0.435,  0,0,0, 0, 0, 0,   0, 0,300, 300, 60,   60,    30,    0.1},//h rate
+	{ 0,  0, 400,  0.435,  1.5,0,0, 0, 0, 0,   0, 0,300, 300, 60,   60,    30,    0.1},//h rate: added Kd 0->1.5 to damp 0.4Hz oscillation (flight_1784538359)
 	
 		/*des FB  Kp   Ki  Kd   Up Ui Ud E preE SumE U Umax Upmax Uimax Udmax SumEmax Emin***/	  //�����Ĳ���
 	//hui fei zhe   1.8outKP    1.8 0.45inKP KI

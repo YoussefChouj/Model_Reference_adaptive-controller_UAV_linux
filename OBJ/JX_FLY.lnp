@@ -16,6 +16,8 @@
 "..\obj\mrac_math.o"
 "..\obj\sysid.o"
 "..\obj\gyro_filter.o"
+"..\obj\ekf.o"
+"..\obj\calib.o"
 "..\obj\rc_input.o"
 "..\obj\flight_fsm.o"
 "..\obj\time_estimate.o"

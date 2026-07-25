@@ -71,3 +71,20 @@
 - **Rationale:** SBUS channels are already decoded at 100 Hz in RemoterTask. A 3-position switch for IDLE/FLY/LAND covers all in-flight mode transitions without requiring ground station connectivity.
 - **Files affected:** `TASK/RemoterTask.h` (defines), `TASK/RemoterTask.c` (Check_Fly_Mode), `TASK/StabilizerTask.c` (mode branches), `Global_file/global_declare.h/.c` (drone_mode, sbus_twc_trigger).
 - **Constraints created:** ch5 and ch8 must be physically assigned on the RC transmitter. ch10 remains the unconditional kill switch (sbus_channel[9] ≤ 500 → DANGEROUS_STOP), independent of drone_mode.
+
+## 2026-07-23: FC Dongle Migration (Rainsun → ATK/DeveBox CH340) + Robust COM-Port Resolution
+- **Problem:** Original Rainsun wireless UART bridge was retired. The replacement ATK/DeveBox CH340 dongle works electrically, but Windows enumerates it differently across replugs: yesterday the dongle came up as COM6 (then went phantom / CM_PROB_PHANTOM); after Device Manager "uninstall + remove driver" + replug it came up as COM3. Hard-coded `serial_port: COM6` in `ground_station/config.yaml` made the bridge fail silently on every COM drift. Driver-level recovery (`pnputil /disable`, `/enable`, `/restart-device`) returned ACCESS DENIED for the phantom.
+- **Options considered:**
+  1. Hard-code the new port (COM3). Works today; same class of failure the next time the user reboots, pairs a Bluetooth device, or changes USB hub.
+  2. Document the swap and let the user edit `config.yaml` every time. No code change but pushes a recurring tax onto the operator.
+  3. AUTO resolution: enumerate CH340 / CP210x / FTDI candidates, probe each at 115200 8N1, return the first that streams telemetry bytes within `com_probe_timeout_s`. Fall back to `serial_port_fallback` if no candidate streams.
+- **Chosen:** Option 3 plus a one-shot PowerShell recovery script (`Recover-AtkComPort.ps1`) that diagnoses phantom / missing / healthy state and guides the operator through the only known working recovery (Device Manager → Uninstall + tick "remove driver" + physical replug). Add a `--scan-com` CLI flag for ad-hoc probing.
+- **Rationale:** The dongle is electrically transparent to the firmware — the FC just sees USART3 with 115200 8N1. COM number drift is purely a Windows-host concern, so the fix belongs in the host bridge, not in firmware. AUTO resolution keeps the bridge usable across future port moves without operator edits. The PowerShell script documents the recovery path so the next operator doesn't need an interactive debugging session.
+- **Files affected:** `ground_station/config.yaml` (new `serial_port: AUTO`, `serial_port_fallback`, `com_scan`, `com_probe_timeout_s`, `com_match_hints`), `ground_station/comm/serial_bridge.py` (new `_list_com_ports`, `_probe_port`, `scan_com_ports`, `resolve_serial_port`, `--scan-com` CLI flag; import `serial.tools.list_ports`), `ground_station/comm/Recover-AtkComPort.ps1` (new).
+- **Constraints created:**
+  - `serial_port` accepts the literal `AUTO` to enable probing; any other value is used verbatim (legacy behaviour preserved).
+  - `serial_port_fallback` is the port the bridge opens when AUTO finds no live candidate, so the bridge fails loudly downstream (open / read error) instead of crashing at startup.
+  - `com_scan` is a space-separated list, parsed by `_parse_simple_yaml`. Re-using the existing parser keeps the YAML dependency at zero.
+  - `com_match_hints` filters the candidate set to known dongle-driver strings (CH340, CP210x, FTDI, USB-SERIAL). If no hint matches, all enumerated ports are probed (fallback).
+  - Bridge firmware-side protocol is unchanged; this ADR is host-only.
+  - Existing telemetry shows firmware reports `proto_version=13` while host expects 14 (pre-existing — see common-pitfalls drift). Not addressed by this ADR; will require separate firmware / bridge alignment work.

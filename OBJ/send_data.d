@@ -92,3 +92,5 @@
 ..\obj\send_data.o: ..\API\rc_input.h
 ..\obj\send_data.o: ..\API\flight_fsm.h
 ..\obj\send_data.o: ..\BSP\rpm.h
+..\obj\send_data.o: ..\API\calib.h
+..\obj\send_data.o: ..\API\ekf.h

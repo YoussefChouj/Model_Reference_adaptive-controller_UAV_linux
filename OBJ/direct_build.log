@@ -1,0 +1,332 @@
+*** Using Compiler 'V5.06 update 3 (build 300)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
+Build target 'JX_FLY'
+compiling retarget.c...
+compiling led.c...
+compiling RemoterTask.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\RemoterTask.c: 2 warnings, 0 errors
+compiling systemmonitor_task.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\systemmonitor_task.c: 2 warnings, 0 errors
+compiling stm32f4xx_it.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\TASK\stm32f4xx_it.c: 3 warnings, 0 errors
+compiling main.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+main.c: 2 warnings, 0 errors
+compiling StabilizerTask.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\StabilizerTask.c: 2 warnings, 0 errors
+compiling AutoflyTask.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\AutoflyTask.c: 2 warnings, 0 errors
+compiling delay.c...
+compiling mrac.c...
+..\API\mrac_math.h(53): warning:  #1-D: last line of file ends without a newline
+  #endif // MRAC_MATH_H
+..\API\mrac.c(37): warning:  #177-D: function "MRAC_InverseMixer" was declared but never referenced
+  static void MRAC_InverseMixer(float current_vbatt, float pwm1, float pwm2, float pwm3, float pwm4,
+..\API\mrac.c: 2 warnings, 0 errors
+compiling bmi088_driver.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\bmi088_driver.c: 2 warnings, 0 errors
+compiling mrac_math.c...
+..\API\mrac_math.h(53): warning:  #1-D: last line of file ends without a newline
+  #endif // MRAC_MATH_H
+..\API\mrac_math.c(74): warning:  #1-D: last line of file ends without a newline
+  }
+..\API\mrac_math.c: 2 warnings, 0 errors
+compiling pid.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\pid.c: 2 warnings, 0 errors
+compiling gyro_filter.c...
+..\API\gyro_filter.c(71): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (axis < 0 || axis >= GYRO_FILT_AXES) return;
+..\API\gyro_filter.c(85): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (!s_enabled || axis < 0 || axis >= GYRO_FILT_AXES) {
+..\API\gyro_filter.c: 2 warnings, 0 errors
+compiling imu_update.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\imu_update.c: 2 warnings, 0 errors
+compiling send_data.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\TASK\send_data.c: 3 warnings, 0 errors
+compiling ekf.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\ekf.c: 2 warnings, 0 errors
+compiling calib.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\calib.c: 2 warnings, 0 errors
+compiling time_estimate.c...
+compiling tf_mini_plus.c...
+compiling sysid.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\sysid.c(163): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (axis < SYSID_AXIS_PITCH || axis > SYSID_AXIS_Z) return 0;
+..\API\sysid.c(66): warning:  #177-D: function "attitude_deg" was declared but never referenced
+  static float attitude_deg(SysID_Axis_e a)
+..\API\sysid.c: 4 warnings, 0 errors
+compiling rc_input.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\rc_input.c: 2 warnings, 0 errors
+compiling sys.c...
+compiling flight_fsm.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\flight_fsm.c: 2 warnings, 0 errors
+compiling Filter.c...
+compiling GPS.c...
+compiling Ano_OF.c...
+Error: C4051E: couldn't write file '..\obj\ano_of.o': Invalid argument
+compiling ADC.c...
+Error: C4051E: couldn't write file '..\obj\adc.o': Invalid argument
+compiling SINS.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\SINS.c(233): error: At end of source:  #5: cannot open source input file "..\obj\sins.crf": Invalid argument
+..\API\SINS.c: 2 warnings, 1 error
+compiling pwm.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\pwm.c(314): error: At end of source:  #5: cannot open source input file "..\obj\pwm.crf": Invalid argument
+..\BSP\pwm.c: 2 warnings, 1 error
+compiling rpm.c...
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\BSP\rpm.c(254): warning:  #1-D: last line of file ends without a newline
+  }
+..\BSP\rpm.c(254): error: At end of source:  #5: cannot open source input file "..\obj\rpm.crf": Invalid argument
+..\BSP\rpm.c: 2 warnings, 1 error
+compiling Accel_Calibartion.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\Accel_Calibartion.c(4): error: At end of source:  #5: cannot open source input file "..\obj\accel_calibartion.crf": Invalid argument
+..\API\Accel_Calibartion.c: 2 warnings, 1 error
+compiling BSP.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\BSP\BSP.c(60): error: At end of source:  #5: cannot open source input file "..\obj\bsp.crf": Invalid argument
+..\BSP\BSP.c: 3 warnings, 1 error
+compiling spi.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\spi.c(80): error: At end of source:  #5: cannot open source input file "..\obj\spi.crf": Invalid argument
+..\BSP\spi.c: 2 warnings, 1 error
+compiling usart6.c...
+Error: C4051E: couldn't write file '..\obj\usart6.o': Invalid argument
+compiling usart1.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart1.c(98): error: At end of source:  #5: cannot open source input file "..\obj\usart1.crf": Invalid argument
+..\BSP\usart1.c: 2 warnings, 1 error
+compiling usart4.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart4.c(153): error: At end of source:  #5: cannot open source input file "..\obj\usart4.crf": Invalid argument
+..\BSP\usart4.c: 2 warnings, 1 error
+compiling usart2.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart2.c(46): error: At end of source:  #5: cannot open source input file "..\obj\usart2.crf": Invalid argument
+..\BSP\usart2.c: 2 warnings, 1 error
+compiling usart5.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart5.c(173): error: At end of source:  #5: cannot open source input file "..\obj\usart5.crf": Invalid argument
+..\BSP\usart5.c: 2 warnings, 1 error
+compiling usart3.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart3.c(150): error: At end of source:  #5: cannot open source input file "..\obj\usart3.crf": Invalid argument
+..\BSP\usart3.c: 2 warnings, 1 error
+compiling global_declare.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.c(48): error: At end of source:  #5: cannot open source input file "..\obj\global_declare.crf": Invalid argument
+..\Global_file\global_declare.c: 2 warnings, 1 error
+compiling globaluse_basic_function.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\globaluse_basic_function.c(49): error: At end of source:  #5: cannot open source input file "..\obj\globaluse_basic_function.crf": Invalid argument
+..\Global_file\globaluse_basic_function.c: 2 warnings, 1 error
+compiling algorithm.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\algorithm.c(17): error: At end of source:  #5: cannot open source input file "..\obj\algorithm.crf": Invalid argument
+..\Global_file\algorithm.c: 2 warnings, 1 error
+compiling misc.c...
+Error: C4051E: couldn't write file '..\obj\misc.o': Invalid argument
+compiling stm32f4xx_adc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_adc.o': Invalid argument
+compiling stm32f4xx_can.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_can.o': Invalid argument
+compiling stm32f4xx_crc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_crc.o': Invalid argument
+compiling stm32f4xx_cryp.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_cryp.o': Invalid argument
+compiling stm32f4xx_cryp_tdes.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_cryp_tdes.o': Invalid argument
+compiling stm32f4xx_cryp_des.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_cryp_des.o': Invalid argument
+compiling stm32f4xx_cryp_aes.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_cryp_aes.o': Invalid argument
+compiling stm32f4xx_dbgmcu.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_dbgmcu.o': Invalid argument
+compiling stm32f4xx_dac.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_dac.o': Invalid argument
+compiling stm32f4xx_dcmi.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_dcmi.o': Invalid argument
+compiling stm32f4xx_exti.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_exti.o': Invalid argument
+compiling stm32f4xx_dma.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_dma.o': Invalid argument
+compiling stm32f4xx_dma2d.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_dma2d.o': Invalid argument
+compiling stm32f4xx_flash_ramfunc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_flash_ramfunc.o': Invalid argument
+compiling stm32f4xx_gpio.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_gpio.o': Invalid argument
+compiling stm32f4xx_flash.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_flash.o': Invalid argument
+compiling stm32f4xx_fsmc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_fsmc.o': Invalid argument
+compiling stm32f4xx_hash.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_hash.o': Invalid argument
+compiling stm32f4xx_hash_md5.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_hash_md5.o': Invalid argument
+compiling stm32f4xx_hash_sha1.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_hash_sha1.o': Invalid argument
+compiling stm32f4xx_iwdg.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_iwdg.o': Invalid argument
+compiling stm32f4xx_i2c.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_i2c.o': Invalid argument
+compiling stm32f4xx_ltdc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_ltdc.o': Invalid argument
+compiling stm32f4xx_pwr.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_pwr.o': Invalid argument
+compiling stm32f4xx_rng.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_rng.o': Invalid argument
+compiling stm32f4xx_rcc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_rcc.o': Invalid argument
+compiling stm32f4xx_syscfg.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_syscfg.o': Invalid argument
+compiling stm32f4xx_sai.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_sai.o': Invalid argument
+compiling stm32f4xx_spi.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_spi.o': Invalid argument
+compiling stm32f4xx_sdio.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_sdio.o': Invalid argument
+compiling stm32f4xx_rtc.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_rtc.o': Invalid argument
+assembling startup_stm32f40_41xxx.s...
+compiling stm32f4xx_usart.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_usart.o': Invalid argument
+compiling stm32f4xx_tim.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_tim.o': Invalid argument
+compiling stm32f4xx_wwdg.c...
+Error: C4051E: couldn't write file '..\obj\stm32f4xx_wwdg.o': Invalid argument
+compiling system_stm32f4xx.c...
+Error: C4051E: couldn't write file '..\obj\system_stm32f4xx.o': Invalid argument
+compiling event_groups.c...
+..\FreeRTOS\event_groups.c(752): error: At end of source:  #5: cannot open source input file "..\obj\event_groups.crf": Invalid argument
+..\FreeRTOS\event_groups.c: 0 warnings, 1 error
+compiling croutine.c...
+..\FreeRTOS\croutine.c(395): error: At end of source:  #5: cannot open source input file "..\obj\croutine.crf": Invalid argument
+..\FreeRTOS\croutine.c: 0 warnings, 1 error
+compiling list.c...
+..\FreeRTOS\list.c(240): error: At end of source:  #5: cannot open source input file "..\obj\list.crf": Invalid argument
+..\FreeRTOS\list.c: 0 warnings, 1 error
+compiling queue.c...
+..\FreeRTOS\queue.c(2566): error: At end of source:  #5: cannot open source input file "..\obj\queue.crf": Invalid argument
+..\FreeRTOS\queue.c: 0 warnings, 1 error
+compiling tasks.c...
+..\FreeRTOS\tasks.c(4807): error: At end of source:  #5: cannot open source input file "..\obj\tasks.crf": Invalid argument
+..\FreeRTOS\tasks.c: 0 warnings, 1 error
+compiling port.c...
+..\FreeRTOS\portable\RVDS\ARM_CM4F\port.c(789): error: At end of source:  #5: cannot open source input file "..\obj\port.crf": Invalid argument
+..\FreeRTOS\portable\RVDS\ARM_CM4F\port.c: 0 warnings, 1 error
+compiling timers.c...
+..\FreeRTOS\timers.c(1092): error: At end of source:  #5: cannot open source input file "..\obj\timers.crf": Invalid argument
+..\FreeRTOS\timers.c: 0 warnings, 1 error
+compiling heap_4.c...
+..\FreeRTOS\portable\MemMang\heap_4.c(478): error: At end of source:  #5: cannot open source input file "..\obj\heap_4.crf": Invalid argument
+..\FreeRTOS\portable\MemMang\heap_4.c: 0 warnings, 1 error
+"..\OBJ\JX_FLY.axf" - 22 Error(s), 69 Warning(s).
+Target not created.
+Build Time Elapsed:  00:00:29

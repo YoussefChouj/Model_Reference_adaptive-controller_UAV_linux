@@ -74,84 +74,84 @@
 //#include "sys.h"
 #include "usart6.h"
 
-//Õë¶Ô²»Í¬µÄ±àÒëÆ÷µ÷ÓÃ²»Í¬µÄstdint.hÎÄ¼þ
+//ï¿½ï¿½Ô²ï¿½Í¬ï¿½Ä±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã²ï¿½Í¬ï¿½ï¿½stdint.hï¿½Ä¼ï¿½
 #if defined(__ICCARM__) || defined(__CC_ARM) || defined(__GNUC__)
     #include <stdint.h>
     extern uint32_t SystemCoreClock;
 #endif
 
-//¶ÏÑÔ
+//ï¿½ï¿½ï¿½ï¿½
 #define vAssertCalled(char,int) printf("Error:%s,%d\r\n",char,int)
 #define configASSERT(x) if((x)==0) vAssertCalled(__FILE__,__LINE__)
 
 /***************************************************************************************************************/
-/*                                        FreeRTOS»ù´¡ÅäÖÃÅäÖÃÑ¡Ïî                                              */
+/*                                        FreeRTOSï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                              */
 /***************************************************************************************************************/
-#define configUSE_PREEMPTION					1                       //1Ê¹ÓÃÇÀÕ¼Ê½ÄÚºË£¬0Ê¹ÓÃÐ­³Ì
-#define configUSE_TIME_SLICING					1						//1Ê¹ÄÜÊ±¼äÆ¬µ÷¶È(Ä¬ÈÏÊ½Ê¹ÄÜµÄ)
-#define configUSE_PORT_OPTIMISED_TASK_SELECTION	1                       //1ÆôÓÃÌØÊâ·½·¨À´Ñ¡ÔñÏÂÒ»¸öÒªÔËÐÐµÄÈÎÎñ
-                                                                        //Ò»°ãÊÇÓ²¼þ¼ÆËãÇ°µ¼ÁãÖ¸Áî£¬Èç¹ûËùÊ¹ÓÃµÄ
-                                                                        //MCUÃ»ÓÐÕâÐ©Ó²¼þÖ¸ÁîµÄ»°´ËºêÓ¦¸ÃÉèÖÃÎª0£¡
-#define configUSE_TICKLESS_IDLE					0                       //1ÆôÓÃµÍ¹¦ºÄticklessÄ£Ê½
-#define configUSE_QUEUE_SETS					1                       //Îª1Ê±ÆôÓÃ¶ÓÁÐ
-#define configCPU_CLOCK_HZ						(SystemCoreClock)       //CPUÆµÂÊ
-#define configTICK_RATE_HZ						(1000)                  //Ê±ÖÓ½ÚÅÄÆµÂÊ£¬ÕâÀïÉèÖÃÎª1000£¬ÖÜÆÚ¾ÍÊÇ1ms
-#define configMAX_PRIORITIES					(32)                    //¿ÉÊ¹ÓÃµÄ×î´óÓÅÏÈ¼¶
-#define configMINIMAL_STACK_SIZE				((unsigned short)130)   //¿ÕÏÐÈÎÎñÊ¹ÓÃµÄ¶ÑÕ»´óÐ¡
-#define configMAX_TASK_NAME_LEN					(16)                    //ÈÎÎñÃû×Ö×Ö·û´®³¤¶È
+#define configUSE_PREEMPTION					1                       //1Ê¹ï¿½ï¿½ï¿½ï¿½Õ¼Ê½ï¿½ÚºË£ï¿½0Ê¹ï¿½ï¿½Ð­ï¿½ï¿½
+#define configUSE_TIME_SLICING					1						//1Ê¹ï¿½ï¿½Ê±ï¿½ï¿½Æ¬ï¿½ï¿½ï¿½ï¿½(Ä¬ï¿½ï¿½Ê½Ê¹ï¿½Üµï¿½)
+#define configUSE_PORT_OPTIMISED_TASK_SELECTION	1                       //1ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â·½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Òªï¿½ï¿½ï¿½Ðµï¿½ï¿½ï¿½ï¿½ï¿½
+                                                                        //Ò»ï¿½ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½î£¬ï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½Ãµï¿½
+                                                                        //MCUÃ»ï¿½ï¿½ï¿½ï¿½Ð©Ó²ï¿½ï¿½Ö¸ï¿½ï¿½Ä»ï¿½ï¿½Ëºï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª0ï¿½ï¿½
+#define configUSE_TICKLESS_IDLE					0                       //1ï¿½ï¿½ï¿½ÃµÍ¹ï¿½ï¿½ï¿½ticklessÄ£Ê½
+#define configUSE_QUEUE_SETS					1                       //Îª1Ê±ï¿½ï¿½ï¿½Ã¶ï¿½ï¿½ï¿½
+#define configCPU_CLOCK_HZ						(SystemCoreClock)       //CPUÆµï¿½ï¿½
+#define configTICK_RATE_HZ						(1000)                  //Ê±ï¿½Ó½ï¿½ï¿½ï¿½Æµï¿½Ê£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª1000ï¿½ï¿½ï¿½ï¿½ï¿½Ú¾ï¿½ï¿½ï¿½1ms
+#define configMAX_PRIORITIES					(32)                    //ï¿½ï¿½Ê¹ï¿½Ãµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
+#define configMINIMAL_STACK_SIZE				((unsigned short)130)   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ÃµÄ¶ï¿½Õ»ï¿½ï¿½Ð¡
+#define configMAX_TASK_NAME_LEN					(16)                    //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-#define configUSE_16_BIT_TICKS					0                       //ÏµÍ³½ÚÅÄ¼ÆÊýÆ÷±äÁ¿Êý¾ÝÀàÐÍ£¬
-                                                                        //1±íÊ¾Îª16Î»ÎÞ·ûºÅÕûÐÎ£¬0±íÊ¾Îª32Î»ÎÞ·ûºÅÕûÐÎ
-#define configIDLE_SHOULD_YIELD					1                       //Îª1Ê±¿ÕÏÐÈÎÎñ·ÅÆúCPUÊ¹ÓÃÈ¨¸øÆäËûÍ¬ÓÅÏÈ¼¶µÄÓÃ»§ÈÎÎñ
-#define configUSE_TASK_NOTIFICATIONS            1                       //Îª1Ê±¿ªÆôÈÎÎñÍ¨Öª¹¦ÄÜ£¬Ä¬ÈÏ¿ªÆô
-#define configUSE_MUTEXES						1                       //Îª1Ê±Ê¹ÓÃ»¥³âÐÅºÅÁ¿
-#define configQUEUE_REGISTRY_SIZE				8                       //²»Îª0Ê±±íÊ¾ÆôÓÃ¶ÓÁÐ¼ÇÂ¼£¬¾ßÌåµÄÖµÊÇ¿ÉÒÔ
-                                                                        //¼ÇÂ¼µÄ¶ÓÁÐºÍÐÅºÅÁ¿×î´óÊýÄ¿¡£
-#define configCHECK_FOR_STACK_OVERFLOW			0                       //´óÓÚ0Ê±ÆôÓÃ¶ÑÕ»Òç³ö¼ì²â¹¦ÄÜ£¬Èç¹ûÊ¹ÓÃ´Ë¹¦ÄÜ
-                                                                        //ÓÃ»§±ØÐëÌá¹©Ò»¸öÕ»Òç³ö¹³×Óº¯Êý£¬Èç¹ûÊ¹ÓÃµÄ»°
-                                                                        //´ËÖµ¿ÉÒÔÎª1»òÕß2£¬ÒòÎªÓÐÁ½ÖÖÕ»Òç³ö¼ì²â·½·¨¡£
-#define configUSE_RECURSIVE_MUTEXES				1                       //Îª1Ê±Ê¹ÓÃµÝ¹é»¥³âÐÅºÅÁ¿
-#define configUSE_MALLOC_FAILED_HOOK			0                       //1Ê¹ÓÃÄÚ´æÉêÇëÊ§°Ü¹³×Óº¯Êý
+#define configUSE_16_BIT_TICKS					0                       //ÏµÍ³ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í£ï¿½
+                                                                        //1ï¿½ï¿½Ê¾Îª16Î»ï¿½Þ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î£ï¿½0ï¿½ï¿½Ê¾Îª32Î»ï¿½Þ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+#define configIDLE_SHOULD_YIELD					1                       //Îª1Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½CPUÊ¹ï¿½ï¿½È¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½
+#define configUSE_TASK_NOTIFICATIONS            1                       //Îª1Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¨Öªï¿½ï¿½ï¿½Ü£ï¿½Ä¬ï¿½Ï¿ï¿½ï¿½ï¿½
+#define configUSE_MUTEXES						1                       //Îª1Ê±Ê¹ï¿½Ã»ï¿½ï¿½ï¿½ï¿½Åºï¿½ï¿½ï¿½
+#define configQUEUE_REGISTRY_SIZE				8                       //ï¿½ï¿½Îª0Ê±ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½Ã¶ï¿½ï¿½Ð¼ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½Ç¿ï¿½ï¿½ï¿½
+                                                                        //ï¿½ï¿½Â¼ï¿½Ä¶ï¿½ï¿½Ðºï¿½ï¿½Åºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½
+#define configCHECK_FOR_STACK_OVERFLOW			0                       /* set to 2 to enable stack-overflow detection (needs vApplicationStackOverflowHook â€” see DEBUG-telemetry-bisect block in USER/main.c) */
+                                                                        //ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½á¹©Ò»ï¿½ï¿½Õ»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Óºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ÃµÄ»ï¿½
+                                                                        //ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½Îª1ï¿½ï¿½ï¿½ï¿½2ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ»ï¿½ï¿½ï¿½ï¿½ï¿½â·½ï¿½ï¿½ï¿½ï¿½
+#define configUSE_RECURSIVE_MUTEXES				1                       //Îª1Ê±Ê¹ï¿½ÃµÝ¹é»¥ï¿½ï¿½ï¿½Åºï¿½ï¿½ï¿½
+#define configUSE_MALLOC_FAILED_HOOK			0                       //1Ê¹ï¿½ï¿½ï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü¹ï¿½ï¿½Óºï¿½ï¿½ï¿½
 #define configUSE_APPLICATION_TASK_TAG			0                       
-#define configUSE_COUNTING_SEMAPHORES			1                       //Îª1Ê±Ê¹ÓÃ¼ÆÊýÐÅºÅÁ¿
+#define configUSE_COUNTING_SEMAPHORES			1                       //Îª1Ê±Ê¹ï¿½Ã¼ï¿½ï¿½ï¿½ï¿½Åºï¿½ï¿½ï¿½
 
 /***************************************************************************************************************/
-/*                                FreeRTOSÓëÄÚ´æÉêÇëÓÐ¹ØÅäÖÃÑ¡Ïî                                                */
+/*                                FreeRTOSï¿½ï¿½ï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¹ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                                */
 /***************************************************************************************************************/
-#define configSUPPORT_DYNAMIC_ALLOCATION        1                       //Ö§³Ö¶¯Ì¬ÄÚ´æÉêÇë
-#define configTOTAL_HEAP_SIZE					((size_t)(20*1024))     //ÏµÍ³ËùÓÐ×ÜµÄ¶Ñ´óÐ¡
+#define configSUPPORT_DYNAMIC_ALLOCATION        1                       //Ö§ï¿½Ö¶ï¿½Ì¬ï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½
+#define configTOTAL_HEAP_SIZE					((size_t)(20*1024))     //ÏµÍ³ï¿½ï¿½ï¿½ï¿½ï¿½ÜµÄ¶Ñ´ï¿½Ð¡
 
 /***************************************************************************************************************/
-/*                                FreeRTOSÓë¹³×Óº¯ÊýÓÐ¹ØµÄÅäÖÃÑ¡Ïî                                              */
+/*                                FreeRTOSï¿½ë¹³ï¿½Óºï¿½ï¿½ï¿½ï¿½Ð¹Øµï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                              */
 /***************************************************************************************************************/
-#define configUSE_IDLE_HOOK						0                       //1£¬Ê¹ÓÃ¿ÕÏÐ¹³×Ó£»0£¬²»Ê¹ÓÃ
-#define configUSE_TICK_HOOK						0                       //1£¬Ê¹ÓÃÊ±¼äÆ¬¹³×Ó£»0£¬²»Ê¹ÓÃ
+#define configUSE_IDLE_HOOK						0                       //1ï¿½ï¿½Ê¹ï¿½Ã¿ï¿½ï¿½Ð¹ï¿½ï¿½Ó£ï¿½0ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½
+#define configUSE_TICK_HOOK						0                       //1ï¿½ï¿½Ê¹ï¿½ï¿½Ê±ï¿½ï¿½Æ¬ï¿½ï¿½ï¿½Ó£ï¿½0ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½
 
 /***************************************************************************************************************/
-/*                                FreeRTOSÓëÔËÐÐÊ±¼äºÍÈÎÎñ×´Ì¬ÊÕ¼¯ÓÐ¹ØµÄÅäÖÃÑ¡Ïî                                 */
+/*                                FreeRTOSï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½Õ¼ï¿½ï¿½Ð¹Øµï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                 */
 /***************************************************************************************************************/
-#define configGENERATE_RUN_TIME_STATS	        0                       //Îª1Ê±ÆôÓÃÔËÐÐÊ±¼äÍ³¼Æ¹¦ÄÜ
-#define configUSE_TRACE_FACILITY				1                       //Îª1ÆôÓÃ¿ÉÊÓ»¯¸ú×Ùµ÷ÊÔ
-#define configUSE_STATS_FORMATTING_FUNCTIONS	1                       //ÓëºêconfigUSE_TRACE_FACILITYÍ¬Ê±Îª1Ê±»á±àÒëÏÂÃæ3¸öº¯Êý
+#define configGENERATE_RUN_TIME_STATS	        0                       //Îª1Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½Í³ï¿½Æ¹ï¿½ï¿½ï¿½
+#define configUSE_TRACE_FACILITY				1                       //Îª1ï¿½ï¿½ï¿½Ã¿ï¿½ï¿½Ó»ï¿½ï¿½ï¿½ï¿½Ùµï¿½ï¿½ï¿½
+#define configUSE_STATS_FORMATTING_FUNCTIONS	1                       //ï¿½ï¿½ï¿½configUSE_TRACE_FACILITYÍ¬Ê±Îª1Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½3ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                                                                         //prvWriteNameToBuffer(),vTaskList(),
                                                                         //vTaskGetRunTimeStats()
                                                                         
 /***************************************************************************************************************/
-/*                                FreeRTOSÓëÐ­³ÌÓÐ¹ØµÄÅäÖÃÑ¡Ïî                                                  */
+/*                                FreeRTOSï¿½ï¿½Ð­ï¿½ï¿½ï¿½Ð¹Øµï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                                  */
 /***************************************************************************************************************/
-#define configUSE_CO_ROUTINES 			        0                       //Îª1Ê±ÆôÓÃÐ­³Ì£¬ÆôÓÃÐ­³ÌÒÔºó±ØÐëÌí¼ÓÎÄ¼þcroutine.c
-#define configMAX_CO_ROUTINE_PRIORITIES         ( 2 )                   //Ð­³ÌµÄÓÐÐ§ÓÅÏÈ¼¶ÊýÄ¿
+#define configUSE_CO_ROUTINES 			        0                       //Îª1Ê±ï¿½ï¿½ï¿½ï¿½Ð­ï¿½Ì£ï¿½ï¿½ï¿½ï¿½ï¿½Ð­ï¿½ï¿½ï¿½Ôºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½croutine.c
+#define configMAX_CO_ROUTINE_PRIORITIES         ( 2 )                   //Ð­ï¿½Ìµï¿½ï¿½ï¿½Ð§ï¿½ï¿½ï¿½È¼ï¿½ï¿½ï¿½Ä¿
 
 /***************************************************************************************************************/
-/*                                FreeRTOSÓëÈí¼þ¶¨Ê±Æ÷ÓÐ¹ØµÄÅäÖÃÑ¡Ïî                                            */
+/*                                FreeRTOSï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½Ð¹Øµï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                            */
 /***************************************************************************************************************/
-#define configUSE_TIMERS				        1                               //Îª1Ê±ÆôÓÃÈí¼þ¶¨Ê±Æ÷
-#define configTIMER_TASK_PRIORITY		        (configMAX_PRIORITIES-1)        //Èí¼þ¶¨Ê±Æ÷ÓÅÏÈ¼¶
-#define configTIMER_QUEUE_LENGTH		        5                               //Èí¼þ¶¨Ê±Æ÷¶ÓÁÐ³¤¶È
-#define configTIMER_TASK_STACK_DEPTH	        (configMINIMAL_STACK_SIZE*2)    //Èí¼þ¶¨Ê±Æ÷ÈÎÎñ¶ÑÕ»´óÐ¡
+#define configUSE_TIMERS				        1                               //Îª1Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½
+#define configTIMER_TASK_PRIORITY		        (configMAX_PRIORITIES-1)        //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
+#define configTIMER_QUEUE_LENGTH		        5                               //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Ð³ï¿½ï¿½ï¿½
+#define configTIMER_TASK_STACK_DEPTH	        (configMINIMAL_STACK_SIZE*2)    //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õ»ï¿½ï¿½Ð¡
 
 /***************************************************************************************************************/
-/*                                FreeRTOS¿ÉÑ¡º¯ÊýÅäÖÃÑ¡Ïî                                                      */
+/*                                FreeRTOSï¿½ï¿½Ñ¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                                      */
 /***************************************************************************************************************/
 #define INCLUDE_xTaskGetSchedulerState          1                       
 #define INCLUDE_vTaskPrioritySet		        1
@@ -165,7 +165,7 @@
 #define INCLUDE_xTimerPendFunctionCall	        1
 
 /***************************************************************************************************************/
-/*                                FreeRTOSÓëÖÐ¶ÏÓÐ¹ØµÄÅäÖÃÑ¡Ïî                                                  */
+/*                                FreeRTOSï¿½ï¿½ï¿½Ð¶ï¿½ï¿½Ð¹Øµï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                                  */
 /***************************************************************************************************************/
 #ifdef __NVIC_PRIO_BITS
 	#define configPRIO_BITS       		__NVIC_PRIO_BITS
@@ -173,13 +173,13 @@
 	#define configPRIO_BITS       		4                  
 #endif
 
-#define configLIBRARY_LOWEST_INTERRUPT_PRIORITY			15                      //ÖÐ¶Ï×îµÍÓÅÏÈ¼¶
-#define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY	5                       //ÏµÍ³¿É¹ÜÀíµÄ×î¸ßÖÐ¶ÏÓÅÏÈ¼¶
+#define configLIBRARY_LOWEST_INTERRUPT_PRIORITY			15                      //ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
+#define configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY	5                       //ÏµÍ³ï¿½É¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½È¼ï¿½
 #define configKERNEL_INTERRUPT_PRIORITY 		( configLIBRARY_LOWEST_INTERRUPT_PRIORITY << (8 - configPRIO_BITS) )
 #define configMAX_SYSCALL_INTERRUPT_PRIORITY 	( configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS) )
 
 /***************************************************************************************************************/
-/*                                FreeRTOSÓëÖÐ¶Ï·þÎñº¯ÊýÓÐ¹ØµÄÅäÖÃÑ¡Ïî                                          */
+/*                                FreeRTOSï¿½ï¿½ï¿½Ð¶Ï·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¹Øµï¿½ï¿½ï¿½ï¿½ï¿½Ñ¡ï¿½ï¿½                                          */
 /***************************************************************************************************************/
 #define xPortPendSVHandler 	PendSV_Handler
 #define vPortSVCHandler 	SVC_Handler

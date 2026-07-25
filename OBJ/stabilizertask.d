@@ -92,3 +92,4 @@
 ..\obj\stabilizertask.o: ..\API\sysid.h
 ..\obj\stabilizertask.o: ..\API\rc_input.h
 ..\obj\stabilizertask.o: ..\API\flight_fsm.h
+..\obj\stabilizertask.o: ..\API\calib.h

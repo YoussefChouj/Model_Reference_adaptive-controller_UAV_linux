@@ -11,6 +11,41 @@
 #include "rpm.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "imu_update.h"  /* imu_data, Lin_Acc_X/Y_body */
+#include "calib.h"       /* CalTrim_t, CalHot_t */
+#include "ekf.h"         /* Ekf9_t, ADR-0011 9-state EKF */
+
+/* Body-frame gyroscope rates (rad/s) — needed for Frame C body-rate telemetry.
+ * Declared as extern in bmi088_driver.h. */
+extern FP32 Gyro_X_Real;
+extern FP32 Gyro_Y_Real;
+extern FP32 Gyro_Z_Real;
+
+/* ADR-0011: calibration state from TASK/StabilizerTask.c */
+extern volatile uint8_t g_of_bias_capture_req; /* CMD 0x17 one-shot OF bias capture req */
+extern CalTrim_t s_cal_trim;   /* accel bias (mg), from TASK/StabilizerTask.c */
+extern CalHot_t  s_cal_hot;    /* gyro bias (rad/s), from TASK/StabilizerTask.c */
+extern uint16_t  g_cal_health; /* bitmask, from TASK/StabilizerTask.c */
+
+/* ADR-0011: estimator readiness from API/imu_update.c */
+extern uint8_t g_estimator_ready;
+
+/* EKF run gate — 1 = the filter predict/update actually executes (s_ekf.active=1).
+ * Observe the running state directly over SWD (ground_station/livewatch, no wire
+ * bytes), so running is decoupled from telemetry emission below. */
+#ifndef EKF_RUN_ENABLED
+#define EKF_RUN_ENABLED 1
+#endif
+
+/* EKF telemetry gate — flip EKF_TELEM_ENABLED to 1 to emit EKF fields in the 0x05
+ * frame (+20 bytes). Default 0: EKF may run (see EKF_RUN_ENABLED) but emits no extra
+ * bytes, so the 0x05 layout stays a compatible contract with serial_bridge.py. */
+#ifndef EKF_TELEM_ENABLED
+#define EKF_TELEM_ENABLED 1
+#endif
+
+static Ekf9_t s_ekf;          /* ADR-0011 parallel EKF instance */
+static uint8_t s_ekf_inited = 0U;
 
 /**
  * @module  send_data.c
@@ -21,6 +56,33 @@
  */
 
 _linux_flag stm32_to_linux_flag;
+
+/* CRC16-CCITT (XModem) — used for Frame C checksum. */
+static uint16_t crc16_xmodem(const uint8_t* data, uint16_t len)
+{
+    uint16_t crc = 0x0000U;
+    uint16_t i;
+    while (len--) {
+        crc ^= (uint16_t)(*data++) << 8;
+        for (i = 0; i < 8; i++) {
+            if (crc & 0x8000U) {
+                crc = (crc << 1) ^ 0x1021U;
+            } else {
+                crc <<= 1;
+            }
+        }
+    }
+    return crc;
+}
+
+/* Frame C body-rate/attitude/position telemetry (0x06, 50 Hz).
+ * Emitted back-to-back with Frame A inside the same DMA TX call so they are atomic on wire.
+ * Layout (50 B payload): rol, pit, yaw, gyro[3], earth_x, earth_y, altitude, rpm[4], seq_hi, seq_lo.
+ * CRC16 covers [frame_type | LEN_hi | LEN_lo | MAX_NUM_BASIS | payload bytes].
+ * SerialBridge ignores 0x06 on firmware older than GS_PROTO_VERSION v13. */
+static uint8_t  s_frame_c_buf[60] = {0};
+static uint16_t s_frame_c_seq      = 0U;
+
 /*************************************************************************
 �� �� ����void ANO_Report_UserData1(void)
 �������ܣ����ߴ��ڷ�������
@@ -231,6 +293,17 @@ void send_to_linux(void)    //����4
 	DataBuf_to_linux[50]= BYTE2(senddata[12]) ;//    
 	DataBuf_to_linux[51]= BYTE3(senddata[12]) ;// 
 	
+  /* UART4 was disabled 2026-07-21 (PA0/PA1 repurposed as RPM inputs — see BSP.c
+   * / BSP/rpm.h). With UART4 unclocked, its TX DMA (DMA1_Stream4) never drains,
+   * so the busy-wait below would spin forever and hang Send_Task — which halts
+   * ALL ground-station telemetry (UART5). Skip the transfer while UART4 is
+   * disabled; re-enabling UART4_Configuration() makes this path live again with
+   * no further change. Root cause of the 2026-07-22 "connected but telemetry
+   * stale" outage. */
+  if ((UART4->CR1 & USART_CR1_UE) == 0U) {
+      return;
+  }
+
   while(DMA_GetCurrDataCounter(DMA1_Stream4));		   //��֮ǰ�ķ���
   DMA_ClearITPendingBit(DMA1_Stream4, DMA_IT_TCIF4); //����DMA_Mode_Normal,����û��ʹ������ж�ҲҪ�������������ֻ��һ��
     
@@ -299,10 +372,48 @@ void Send_Groundstation_Telemetry_UART4(void)
     uint16_t len = 0;
     uint8_t crc = 0;
     int i;
-    
+    /* Set to 1 when the built frame(s) already carry their own trailing checksum
+     * (Frame A closes its own CRC8 before Frame C is appended). When set, the
+     * shared XOR-CRC8 at the end of this function is skipped so it does not
+     * clobber the framing. Stays 0 for single-frame buffers (B / ID / bench / OF). */
+    uint8_t frame_self_crc = 0;
+
     Buf_Telemetry_UART4[0] = 0xAA;
     Buf_Telemetry_UART4[1] = 0xBB;
-    
+
+    /* EKF step: runs every 200 Hz Send_Task tick, unconditionally — independent of
+     * which telemetry frame this tick happens to emit. Previously this lived inside
+     * the `of_frame_on` branch below, which meant the estimator only ran while the
+     * ground station had frame 0x05 selected (nothing toggles that in normal
+     * operation), silently defeating the EKF_RUN_ENABLED/EKF_TELEM_ENABLED split
+     * meant to decouple "does it run" from "do we transmit it" (ADR-0011).
+     * dt = 0.005 s (5 ms, 200 Hz control tick). IMU accel is in mg -> convert to m/s^2. */
+    if (!s_ekf_inited) {
+        Ekf9_Init(&s_ekf, EKF_RUN_ENABLED);
+        s_ekf_inited = 1U;
+    }
+    if (s_ekf.active) {
+        float ax = Acc_X_Real * 0.001f;  /* mg -> m/s^2 */
+        float ay = Acc_Y_Real * 0.001f;
+        float az = Acc_Z_Real * 0.001f;
+        Ekf9_Predict(&s_ekf, ax, ay, az, Gyro_X_Real, Gyro_Y_Real, Gyro_Z_Real, 0.005f);
+        /* OF measurement: quality gate (same threshold as control loop) */
+        if (ano_of.of_quality >= 50) {
+            float ofx = (float)ano_of.of2_dx_fix * 0.01f; /* s16 0.01 m/s -> float m/s */
+            float ofy = (float)ano_of.of2_dy_fix * 0.01f;
+            Ekf9_UpdateOf(&s_ekf, ofx, ofy);
+        }
+        /* Accel measurement: gravity-removed, mg -> m/s^2 */
+        Ekf9_UpdateAccXY(&s_ekf,
+                         Lin_Acc_X_body * 0.001f,
+                         Lin_Acc_Y_body * 0.001f);
+        /* Z-rate: use the smoothed derivative of of2_h computed in StabilizerTask
+         * (of2_h_f2_v is the LP-filtered d(altitude)/dt, m/s). This is the same
+         * signal that feeds Ctrler.Z_ratePID.FB so the EKF and the control loop
+         * see the same vertical velocity. */
+        Ekf9_UpdateZRate(&s_ekf, ano_of.of2_h_f2_v);
+    }
+
     if (motor_test_active) // FRAME 0x04 — motor bench-test stream @100Hz (replaces A/B while active)
     {
         // Payload (20 B): u32 sample_counter, u8 motor_id, u16 commanded_ccr, f real_voltage, u8 active,
@@ -427,18 +538,29 @@ void Send_Groundstation_Telemetry_UART4(void)
     }
     else if (mrac_flags.of_frame_on) // FRAME 0x05 — OF calibration/fusion raw stream @200Hz (replaces A/B while active)
     {
-        // Payload (39 B): u16 sample_counter, s16 of2_dx_fix/dy_fix (tilt-comp body-frame velocity),
-        // s16 of2_dx/dy (raw velocity cross-check), s16 Acc_X/Y_Real (body accel incl gravity, mg),
-        // s16 Lin_Acc_X/Y_body (gravity-removed body accel, mg — fusion input),
-        // s16 yaw/pit/rol (0.01 deg; yaw is atan2 so ±180 fits s16 at 0.01), s16 s_of_bias_x/y
-        // (0.01 raw units; firmware v3 bias), u16 of_alt_cm (cm), f earth_x/earth_y (firmware-
-        // integrated world position), u8 of_quality.
-        // Purpose: RAW log (no filter) for offline IMU+OF fusion — derive the of2_dx_fix→m/s scale,
-        // tune complementary/Kalman filters offline, and validate firmware integration vs offline.
-        // Streams at 200 Hz via Send_Task's high-rate path (main.c). sample_counter detects dropped
-        // frames (u16 wraps ~5.5 min @200Hz — fine for gap detection). See docs/tracking_baseline_and_drift.md.
+        // Payload layout (v14):
+        //  2   u16 sample_counter
+        //  4   s16 of2_dx_fix/dy_fix    (0.01 m/s, tilt-comp body velocity)
+        //  8   s16 of2_dx/dy            (0.01 m/s, raw velocity cross-check)
+        //  4   s16 Acc_X/Y_Real          (1 mg, body-frame accel incl gravity)
+        //  4   s16 Lin_Acc_X/Y_body      (1 mg, gravity-removed fusion input)
+        //  6   s16 yaw/pit/rol           (0.01 deg)
+        //  4   s16 s_of_bias_x/y         (0.01 raw units, firmware v3 bias)
+        //  2   u16 of_alt_cm             (cm)
+        //  8   f earth_x/earth_y         (integrated world position, m)
+        //  1   u8  of_quality
+        // --- ADR-0011 always-on additions ---
+        //  6   s16 acc_bias[3]           (1 mg, s_cal_trim.b_a)
+        //  6   s16 gyro_bias[3]          (1e-4 rad/s, s_cal_hot.b_g)
+        //  2   u16 cal_health            (bitmask from g_cal_health)
+        // --- ADR-0011 EKF additions (EKF_TELEM_ENABLED=1 only) ---
+        //  6   s16 v_body[3]            (1 mm/s, EKF x[0..2])
+        //  6   s16 P_diag[3]            (1e-3, EKF P[0,0],P[1,1],P[2,2])
+        //  2   s16 NIS                  (1e-3)
+        //  6   s16 K_last[3]            (1e-3, K[0..2])
+        // Total: 39 + 14 = 53 B always-on; 53 + 20 = 73 B with EKF_TELEM_ENABLED=1
         static uint16_t of_sample_counter = 0;
-        uint16_t payload_len = 39U;
+        uint16_t payload_len = (EKF_TELEM_ENABLED) ? 73U : 53U;
         int16_t s16v;
         float ex, ey;
 
@@ -485,13 +607,53 @@ void Send_Groundstation_Telemetry_UART4(void)
         Buf_Telemetry_UART4[len++] = BYTE3(ey);
 
         Buf_Telemetry_UART4[len++] = ano_of.of_quality;
+
+        /* ADR-0011 §"Telemetry surface": always-on calibration fields */
+        /* acc_bias[3]: s16, 1 mg scale (s_cal_trim.b_a is already in mg).
+         * Hand-rolled byte stores to match the existing tail pattern (OF_PUT_S16 was
+         * #undef'd at line 552 when the alt/earth/quality fields moved to raw bytes). */
+        {
+            int16_t _v;
+            _v = (int16_t)s_cal_trim.b_a[0]; Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)s_cal_trim.b_a[1]; Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)s_cal_trim.b_a[2]; Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            /* gyro_bias[3]: s16, 1e-4 rad/s scale */
+            _v = (int16_t)(s_cal_hot.b_g[0] * 1e4f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_cal_hot.b_g[1] * 1e4f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_cal_hot.b_g[2] * 1e4f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+        }
+        /* cal_health: u16 bitmask */
+        Buf_Telemetry_UART4[len++] = (uint8_t)(g_cal_health & 0xFFU);
+        Buf_Telemetry_UART4[len++] = (uint8_t)((g_cal_health >> 8) & 0xFFU);
+
+        /* EKF step now runs unconditionally above (before the frame-select chain);
+         * this branch only emits its telemetry when EKF_TELEM_ENABLED. */
+#if EKF_TELEM_ENABLED
+        /* EKF telemetry: v_body[3] (mm/s), P_diag[3] (1e-3), NIS (1e-3), K_last[3] (1e-3).
+         * Hand-rolled byte stores (same pattern as the acc/gyro bias fields above). */
+        {
+            int16_t _v;
+            _v = (int16_t)(s_ekf.x[0] * 1000.0f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.x[1] * 1000.0f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.x[2] * 1000.0f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.P[0 * 9U + 0U] * 1e3f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.P[1 * 9U + 1U] * 1e3f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.P[2 * 9U + 2U] * 1e3f); Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.nis * 1e3f);         Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.k_last[0] * 1e3f);  Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.k_last[1] * 1e3f);  Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+            _v = (int16_t)(s_ekf.k_last[2] * 1e3f);  Buf_Telemetry_UART4[len++] = BYTE0(_v); Buf_Telemetry_UART4[len++] = BYTE1(_v);
+        }
+#endif
+        #undef OF_PUT_S16
+
         of_sample_counter++;
     }
     else if (frame_counter % 5 != 0) // 100Hz Frame A
     {
         // FRAME A �� header: [type][LEN_hi][LEN_lo][MAX_NUM_BASIS], payload 37 bytes (16-bit LEN)
         {
-            uint16_t payload_len = 39U; /* +1 rc_authority +1 GS_PROTO_VERSION */
+            uint16_t payload_len = 41U; /* +1 rc_authority +1 of_hold +1 estimator_ready +1 GS_PROTO_VERSION */
             Buf_Telemetry_UART4[2] = 0x01; // ID
             Buf_Telemetry_UART4[3] = (uint8_t)(payload_len >> 8);
             Buf_Telemetry_UART4[4] = (uint8_t)(payload_len & 0xFFU);
@@ -520,7 +682,115 @@ void Send_Groundstation_Telemetry_UART4(void)
         Buf_Telemetry_UART4[len++] = (uint8_t)(TWC.execute != 0 ? 1 : 0);
         Buf_Telemetry_UART4[len++] = TWC_arrived;
         Buf_Telemetry_UART4[len++] = RCInput_GetAuthority(); /* 1=PC authority, 0=RC */
+        Buf_Telemetry_UART4[len++] = g_of_hold_active; /* 1=OF position-hold, 0=angle mode (ch6) */
+        Buf_Telemetry_UART4[len++] = g_estimator_ready; /* 1=estimator converged/armable, 0=warming up */
         Buf_Telemetry_UART4[len++] = GS_PROTO_VERSION; /* protocol version — must match serial_bridge.py */
+
+        /* Close Frame A with its OWN XOR-CRC8 before appending Frame C, so Frame A
+         * is a valid standalone frame on the wire. Without this, Frame C's bytes
+         * follow Frame A's payload directly and the host reads Frame C's sync byte
+         * as Frame A's CRC -> Frame A always fails CRC and telemetry goes stale. */
+        {
+            uint8_t a_crc = 0;
+            uint16_t k;
+            for (k = 2; k < len; k++) {
+                a_crc ^= Buf_Telemetry_UART4[k];
+            }
+            Buf_Telemetry_UART4[len++] = a_crc;
+        }
+        frame_self_crc = 1; /* Frame A already has its CRC; skip the shared CRC8 below. */
+
+        /* Frame C (0x06) — attitude / body-rate / position @ 50 Hz.
+         * Built only when this is a Frame-A call (frame_counter % 10 != 5),
+         * then sent back-to-back with Frame A so they are atomic on the wire.
+         * A: 6+41+1 = 48 B; C: 6+46+2 = 54 B; combined = 102 B -> ~8.9 ms UART time -> fits 10 ms slot.
+         * SerialBridge silently ignores 0x06 on firmware < v13 (checks via proto_version). */
+        if (frame_counter % 10 != 5) {
+            uint16_t c_len = 0;
+            uint16_t c_payload_len;
+            uint16_t c_crc;
+            float tf;
+
+            s_frame_c_buf[0] = 0xAA;
+            s_frame_c_buf[1] = 0xBB;
+            s_frame_c_buf[2] = 0x06;
+            /* LEN (indices 3,4) is backfilled from the actual bytes written once the
+             * payload is complete — see below — so it can never drift from the layout. */
+            s_frame_c_buf[5] = MAX_NUM_BASIS;
+            c_len = 6;
+
+            /* rol, pit, yaw (deg) */
+            tf = imu_data.rol;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+            tf = imu_data.pit;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+            tf = imu_data.yaw;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+
+            /* gyro_rad[3] (rad/s) — from BMI088 driver, pre-filter */
+            tf = Gyro_X_Real;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+            tf = Gyro_Y_Real;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+            tf = Gyro_Z_Real;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+
+            /* earth_x, earth_y (m), altitude (m) */
+            tf = ano_of.earth_x;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+            tf = ano_of.earth_y;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+            tf = (float)ano_of.of_alt_cm / 100.0f;
+            s_frame_c_buf[c_len++] = BYTE0(tf); s_frame_c_buf[c_len++] = BYTE1(tf);
+            s_frame_c_buf[c_len++] = BYTE2(tf); s_frame_c_buf[c_len++] = BYTE3(tf);
+
+            /* rpm[4] (RPM, u16 LE) — read once, streamed in Frame C and Frame 0x04 */
+            {
+                uint8_t ri;
+                for (ri = 0; ri < RPM_NUM_CH; ri++) {
+                    uint16_t rpm = RPM_Get(ri);
+                    s_frame_c_buf[c_len++] = (uint8_t)(rpm & 0xFFU);
+                    s_frame_c_buf[c_len++] = (uint8_t)((rpm >> 8) & 0xFFU);
+                }
+            }
+
+            /* sequence number (wrapping u16) */
+            s_frame_c_buf[c_len++] = (uint8_t)(s_frame_c_seq & 0xFFU);
+            s_frame_c_buf[c_len++] = (uint8_t)((s_frame_c_seq >> 8) & 0xFFU);
+            s_frame_c_seq++;
+
+            /* Backfill LEN from the actual payload written (everything after the
+             * 6-byte header): currently 9 floats + 4*u16 rpm + u16 seq = 46 B. */
+            c_payload_len = (uint16_t)(c_len - 6U);
+            s_frame_c_buf[3] = (uint8_t)(c_payload_len >> 8);
+            s_frame_c_buf[4] = (uint8_t)(c_payload_len & 0xFFU);
+
+            /* CRC16-CCITT (XModem) over [frame_type | LEN_hi | LEN_lo | MAX_NUM_BASIS | payload]
+             * = every byte from index 2 up to (but not including) the CRC itself = c_len-2. */
+            c_crc = crc16_xmodem(&s_frame_c_buf[2], (uint16_t)(c_len - 2U));
+            s_frame_c_buf[c_len++] = (uint8_t)(c_crc >> 8);
+            s_frame_c_buf[c_len++] = (uint8_t)(c_crc & 0xFFU);
+            /* c_len is now 54: 6 header + 46 payload + 2 CRC — fits s_frame_c_buf[60]. */
+
+            /* Append Frame C directly after Frame A in the TX buffer.
+             * Buf_Telemetry_UART4[512] has headroom: max frame is B at ~326 B + 7 header = 333 B.
+             * A(48 B) + C(54 B) = 102 B — well within 512 B. */
+            {
+                uint16_t j;
+                for (j = 0; j < c_len; j++) {
+                    Buf_Telemetry_UART4[len + j] = s_frame_c_buf[j];
+                }
+                len += c_len;
+            }
+        }
     }
     else // 20Hz Frame B
     {
@@ -639,23 +909,39 @@ void Send_Groundstation_Telemetry_UART4(void)
     
     // CONSTRAINT: CRC coverage must match the host parser exactly.
     // WHY: Any mismatch causes silent frame drops in serial_bridge.
-    /* CRC8 XOR over all bytes after sync: frame type, 16-bit LEN, MAX_NUM_BASIS, payload (index 2 .. len-1) */
-    crc = 0;
-    for (i = 2; i < len; i++) {
-        crc ^= Buf_Telemetry_UART4[i];
+    /* CRC8 XOR over all bytes after sync: frame type, 16-bit LEN, MAX_NUM_BASIS, payload (index 2 .. len-1).
+     * Skipped when the buffer already carries its own checksum(s) — i.e. the Frame A + Frame C
+     * path, where Frame A closed its own CRC8 above and Frame C carries its own CRC16. */
+    if (!frame_self_crc) {
+        crc = 0;
+        for (i = 2; i < len; i++) {
+            crc ^= Buf_Telemetry_UART4[i];
+        }
+        Buf_Telemetry_UART4[len++] = crc;
     }
-    Buf_Telemetry_UART4[len++] = crc;
     
     frame_counter++;
     
     // DMA transfer on UART5 wireless link (DMA1_Stream7)
-    while(DMA_GetCurrDataCounter(DMA1_Stream7)); 
-    DMA_ClearITPendingBit(DMA1_Stream7, DMA_IT_TCIF7); 
+    while(DMA_GetCurrDataCounter(DMA1_Stream7));
 
-    DMA_Cmd(DMA1_Stream7, DISABLE);				             
-    DMA1_Stream7->M0AR = (uint32_t)&Buf_Telemetry_UART4;  
-    DMA1_Stream7->NDTR = len;     
-    DMA_Cmd(DMA1_Stream7, ENABLE);		
+    DMA_Cmd(DMA1_Stream7, DISABLE);
+    /* Wait for the stream to actually stop before rewriting M0AR/NDTR — the EN
+     * bit clears only once the current burst has drained; reconfiguring early
+     * corrupts the transfer. */
+    while (DMA_GetCmdStatus(DMA1_Stream7) == ENABLE);
+
+    /* Clear ALL stream-7 event flags before re-enabling, not just TCIF7. The
+     * larger back-to-back Frame A+C burst latches a (benign) FIFO-error FEIF7
+     * on the direct-mode stream; per RM0090 every event flag must be cleared
+     * before EN is set again, so clearing only TCIF7 is fragile. Defensive —
+     * lets the stream self-heal from any transient DMA error. */
+    DMA_ClearFlag(DMA1_Stream7, DMA_FLAG_TCIF7 | DMA_FLAG_HTIF7 | DMA_FLAG_TEIF7
+                              | DMA_FLAG_DMEIF7 | DMA_FLAG_FEIF7);
+
+    DMA1_Stream7->M0AR = (uint32_t)&Buf_Telemetry_UART4;
+    DMA1_Stream7->NDTR = len;
+    DMA_Cmd(DMA1_Stream7, ENABLE);
 }
 
 typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;
@@ -1021,18 +1307,55 @@ void Process_GroundStation_Command(void)
          * to avoid a sudden jump on the next control tick. */
         else if (id == 0x10) {
             if (idx == 0) {
-                ano_of.earth_x       = 0.0f;
-                ano_of.earth_y       = 0.0f;
-                ano_of.earth_x_ture  = 0.0f;
-                ano_of.earth_y_ture  = 0.0f;
-                ano_of.DISTANCE_X    = 0.0f;
-                ano_of.DISTANCE_Y    = 0.0f;
-                Ctrler.locxPID.FB    = 0.0f;
-                Ctrler.locyPID.FB    = 0.0f;
-                Ctrler.locxPID.Des   = 0.0f;
-                Ctrler.locyPID.Des   = 0.0f;
-                Ctrler.locxsPID.Des  = 0.0f;
-                Ctrler.locysPID.Des  = 0.0f;
+                Reset_World_Origin();
+            }
+        }
+
+        /* CMD 0x17 — one-shot optical-flow velocity-bias capture.
+         * Pilot places the drone level and still, then triggers this; the stabilizer
+         * task averages of2_dx_fix/dy_fix over ~2 s and stores the bias (streamed back
+         * as of.bias_x/y in the 0x05 frame so the capture can be confirmed). Fixes the
+         * unbounded earth_x/y drift (~25 m/200 s) caused by the un-subtracted DC bias. */
+        else if (id == 0x17) {
+            if (idx == 0) {
+                g_of_bias_capture_req = 1U;
+            }
+        }
+
+        /* CMD 0x18 — force recalibration (ADR-0011).
+         * Re-enters cold-cal from the top. Accepted only in GROUND_IDLE and DisArmed.
+         * Resets: s_cal_trim, s_cal_hot, g_cal_health, g_estimator_ready, EKF. */
+        else if (id == 0x18) {
+            if (idx == 0) {
+                if (flight_phase != FLIGHT_PHASE_GROUND_IDLE ||
+                    DroneStatus.ARM_Status != DisArmed) {
+                    /* refused: not in pre-flight ground-idle state */
+                } else {
+                    /* Reset accel bias to zero */
+                    s_cal_trim.b_a[0] = 0.0f;
+                    s_cal_trim.b_a[1] = 0.0f;
+                    s_cal_trim.b_a[2] = 0.0f;
+                    s_cal_trim.state = CAL_TRIM_STATE_WAIT_TAKEOFF;
+                    s_cal_trim.run_ticks = 0U;
+                    s_cal_trim.settled_ticks = 0U;
+                    /* Reset gyro bias to zero */
+                    s_cal_hot.b_g[0] = 0.0f;
+                    s_cal_hot.b_g[1] = 0.0f;
+                    s_cal_hot.b_g[2] = 0.0f;
+                    s_cal_hot.state = CAL_HOT_STATE_WAIT_STILL;
+                    s_cal_hot.still_tick = 0U;
+                    s_cal_hot.acc_tick = 0U;
+                    s_cal_hot.rejected = 0U;
+                    s_cal_hot.cleared = 1U;
+                    /* Clear health flags but preserve MANUAL_ORIGIN_RESET (0x80) */
+                    g_cal_health = 0x80U;   /* MANUAL_ORIGIN_RESET sticky */
+                    /* Force cold cal to re-run from top */
+                    g_estimator_ready = 0U;
+                    /* Re-init EKF */
+                    if (s_ekf_inited) {
+                        Ekf9_Init(&s_ekf, EKF_RUN_ENABLED);
+                    }
+                }
             }
         }
 

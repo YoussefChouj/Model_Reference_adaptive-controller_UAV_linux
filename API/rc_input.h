@@ -73,6 +73,14 @@ uint8_t RCInput_GetAuthority(void);
  */
 void    RCInput_Update(void);
 
+/*
+ * Call once per 10 ms from remoter_task(), after the Remoter.*Ctrler fields and
+ * sbus_lost have been refreshed. Auto-captures the physical stick neutral for
+ * pitch/roll/yaw once at boot (transmitter centre can sit off the nominal 3000
+ * raw units) so released sticks read true zero. Throttle is never offset.
+ */
+void    RCInput_UpdateNeutral(void);
+
 /* Returns 1 once after a heartbeat timeout (clears on next call to RCInput_SetAuthority). */
 int     RCInput_IsHeartbeatLost(void);
 

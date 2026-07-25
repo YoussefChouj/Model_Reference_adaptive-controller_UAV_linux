@@ -3,6 +3,72 @@
 #include "mrac.h"
 #include "gyro_filter.h"
 
+/* DEBUG-telemetry-bisect: instrumentation kept for future use. Flip to `#if 1`
+ * to re-enable the UART5 polling checkpoints, stack-overflow hook, and the
+ * priority-5 counter reporter. NOTE: while enabled these write to UART5 — the
+ * same port as telemetry — so they corrupt the telemetry stream; only enable
+ * when telemetry itself is not being used. */
+#if 0
+/* one-shot polling TX on UART5 (bypasses DMA + RTOS).
+ * Used to checkpoint how far boot/scheduling gets when normal telemetry is
+ * silent. Safe because DMA1_Stream7 is idle between transfers. */
+static void dbg_uart5_puts(const char *s)
+{
+    while (*s) {
+        while (USART_GetFlagStatus(UART5, USART_FLAG_TXE) == RESET) { }
+        USART_SendData(UART5, (uint8_t)(*s++));
+    }
+    while (USART_GetFlagStatus(UART5, USART_FLAG_TC) == RESET) { }
+}
+
+/* DEBUG-telemetry-bisect: FreeRTOS calls this when a task overflows its stack
+ * (configCHECK_FOR_STACK_OVERFLOW=2). Dumps the offending task name on COM6.
+ * Adding locals to a task (e.g. Stabilizer_Task) can blow its fixed stack and
+ * corrupt memory -> looks like a random freeze. Remove after diagnosis. */
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    volatile uint32_t d;
+    (void)xTask;
+    for (;;) {
+        dbg_uart5_puts("\r\nSTACKOVF:");
+        dbg_uart5_puts(pcTaskName ? pcTaskName : "?");
+        dbg_uart5_puts("\r\n");
+        for (d = 3000000U; d != 0U; d--) { }
+    }
+}
+
+/* DEBUG-telemetry-bisect: print an unsigned decimal over UART5 (polling). */
+static void dbg_uart5_u32(uint32_t v)
+{
+    char b[11];
+    int i = 10;
+    b[10] = '\0';
+    if (v == 0U) { dbg_uart5_puts("0"); return; }
+    while (v != 0U && i > 0) { b[--i] = (char)('0' + (v % 10U)); v /= 10U; }
+    dbg_uart5_puts(&b[i]);
+}
+
+/* DEBUG-telemetry-bisect: priority-5 reporter (above all app tasks at prio 4).
+ * Dumps each task's execution counter every 250 ms. Whichever counter STOPS
+ * incrementing between lines is the task whose work function hung (starving
+ * Send_Task). If NO "CNT" line ever prints, the hang disables interrupts/tick
+ * (e.g. an unmatched critical section) or lives in an ISR. Remove after use. */
+void dbg_report_task(void *pvParameters)
+{
+    (void)pvParameters;
+    for (;;) {
+        dbg_uart5_puts("\r\nCNT imu=");  dbg_uart5_u32(system_monitor.IMUUpdateTask_cnt);
+        dbg_uart5_puts(" samp=");        dbg_uart5_u32(system_monitor.IMUSampleTask_cnt);
+        dbg_uart5_puts(" stab=");        dbg_uart5_u32(system_monitor.stabilizerTask_cnt);
+        dbg_uart5_puts(" rem=");         dbg_uart5_u32(system_monitor.remoter_task_cnt);
+        dbg_uart5_puts(" auto=");        dbg_uart5_u32(system_monitor.AutoflyTask_cnt);
+        dbg_uart5_puts(" send=");        dbg_uart5_u32(system_monitor.USART2_task_cnt);
+        dbg_uart5_puts("\r\n");
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+}
+#endif /* DEBUG-telemetry-bisect */
+
 /**
  * @module  main.c
  * @subsystem  scheduler
@@ -24,6 +90,7 @@ int main(void)
         (void*          )NULL,                  //���ݸ��������Ĳ��� (chu��n d�� g��i r��n w�� h��n sh�� de c��n sh��) - "parameter passed to task function" - NULL means no parameter
         (UBaseType_t    )START_TASK_PRIO,       //�������ȼ� (r��n w�� y��u xi��n j��) - "task priority" - higher number = higher priority
         (TaskHandle_t*  )&StartTask_Handler);   //������ (r��n w�� j�� b��ng) - "task handle" - a reference/ID to control this task later
+  /* DEBUG-telemetry-bisect: dbg_uart5_puts("PRE-SCHED\r\n"); (checkpoint before scheduler start) */
   vTaskStartScheduler();          //����������� (k��i q�� r��n w�� di��o d��) - "start task scheduler" - begins FreeRTOS multitasking; this function never returns
 }
 
@@ -87,8 +154,19 @@ void start_task(void *pvParameters)
         (uint16_t       )SENDTASK_STK_SIZE, 
         (void*          )NULL,
         (UBaseType_t    )SENDTASK_PRIO,
-        (TaskHandle_t*  )&SendTask_Handler); 								
-                
+        (TaskHandle_t*  )&SendTask_Handler);
+
+  /* DEBUG-telemetry-bisect: priority-5 counter reporter (above app tasks @ prio 4).
+   * Re-enable together with the `#if 0` helper block at the top of this file. */
+#if 0
+  xTaskCreate((TaskFunction_t )dbg_report_task,
+        (const char*    )"dbg_report",
+        (uint16_t       )256,
+        (void*          )NULL,
+        (UBaseType_t    )5,
+        (TaskHandle_t*  )NULL);
+#endif
+
   vTaskDelete(StartTask_Handler); //ɾ����ʼ���� (sh��n ch�� k��i sh�� r��n w��) - "delete start task" - this task deletes itself since its job (creating other tasks) is done
   taskEXIT_CRITICAL();            //�˳��ٽ��� (tu�� ch�� l��n ji�� q��) - "exit critical section" - re-enables interrupts (though this line never executes because task was deleted)
 }
@@ -123,6 +201,7 @@ void Send_Task(void *pvParameters)
 {
     TickType_t PreviousWakeTime;
     PreviousWakeTime = xTaskGetTickCount();
+    /* DEBUG-telemetry-bisect: dbg_uart5_puts("SEND-RAN\r\n"); (fires once when Send_Task first runs) */
   while(1)
   {
         // SysID high-rate mode (id_frame_on): stream the single-axis ID frame at a STABLE 200 Hz

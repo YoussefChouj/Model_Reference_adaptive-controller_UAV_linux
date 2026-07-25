@@ -1,6 +1,50 @@
 #include "stm32f4xx_it.h"
 #include "rpm.h"
 
+/* ====================================================================
+ * DEBUG-telemetry-bisect: fault reporting over UART5 (polling, no DMA/RTOS).
+ * Kept for future use — flip to `#if 1` to override the silent startup-file
+ * HardFault_Handler so a fault ANNOUNCES itself on COM6 instead of looking like
+ * a dead link. Format: "HARDFAULT PSP_PC=... PSP_LR=... MSP_PC=..." — look up
+ * the PC address in the Keil .map / disassembly to find the faulting line.
+ * ==================================================================== */
+#if 0
+static void dbg_it_uart5_putc(char c)
+{
+    while (USART_GetFlagStatus(UART5, USART_FLAG_TXE) == RESET) { }
+    USART_SendData(UART5, (uint8_t)c);
+}
+static void dbg_it_uart5_puts(const char *s)
+{
+    while (*s) { dbg_it_uart5_putc(*s++); }
+}
+static void dbg_it_uart5_hex32(uint32_t v)
+{
+    const char *hx = "0123456789ABCDEF";
+    int i;
+    for (i = 28; i >= 0; i -= 4) { dbg_it_uart5_putc(hx[(v >> i) & 0xFU]); }
+}
+
+void HardFault_Handler(void)
+{
+    volatile uint32_t d;
+    uint32_t psp = __get_PSP();
+    uint32_t msp = __get_MSP();
+    uint32_t *pf = (uint32_t *)psp;  /* stacked frame if fault was in task (PSP) context */
+    uint32_t *mf = (uint32_t *)msp;  /* stacked frame if fault was in handler (MSP) context */
+    for (;;)
+    {
+        dbg_it_uart5_puts("\r\nHARDFAULT PSP_PC=");
+        dbg_it_uart5_hex32(pf[6]);
+        dbg_it_uart5_puts(" PSP_LR=");
+        dbg_it_uart5_hex32(pf[5]);
+        dbg_it_uart5_puts(" MSP_PC=");
+        dbg_it_uart5_hex32(mf[6]);
+        dbg_it_uart5_puts("\r\n");
+        for (d = 3000000U; d != 0U; d--) { }
+    }
+}
+#endif /* DEBUG-telemetry-bisect */
 
 USHORT16 Clear_IT = 0;
 /*************************************************************************
@@ -103,8 +147,19 @@ void DMA1_Stream3_IRQHandler(void)//串口3发送完成中断，这个一定不�
     	DMA_Cmd(DMA1_Stream3, DISABLE);             //关闭DMA传输 
    }
 }
-/* ADR-0010: RPM acquisition - EXTI handlers for PA5/PB3/PB10/PB11 */
-void EXTI3_IRQHandler(void)
+/* ADR-0010: RPM acquisition - EXTI handlers for PA0/PA1/PC6/PC7.
+ * Re-targeted 2026-07-21 from PA5/PB3/PB10/PB11; the new pins are
+ * UART4 TX/RX and UART6 TX/RX (physically unused on this custom FC). */
+void EXTI0_IRQHandler(void)
+{
+	if (EXTI_GetITStatus(RPM_CH0_EXTI_LINE) != RESET)
+	{
+		RPM_EdgeISR(0);
+		EXTI_ClearITPendingBit(RPM_CH0_EXTI_LINE);
+	}
+}
+
+void EXTI1_IRQHandler(void)
 {
 	if (EXTI_GetITStatus(RPM_CH1_EXTI_LINE) != RESET)
 	{
@@ -114,15 +169,6 @@ void EXTI3_IRQHandler(void)
 }
 
 void EXTI9_5_IRQHandler(void)
-{
-	if (EXTI_GetITStatus(RPM_CH0_EXTI_LINE) != RESET)
-	{
-		RPM_EdgeISR(0);
-		EXTI_ClearITPendingBit(RPM_CH0_EXTI_LINE);
-	}
-}
-
-void EXTI15_10_IRQHandler(void)
 {
 	if (EXTI_GetITStatus(RPM_CH2_EXTI_LINE) != RESET)
 	{

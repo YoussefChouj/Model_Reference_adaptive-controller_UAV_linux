@@ -341,10 +341,19 @@ void MRAC_Init(void)
         
         // Z-Axis
         mrac_config_z.gamma[i]          = Z_Gamma[i];
-        mrac_config_z.What_limit[i]     = Z_Wlim[i]; 
+        mrac_config_z.What_limit[i]     = Z_Wlim[i];
         mrac_config_z.What_tol[i]       = Z_Wtol[i];
     }
-    
+
+    // Unlock the bias weight (theta_0) below zero so the adaptive law can inject a
+    // negative constant term to cancel a standing torque bias (e.g. yaw reactive-
+    // torque imbalance). Without this the lower bound defaults to 0 and the bias
+    // weight is floored, so MRAC cannot reject a constant disturbance. Symmetric
+    // with the upper authority; all other weights keep the default 0 lower bound.
+    mrac_config_pitch.What_lower_limit[0] = -mrac_config_pitch.What_limit[0];
+    mrac_config_roll.What_lower_limit[0]  = -mrac_config_roll.What_limit[0];
+    mrac_config_yaw.What_lower_limit[0]   = -mrac_config_yaw.What_limit[0];
+
     // Set Scalar Constants: Pitch
     mrac_config_pitch.sigma = 0.01f;
     mrac_config_pitch.e_deadzone = 0.05f;

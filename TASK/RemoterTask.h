@@ -20,6 +20,7 @@
 #define  MODE_CH      sbus_channel[4]  /* ch5: 2-state — mid(≈1000)=IDLE, high(≈1600)=LAND; low treated as IDLE */
 #define  FLYUP_CH     sbus_channel[6]  /* ch7: momentary — rising edge >500 commands fly-up to Z=0.5 m */
 #define  PATH_EXEC_CH sbus_channel[7]  /* ch8: momentary — rising edge >500 triggers preset path */
+#define  OFHOLD_CH    sbus_channel[5]  /* ch6: 2-state - high(~1694)=OF position-hold ON, low(~306)/lost=angle mode (default) */
 
 /////////////////////////////////////////////////////////////////////////////////////
 //���ݲ�ֺ궨�壬�ڷ��ʹ���1�ֽڵ���������ʱ������int16��float�ȣ���Ҫ�����ݲ�ֳɵ����ֽڽ��з���

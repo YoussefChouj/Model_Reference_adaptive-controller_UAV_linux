@@ -51,39 +51,26 @@ static float s_land_sink_bias = 0.0f;
  * of2_dx_fix/of2_dy_fix carry a small constant offset (measured ~12-14 / ~2-3 raw
  * units on the bench) that integrates into unbounded locx/locyPID.FB drift.
  *
- * Gated on quiescence rather than the arm edge: arming (stick gesture) happens
- * before the drone is physically settled (still being placed/held), so a fixed
- * 2 s window starting at arm captures placement motion, not the true bias
- * (confirmed on the bench 2026-07-12 — drift was unchanged by an arm-edge-triggered
- * version of this calibration).
- *
- * "Quiescent" = gyro rate below OF_BIAS_STILL_THRESH_RADPS on all 3 axes AND
- * pitch/roll RC sticks centered (RCInput_IsActive false) — the same condition
- * under which case_Update_loc_Des already latches locxPID.Des = locxPID.FB
- * (StabilizerTask.c ~line 629), i.e. the moments position hold assumes the drone
- * is holding still. Requiring sticks-centered (not just gyro-still) avoids folding
- * a real, constant-velocity manual translation into the bias estimate.
- *
- * Once OF_BIAS_STILL_TICKS of quiescence is seen, average of2_dx_fix/dy_fix for
- * OF_BIAS_CAL_TICKS; if quiescence breaks mid-average, discard and re-wait. Unlike
- * a one-shot arm-time calibration, completing a window does NOT freeze the bias —
- * it goes back to waiting so the next quiescent moment (e.g. every time the pilot
- * releases the sticks to hover) refreshes it, tracking the slow thermal drift
- * observed on the bench (~13% bias drift over 13 min) throughout a flight instead
- * of only at t=0. */
-#define OF_BIAS_STILL_THRESH_RADPS  0.05236f /* ~3 deg/s */
-#define OF_BIAS_STILL_TICKS         100U     /* 100 ticks @ 200 Hz = 0.5 s settled before starting */
-#define OF_BIAS_CAL_TICKS           400U     /* 400 ticks @ 200 Hz = 2.0 s averaging window */
+ * Tracked with a continuous EMA rather than a discrete settled-window capture: the
+ * true zero-point drifts slowly with sensor temperature (~13% over 13 min observed
+ * on the bench), so *any* fixed/one-shot value goes stale and the residual
+ * integrates forever at 200 Hz. A prior quiescence-gated version (require
+ * OF_BIAS_STILL_TICKS of near-zero gyro before averaging) suffered the same
+ * failure mode as a one-shot: on this bench, ambient vibration kept breaking the
+ * settled window before it could complete, so the estimate stayed stale/zero.
+ * The EMA needs no settled window and self-corrects continuously; the tradeoff is
+ * that it slowly absorbs any *sustained* real translational flow into the bias
+ * estimate too, which is acceptable because OF position-hold is not currently
+ * used for control (see project_ofhold_velocity_instability) — this only feeds
+ * the dead-reckoning position used for logging/analysis. tau=20s keeps typical
+ * bench-scale motion (seconds) from being absorbed while still correcting
+ * minutes-scale thermal drift. */
+#define OF_BIAS_EMA_TAU_S  20.0f
+#define OF_BIAS_EMA_ALPHA  (0.005f / OF_BIAS_EMA_TAU_S) /* dt=5ms @ 200 Hz */
 /* OF lock gate (rec 3). of_quality is 0..255 (higher = better); a real lock sits at
  * ~250-255 on the bench. Below this we treat the sensor as unlocked: freeze both the
  * bias calibration and the earth_x/y integration so we never integrate garbage flow. */
 #define OF_MIN_QUALITY              50U
-typedef enum { OF_BIAS_WAIT_STILL = 0, OF_BIAS_ACCUMULATING = 1 } OfBiasState_t;
-static u8            s_of_bias_prev_armed = 0;
-static OfBiasState_t s_of_bias_state      = OF_BIAS_WAIT_STILL;
-static u16           s_of_bias_still_tick = 0;
-static u16           s_of_bias_cal_tick   = 0;
-static float s_of_bias_sum_x = 0.0f, s_of_bias_sum_y = 0.0f;
 /* Non-static: streamed in the 0x05 OF-calibration frame (send_data.c) to validate the v3
  * bias against an offline-derived Kalman estimate. See docs/tracking_baseline_and_drift.md. */
 float s_of_bias_x = 0.0f, s_of_bias_y = 0.0f;
@@ -101,15 +88,12 @@ uint16_t g_cal_health = 0U;   /* bitmask: 0x01 BOOT_OK | 0x02 COLD_OK | 0x04 COL
                                *         0x80 MANUAL_ORIGIN_RESET | 0x100 BOOT_TIMEOUT
                                *         0x200 ESTIMATOR_READY */
 
-/* One-shot bias capture (CMD 0x17). g_of_bias_capture_req is set from the ground
- * station (Send_Task) when the drone is placed level and still; the accumulation and
- * store all happen here in the stabilizer task, so s_of_bias_x/y is only ever written
- * from one context. Unlike the auto-estimator this has NO quiescence gate — the pilot
- * guarantees stillness — which is why it works where the auto path logged bias 0. */
+/* Manual bias snap (CMD 0x17). g_of_bias_capture_req is set from the ground
+ * station (Send_Task) when the pilot has placed the drone level and still; it
+ * jumps s_of_bias_x/y straight to the current of2_dx_fix/dy_fix sample instead
+ * of waiting out the EMA time constant. The background EMA (below) then keeps
+ * tracking from there — s_of_bias_x/y is only ever written from this task. */
 volatile uint8_t g_of_bias_capture_req = 0;
-static uint8_t s_of_cap_active = 0;
-static u16     s_of_cap_tick   = 0;
-static float   s_of_cap_sum_x  = 0.0f, s_of_cap_sum_y = 0.0f;
 
 //
 /* Zero the world-frame optical-flow origin: the drone's current location becomes
@@ -193,82 +177,22 @@ void Update_Data(void)
 	
 	//////////////////λ�û�����ֵ����/////////////////////////
 		{
-			u8 armed_now = (DroneStatus.ARM_Status == Armed);
-			u8 of_ok     = (ano_of.of_quality >= OF_MIN_QUALITY);
-			/* Restart the stillness-gated window on the arm edge, OR whenever OF drops
-			 * its lock, so a fresh average is always taken from a known-good state. */
-			if ((armed_now && !s_of_bias_prev_armed) || !of_ok) {
-				s_of_bias_state      = OF_BIAS_WAIT_STILL;
-				s_of_bias_still_tick = 0;
-				s_of_bias_cal_tick   = 0;
-				s_of_bias_sum_x = 0.0f;
-				s_of_bias_sum_y = 0.0f;
-			}
-			s_of_bias_prev_armed = armed_now;
+			u8 of_ok = (ano_of.of_quality >= OF_MIN_QUALITY);
 
-			/* Calibrate whenever OF has a good lock — NOT only while armed (rec 1).
-			 * A bolted, disarmed drone on the bench is the ideal (perfectly still)
-			 * condition to measure the stationary velocity bias, and it is exactly
-			 * when the pilot validates that the estimate holds. Gating this on the
-			 * armed state was why of.bias_x/y stayed 0 in every bench log (drone
-			 * disarmed, or sticks moved before an armed window could complete), so the
-			 * estimate kept drifting at the raw ~3/~4.8-unit bias. */
-			if (of_ok) {
-				u8 is_quiescent = (fabsf(Gyro_X_Real) < OF_BIAS_STILL_THRESH_RADPS)
-				               && (fabsf(Gyro_Y_Real) < OF_BIAS_STILL_THRESH_RADPS)
-				               && (fabsf(Gyro_Z_Real) < OF_BIAS_STILL_THRESH_RADPS)
-				               && !RCInput_IsActive(RC_AXIS_PITCH)
-				               && !RCInput_IsActive(RC_AXIS_ROLL);
-
-				if (s_of_bias_state == OF_BIAS_WAIT_STILL) {
-					s_of_bias_still_tick = is_quiescent ? (s_of_bias_still_tick + 1U) : 0U;
-					if (s_of_bias_still_tick >= OF_BIAS_STILL_TICKS) {
-						s_of_bias_state = OF_BIAS_ACCUMULATING;
-						s_of_bias_cal_tick = 0;
-						s_of_bias_sum_x = 0.0f;
-						s_of_bias_sum_y = 0.0f;
-					}
-				} else { /* OF_BIAS_ACCUMULATING */
-					if (!is_quiescent) {
-						/* Motion resumed before the window finished: discard and re-wait. */
-						s_of_bias_state      = OF_BIAS_WAIT_STILL;
-						s_of_bias_still_tick = 0;
-					} else {
-						s_of_bias_sum_x += (float)ano_of.of2_dx_fix;
-						s_of_bias_sum_y += (float)ano_of.of2_dy_fix;
-						s_of_bias_cal_tick++;
-						if (s_of_bias_cal_tick >= OF_BIAS_CAL_TICKS) {
-							s_of_bias_x = s_of_bias_sum_x / (float)OF_BIAS_CAL_TICKS;
-							s_of_bias_y = s_of_bias_sum_y / (float)OF_BIAS_CAL_TICKS;
-							/* Refreshed, not frozen: go back and look for the next
-							 * quiescent window so slow bias drift keeps getting tracked. */
-							s_of_bias_state      = OF_BIAS_WAIT_STILL;
-							s_of_bias_still_tick = 0;
-						}
-					}
-				}
-			}
-
-			/* CMD 0x17 one-shot bias capture. Latch the request, then average
-			 * of2_dx_fix/dy_fix over OF_BIAS_CAL_TICKS (~2 s) while OF holds lock and
-			 * store the result. No quiescence gate: the pilot has placed the drone
-			 * level and still, so every sample in the window is valid bias. */
+			/* CMD 0x17 manual snap: jump straight to the current sample instead of
+			 * waiting out the EMA time constant. */
 			if (g_of_bias_capture_req) {
 				g_of_bias_capture_req = 0;
-				s_of_cap_active = 1;
-				s_of_cap_tick   = 0;
-				s_of_cap_sum_x  = 0.0f;
-				s_of_cap_sum_y  = 0.0f;
-			}
-			if (s_of_cap_active && of_ok) {
-				s_of_cap_sum_x += (float)ano_of.of2_dx_fix;
-				s_of_cap_sum_y += (float)ano_of.of2_dy_fix;
-				s_of_cap_tick++;
-				if (s_of_cap_tick >= OF_BIAS_CAL_TICKS) {
-					s_of_bias_x = s_of_cap_sum_x / (float)OF_BIAS_CAL_TICKS;
-					s_of_bias_y = s_of_cap_sum_y / (float)OF_BIAS_CAL_TICKS;
-					s_of_cap_active = 0;
+				if (of_ok) {
+					s_of_bias_x = (float)ano_of.of2_dx_fix;
+					s_of_bias_y = (float)ano_of.of2_dy_fix;
 				}
+			}
+
+			/* Continuous background tracking — see the OF_BIAS_EMA_ALPHA comment above. */
+			if (of_ok) {
+				s_of_bias_x += OF_BIAS_EMA_ALPHA * ((float)ano_of.of2_dx_fix - s_of_bias_x);
+				s_of_bias_y += OF_BIAS_EMA_ALPHA * ((float)ano_of.of2_dy_fix - s_of_bias_y);
 			}
 		}
 		/* Only integrate flow into position when OF has a good lock (rec 3). On lock
@@ -358,22 +282,48 @@ void Update_Data(void)
 		Ctrler.locxsPID.FB= (ano_of.of2_dy) *Cos_Yaw_01 +(-ano_of.of2_dx)*Sin_Yaw_01;
     Ctrler.locysPID.FB=  (-ano_of.of2_dx) * Cos_Yaw_01 - (ano_of.of2_dy)*Sin_Yaw_01; //��������ϵ��
 	
-	  /* Altitude sanity gate (of_alt_cm is cm, u32). Reject and freeze of2_raw_h at
-	   * its last good value when the reading is out of band OR a non-physical per-tick
-	   * jump. The upper bound already rejects 65535 (0xFFFF, sensor no-reading). The
-	   * 5 cm floor rejects the sub-band 1 cm dropouts, and the 0.10 m/tick (=20 m/s,
-	   * far above this drone's ~1 m/s climb) jump limit rejects in-band spikes - both
-	   * were seen collapsing of2_h and spiking the z-rate derivative into saturation. */
+	  /* Altitude sanity gate (of_alt_cm is cm, u16). Three layers (ADR-0011 Z-gate),
+	   * mirroring PX4/DJI altitude filtering:
+	   *   1. median-of-3 on the raw sample — a lone spike (in-band or the 0xFFFF
+	   *      no-reading) is never the median of three, so it is dropped before the
+	   *      band/jump gates ever see it.
+	   *   2. band gate — 5..500 cm (the 500 upper bound rejects 65535 no-reading;
+	   *      the 5 cm floor rejects sub-band 1 cm dropouts).
+	   *   3. rate-aware per-tick jump gate — baseline 0.05 m/tick (=10 m/s, still
+	   *      ~10x this drone's ~1 m/s climb), widened by the commanded vertical rate
+	   *      so legit fast ascents are not clipped: gate = 0.05 + 0.15*|Z_ratePID.Des|,
+	   *      capped at 0.20 m/tick. The 20-reject (100 ms) force-resync escape is kept
+	   *      so a genuine sustained level change is not locked out. */
 	  {
 			static u16 s_alt_reject_cnt = 0U;
-			if( ano_of.of_alt_cm >= 5U && ano_of.of_alt_cm <= 500U )
+			static u16 s_alt_hist[3] = {0U, 0U, 0U};
+			static uint8_t s_alt_hist_n = 0U;
+			u16 a0, a1, a2, alt_med;
+
+			/* Layer 1: median-of-3. */
+			s_alt_hist[2] = s_alt_hist[1];
+			s_alt_hist[1] = s_alt_hist[0];
+			s_alt_hist[0] = ano_of.of_alt_cm;
+			if (s_alt_hist_n < 3U) s_alt_hist_n++;
+			if (s_alt_hist_n >= 3U)
 			{
-				float h_new = ano_of.of_alt_cm*0.01f*Cos_roll_01*Cos_pitch_01;
-				/* Accept if within the per-tick jump limit, OR force a resync after
-				 * 20 consecutive rejects (100 ms) so a genuine sustained level change
-				 * (boot at altitude, flying over a surface step) is not locked out —
-				 * while a 1-tick spike, which returns before 20 ticks, stays filtered. */
-				if( fabsf(h_new - ano_of.of2_raw_h) < 0.10f || s_alt_reject_cnt >= 20U )
+				a0 = s_alt_hist[0]; a1 = s_alt_hist[1]; a2 = s_alt_hist[2];
+				alt_med = (a0 > a1) ? ((a1 > a2) ? a1 : ((a0 > a2) ? a2 : a0))
+				                    : ((a0 > a2) ? a0 : ((a1 > a2) ? a2 : a1));
+			}
+			else
+			{
+				alt_med = ano_of.of_alt_cm;  /* warmup: not enough history yet */
+			}
+
+			/* Layer 2: band gate. */
+			if( alt_med >= 5U && alt_med <= 500U )
+			{
+				float h_new = alt_med*0.01f*Cos_roll_01*Cos_pitch_01;
+				/* Layer 3: rate-aware jump gate. */
+				float gate = 0.05f + 0.15f * fabsf(Ctrler.Z_ratePID.Des);
+				if (gate > 0.20f) gate = 0.20f;
+				if( fabsf(h_new - ano_of.of2_raw_h) < gate || s_alt_reject_cnt >= 20U )
 				{
 					ano_of.of2_raw_h = h_new;
 					s_alt_reject_cnt = 0U;

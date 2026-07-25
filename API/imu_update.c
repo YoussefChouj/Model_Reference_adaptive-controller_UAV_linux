@@ -23,6 +23,32 @@ float Ki = 0.001f;/**/
 float exInt = 0.0f;
 float eyInt = 0.0f;
 float ezInt = 0.0f;
+
+/* --- A1: fast-converge boot window ---
+ * For the first IMU_FAST_WINDOW seconds after boot the Mahony gains are boosted
+ * so the attitude estimate snaps onto gravity in ~10-15 s instead of the ~1-2
+ * min the nominal Ki=0.001 needs to walk out the cold->warm gyro-bias shift.
+ * The boost decays linearly to the nominal Kp/Ki across the window. */
+#define IMU_KP_BOOST     4.0f     /* boosted proportional gain at t=0          */
+#define IMU_KI_BOOST     0.02f    /* boosted integral gain at t=0              */
+#define IMU_FAST_WINDOW  10.0f    /* [s] boost-decay window                    */
+
+/* --- A2: estimator-settled detector ---
+ * Convergence proxy = low-passed innovation energy |e|^2 (cross product of the
+ * measured vs estimated gravity direction). Large while a gyro-bias mismatch
+ * persists, small once the integral has cancelled it. "settled" latches once
+ * the LPF drops below the threshold after the boost window; a hard timeout
+ * guarantees the arming gate can never lock the pilot out. */
+#define IMU_SETTLE_E2     0.0009f  /* |e|^2 threshold (~0.03 rad innovation)    */
+#define IMU_SETTLE_ALPHA  0.002f   /* LPF coeff at 1 kHz (~0.5 s time constant) */
+#define IMU_READY_TIMEOUT 30.0f    /* [s] hard fallback: ready regardless       */
+
+static float   s_boot_t    = 0.0f;
+static float   s_innov_lpf = 1.0f;   /* start high => not settled at boot       */
+static uint8_t s_settled   = 0U;
+
+float   g_imu_settle_metric = 1.0f;  /* Keil-watchable LPF value for tuning     */
+uint8_t g_estimator_ready   = 0U;    /* A3: published to telemetry / arm gate   */
 /**/
 static float q0 = 1.0f;	
 static float q1 = 0.0f;
@@ -43,7 +69,12 @@ float invSqrt(float x)
 /* Gravity-removed body-frame linear acceleration (mg), computed from the fresh Mahony
  * gravity direction each update. Streamed in the 0x05 OF-calibration frame for the
  * IMU+OF fusion filter (prereq #1, docs/tracking_baseline_and_drift.md). 1 G = 1000 mg. */
-float Lin_Acc_X_body = 0.0f, Lin_Acc_Y_body = 0.0f;
+float Lin_Acc_X_body = 0.0f, Lin_Acc_Y_body = 0.0f, Lin_Acc_Z_body = 0.0f;
+
+/* Body-frame gravity unit vector (R^T * [0,0,1]). 1 G = 1.0 (NOT mg).
+ * Exported so the CAL_AIRBORNE_HOVER_TRIM LSM (ADR-0011 Phase 3) can reconstruct
+ * the world-frame gravity vector at hover from body-frame accel alone. */
+float Gravity_Body_X = 0.0f, Gravity_Body_Y = 0.0f, Gravity_Body_Z = 0.0f;
 
 void IMU_Update_Mahony(_imu_st *imu,float dt)
 {
@@ -63,6 +94,17 @@ void IMU_Update_Mahony(_imu_st *imu,float dt)
 	float q3Last = q3;
 	float delta_theta[3];/* xyz */
 	float delta_theta_s;/* xyz */
+	float kp_eff, ki_eff, boost_frac;
+
+	/* A1: advance the boot clock and derive the decaying gain boost. */
+	s_boot_t += dt;
+	if (s_boot_t < IMU_FAST_WINDOW) {
+		boost_frac = 1.0f - (s_boot_t / IMU_FAST_WINDOW);   /* 1 -> 0 across window */
+	} else {
+		boost_frac = 0.0f;
+	}
+	kp_eff = Kp + (IMU_KP_BOOST - Kp) * boost_frac;
+	ki_eff = Ki + (IMU_KI_BOOST - Ki) * boost_frac;
 
 	/* 0 */
 	if((Acc_X_Real != 0.0f) || (Acc_Y_Real != 0.0f) || (Acc_Z_Real != 0.0f))
@@ -84,15 +126,29 @@ void IMU_Update_Mahony(_imu_st *imu,float dt)
 		ez = (nor_acc[X] * vecyZ - nor_acc[Y] * vecxZ);
 		
 		/* , */
-		exInt += Ki * ex * dt ;  
-		eyInt += Ki * ey * dt ;
-		ezInt += Ki * ez * dt ;
-		
+		exInt += ki_eff * ex * dt ;
+		eyInt += ki_eff * ey * dt ;
+		ezInt += ki_eff * ez * dt ;
+
 		/* PI, */
- 		Gyro_X_Real += Kp * ex + exInt;
- 		Gyro_Y_Real += Kp * ey + eyInt;
- 		Gyro_Z_Real += Kp * ez + ezInt;
+ 		Gyro_X_Real += kp_eff * ex + exInt;
+ 		Gyro_Y_Real += kp_eff * ey + eyInt;
+ 		Gyro_Z_Real += kp_eff * ez + ezInt;
+
+		/* A2: track low-passed innovation energy and latch "settled" once it
+		 * falls below threshold after the boost window has elapsed. */
+		{
+			float e2 = ex * ex + ey * ey + ez * ez;
+			s_innov_lpf += IMU_SETTLE_ALPHA * (e2 - s_innov_lpf);
+			g_imu_settle_metric = s_innov_lpf;
+			if (!s_settled && (s_boot_t > IMU_FAST_WINDOW) && (s_innov_lpf < IMU_SETTLE_E2)) {
+				s_settled = 1U;
+			}
+		}
 	}
+
+	/* A3: publish readiness — settled, or the hard timeout as a lockout guard. */
+	g_estimator_ready = (s_settled || (s_boot_t > IMU_READY_TIMEOUT)) ? 1U : 0U;
 
 	/* TkTk+1, */
 	delta_theta[0] = Gyro_X_Real*half_T;
@@ -145,6 +201,20 @@ void IMU_Update_Mahony(_imu_st *imu,float dt)
 	 * (vecxZ,vecyZ,veczZ) is the body-frame gravity unit vector; static & level => lin ~ 0. */
 	Lin_Acc_X_body = Acc_X_Real - 1000.0f * vecxZ;
 	Lin_Acc_Y_body = Acc_Y_Real - 1000.0f * vecyZ;
+	Lin_Acc_Z_body = Acc_Z_Real - 1000.0f * veczZ;
+	/* Exported for the calibrator (Phase 3 needs to reconstruct world-gravity in body frame
+	 * without re-deriving the rotation matrix). 1 G = 1.0 here. */
+	Gravity_Body_X = vecxZ;
+	Gravity_Body_Y = vecyZ;
+	Gravity_Body_Z = veczZ;
+}
+
+/* Pre-arm gate: 1 once the attitude estimator has converged (or the timeout
+ * fallback fired), 0 while still warming up. Used by the flight FSM to block
+ * arming and by StabilizerTask to hold the OF world origin at zero. */
+uint8_t IMU_EstimatorReady(void)
+{
+	return g_estimator_ready;
 }
 
 	 
