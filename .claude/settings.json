@@ -4,13 +4,16 @@
       "Bash(ccc search*)",
       "Bash(ccc status*)",
       "Bash(python .agent_scripts/knowledge_gate.py*)",
+      "Bash(python .agent_scripts/knowledge_state.py*)",
+      "Bash(python .agent_scripts/trail.py*)",
+      "Bash(python .agent_scripts/path_refresh.py*)",
+      "Bash(python .agent_scripts/knowledge_loop.py*)",
+      "Bash(python .agent_scripts/llm_call.py*)",
       "Bash(python -m ground_station.livewatch*)",
       "Bash(python -m ground_station.flashtool*)",
       "Bash(python C:\\Users\\Acer\\AppData\\Local\\Temp\\claude\\**\\scratchpad\\*.py*)",
       "Read",
       "Write",
-      "Grep",
-      "Glob",
       "Bash(*)",
       "PowerShell(*)"
     ]
@@ -27,6 +30,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .agent_scripts/trail.py add __TOOL__ __FILE_PATH__"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": ".*",
@@ -34,6 +48,21 @@
           {
             "type": "command",
             "command": "python .agent_scripts/context_watch.py"
+          },
+          {
+            "type": "command",
+            "command": "python .agent_scripts/knowledge_loop.py run"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .agent_scripts/knowledge_loop.py run --no-llm"
           }
         ]
       }

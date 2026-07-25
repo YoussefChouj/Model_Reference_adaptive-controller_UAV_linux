@@ -32,3 +32,31 @@ alwaysApply: false
 | noisy codebase, broad terms | scoped to a known directory, speed critical |
 
 Adding knowledge: drop sources in `raw/`, then run the wiki ingest. Re-index the graph after wiki/code changes.
+
+## Gate enforcement (PreToolUse hook)
+
+Claude Code's `PreToolUse` hook on `Glob|Grep` runs `.agent_scripts/knowledge_gate.py`.
+
+- The gate **classifies** the command (snake_case / file:line → ccc; cross-subsystem / god node → graphify; why / ADR / architecture → wiki) and tells you which layer to consult.
+- For each layer you consult, record it: `python .agent_scripts/knowledge_gate.py --touch <layer>`.
+- After all three layers are touched, `python .agent_scripts/knowledge_gate.py --unlock` lets grep/glob through silently for the rest of the day.
+- `--unlock` is **hard to skip** — it refuses until all three layers have been touched at least once. This forces the agent to know the full stack before raw-searching.
+- **Staleness-aware** (via `knowledge_state.py`): if a layer is stale (HEAD moved past `last_commit`, or known files drifted), the gate's block message says so and tells you which refresh command to run (`/graphify --update`, `/wiki ingest`, etc.).
+- Full protocol: `wiki/concepts/knowledge-gate-enforcement.md`.
+
+## Per-path refresh (Stop hook)
+
+Claude Code's `Stop` hook runs `knowledge_loop.py` after every turn. The flow is:
+
+1. The `PostToolUse` hook on `Write|Edit|MultiEdit|NotebookEdit` records each file the agent touches to a session-keyed JSONL trail: `.agent_state/trail_<session>.jsonl`.
+2. At session stop, `knowledge_loop.py run` reads the trail, identifies the touched files, and runs **six stages**:
+   - **drift detect** — re-evaluate stale flags in the manifest
+   - **delta_update** — LLM re-extracts structure for touched code files → merges into `graph.json` (only when `OPENROUTER_API_KEY` is set)
+   - **wiki write-through** — LLM checks if rationale shifted on touched concept pages; rewrites pages whose rationale shifted; backs up old version to `.agent_state/wiki_backup/<date>/`
+   - **structural annotation** — always runs, marks touched graph nodes with `last_touched_session`, appends `## Recent change (YYYY-MM-DD)` to wiki pages
+   - **fresh stamp** — marks all layers fresh in the manifest
+   - **audit** — logs everything to `.agent_state/knowledge_loop_log.json`
+3. Without an API key, the LLM stages degrade to no-ops and the circuit breaker (3 failures → 5-min open) prevents bad networks from blocking.
+4. The whole-corpus `/graphify` is **not** triggered automatically — only the structural annotation. The next user-initiated `/graphify --update` is when the LLM re-extraction runs.
+
+This means the knowledge graph becomes a **journal** of the agent's path, growing richer with each task, with no human in the loop. Git post-commit hook fires the same loop in the background on every commit (installed via `python .agent_scripts/install_post_commit.py install`).

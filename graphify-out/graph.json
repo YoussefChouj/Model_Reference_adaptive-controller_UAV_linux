@@ -65,7 +65,11 @@
       "source_file": "API\\imu_update.c",
       "source_location": "L1",
       "id": "imu_update",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "mrac.c",
@@ -73,7 +77,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L1",
       "id": "mrac",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "mrac_math.c",
@@ -1417,7 +1425,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L1",
       "id": "stabilizertask",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "stm32f4xx_it.c",
@@ -4177,7 +4189,11 @@
       "source_file": "API\\imu_update.c",
       "source_location": "L33",
       "id": "imu_update_invsqrt",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "IMU_Update_Mahony()",
@@ -4185,7 +4201,11 @@
       "source_file": "API\\imu_update.c",
       "source_location": "L43",
       "id": "imu_update_imu_update_mahony",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_InverseMixer()",
@@ -4193,7 +4213,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L37",
       "id": "mrac_mrac_inversemixer",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_GenerateStructuredBasis()",
@@ -4201,7 +4225,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L65",
       "id": "mrac_mrac_generatestructuredbasis",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_ProjectGradient()",
@@ -4209,7 +4237,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L93",
       "id": "mrac_mrac_projectgradient",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_UpdateAxis()",
@@ -4217,7 +4249,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L149",
       "id": "mrac_mrac_updateaxis",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_Init()",
@@ -4225,7 +4261,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L240",
       "id": "mrac_mrac_init",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_Reset()",
@@ -4233,7 +4273,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L339",
       "id": "mrac_mrac_reset",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_Control()",
@@ -4241,7 +4285,11 @@
       "source_file": "API\\mrac.c",
       "source_location": "L362",
       "id": "mrac_mrac_control",
-      "community": 34
+      "community": 34,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "MRAC_Projection()",
@@ -12161,7 +12209,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L30",
       "id": "stabilizertask_stabilizer_task",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "Update_Data()",
@@ -12169,7 +12221,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L49",
       "id": "stabilizertask_update_data",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "Update_Motor()",
@@ -12177,7 +12233,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L122",
       "id": "stabilizertask_update_motor",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "Compute_Motor()",
@@ -12185,7 +12245,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L189",
       "id": "stabilizertask_compute_motor",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "Update_Des()",
@@ -12193,7 +12257,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L313",
       "id": "stabilizertask_update_des",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "Constrain_Float()",
@@ -12201,7 +12269,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L517",
       "id": "stabilizertask_constrain_float",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "fast_atan()",
@@ -12209,7 +12281,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L522",
       "id": "stabilizertask_fast_atan",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "accel_to_lean_angles()",
@@ -12217,7 +12293,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L529",
       "id": "stabilizertask_accel_to_lean_angles",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "fast_atan2()",
@@ -12225,7 +12305,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L616",
       "id": "stabilizertask_fast_atan2",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "Get_Voltage()",
@@ -12233,7 +12317,11 @@
       "source_file": "TASK\\StabilizerTask.c",
       "source_location": "L700",
       "id": "stabilizertask_get_voltage",
-      "community": 0
+      "community": 0,
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "label": "USART1_IRQHandler()",
@@ -12957,7 +13045,7 @@
     },
     {
       "id": "lowpass_filter",
-      "label": "Low‑Pass Filter",
+      "label": "Low\u2011Pass Filter",
       "file_type": "algorithm",
       "source_file": "GETTING_STARTED.md"
     },
@@ -13597,7 +13685,7 @@
     },
     {
       "id": "keil_uvision",
-      "label": "Keil µVision",
+      "label": "Keil \u00b5Vision",
       "file_type": "document",
       "source_file": "docs\\architecture.md"
     },
@@ -17024,7 +17112,11 @@
       "id": "update_des",
       "label": "Update_Des",
       "file_type": "function",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "cmd_0x0a",
@@ -17072,7 +17164,11 @@
       "id": "twc_arrived",
       "label": "TWC_arrived",
       "file_type": "variable",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "autoflytask_patharbitrate",
@@ -17750,7 +17846,11 @@
       "id": "stabilizer_task_update_des",
       "label": "StabilizerTask Update_Des logic",
       "file_type": "function",
-      "source_file": "TASK\\StabilizerTask.c"
+      "source_file": "TASK\\StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "twc_path",
@@ -18416,13 +18516,21 @@
       "id": "update_data",
       "label": "Update_Data",
       "file_type": "function",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "eff_rc_helpers",
       "label": "eff_rc_helpers",
       "file_type": "function",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "system_error_detect",
@@ -18509,7 +18617,7 @@
     },
     {
       "id": "diag_telemetry_link_py",
-      "label": "diag_telemetry_link.py — Telemetry Link Diagnostics",
+      "label": "diag_telemetry_link.py \u2014 Telemetry Link Diagnostics",
       "file_type": "script",
       "source_file": "wiki\\entities\\ground-station-tooling.md"
     },
@@ -18539,13 +18647,13 @@
     },
     {
       "id": "check_vofa_udp_py",
-      "label": "check_vofa_udp.py — VOFA UDP Health Check",
+      "label": "check_vofa_udp.py \u2014 VOFA UDP Health Check",
       "file_type": "script",
       "source_file": "wiki\\entities\\ground-station-tooling.md"
     },
     {
       "id": "show_frame_a_vofa_bytes_py",
-      "label": "show_frame_a_vofa_bytes.py — Raw Frame Inspection",
+      "label": "show_frame_a_vofa_bytes.py \u2014 Raw Frame Inspection",
       "file_type": "script",
       "source_file": "wiki\\entities\\ground-station-tooling.md"
     },
@@ -18601,7 +18709,11 @@
       "id": "invsqrt",
       "label": "invSqrt",
       "file_type": "function",
-      "source_file": "API/imu_update.c"
+      "source_file": "API/imu_update.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "sensor_data_prepare",
@@ -18619,31 +18731,51 @@
       "id": "imu_data_struct",
       "label": "imu_data",
       "file_type": "variable",
-      "source_file": "API/imu_update.c"
+      "source_file": "API/imu_update.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "quaternion_state",
       "label": "q0..q3",
       "file_type": "variable_group",
-      "source_file": "API/imu_update.c"
+      "source_file": "API/imu_update.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "integral_terms",
       "label": "exInt, eyInt, ezInt",
       "file_type": "variable_group",
-      "source_file": "API/imu_update.c"
+      "source_file": "API/imu_update.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "pi_gains",
       "label": "Kp, Ki",
       "file_type": "constants",
-      "source_file": "API/imu_update.c"
+      "source_file": "API/imu_update.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "scaled_sensor_channels",
       "label": "Acc_X_Real, Gyro_X_Real, etc.",
       "file_type": "variable_group",
-      "source_file": "API/imu_update.c"
+      "source_file": "API/imu_update.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "mahony_filter_theory",
@@ -18673,7 +18805,11 @@
       "id": "compute_motor_function",
       "label": "Compute_Motor",
       "file_type": "function",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "set_pwm_motors_function",
@@ -18697,25 +18833,41 @@
       "id": "throttle_out_variable",
       "label": "Throttle_out",
       "file_type": "variable",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "u_gyrox_variable",
       "label": "u_gyrox",
       "file_type": "variable",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "u_gyroy_variable",
       "label": "u_gyroy",
       "file_type": "variable",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "u_gyroz_variable",
       "label": "u_gyroz",
       "file_type": "variable",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "m1_macro",
@@ -18793,13 +18945,21 @@
       "id": "constrain_float_function",
       "label": "Constrain_Float",
       "file_type": "function",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "update_motor_function",
       "label": "Update_Motor",
       "file_type": "function",
-      "source_file": "TASK/StabilizerTask.c"
+      "source_file": "TASK/StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "stabilizertask_doc",
@@ -19829,7 +19989,7 @@
     },
     {
       "id": "raffo_integral_predictive",
-      "label": "An Integral Predictive/Nonlinear H∞ Control Structure for a Quadrotor Helicopter",
+      "label": "An Integral Predictive/Nonlinear H\u221e Control Structure for a Quadrotor Helicopter",
       "file_type": "external_reference",
       "source_file": null
     },
@@ -19855,7 +20015,11 @@
       "id": "accel_to_lean_angles",
       "label": "accel_to_lean_angles",
       "file_type": "function",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "stabilizer_task_func",
@@ -19867,121 +20031,201 @@
       "id": "locx_pid",
       "label": "Ctrler.locxPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "locy_pid",
       "label": "Ctrler.locyPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "locxs_pid",
       "label": "Ctrler.locxsPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "locys_pid",
       "label": "Ctrler.locysPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "pitch_pid",
       "label": "Ctrler.pitchPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "roll_pid",
       "label": "Ctrler.rollPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "yaw_pid",
       "label": "Ctrler.yawPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "gyrox_pid",
       "label": "Ctrler.gyroxPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "gyroy_pid",
       "label": "Ctrler.gyroyPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "gyroz_pid",
       "label": "Ctrler.gyrozPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "z_pos_pid",
       "label": "Ctrler.Z_posPID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "z_rate_pid",
       "label": "Ctrler.Z_ratePID",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "cos_yaw",
       "label": "Cos_Yaw",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "sin_yaw",
       "label": "Sin_Yaw",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "cos_yaw_01",
       "label": "Cos_Yaw_01",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "sin_yaw_01",
       "label": "Sin_Yaw_01",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "imu_data_yaw",
       "label": "imu_data.yaw",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "gravity_mss",
       "label": "GRAVITY_MSS",
       "file_type": "constant",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "cnt_loc",
       "label": "cnt_loc",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "cnt_h",
       "label": "cnt_h",
       "file_type": "variable",
-      "source_file": "StabilizerTask.c"
+      "source_file": "StabilizerTask.c",
+      "meta": {
+        "last_touched_session": "autonomy-e2e",
+        "last_touched_at": "2026-07-25T13:45:58+00:00"
+      }
     },
     {
       "id": "cascade_control",
@@ -20033,7 +20277,7 @@
     },
     {
       "id": "yaw_wrapping",
-      "label": "Yaw Error Wrapping ±180°",
+      "label": "Yaw Error Wrapping \u00b1180\u00b0",
       "file_type": "design_concept",
       "source_file": "wiki\\theory\\cascaded-pid.md"
     },
@@ -20057,7 +20301,7 @@
     },
     {
       "id": "rationale_yaw_wrapping",
-      "label": "Rationale: prevents commanding 350° rotation when -10° reaches same heading",
+      "label": "Rationale: prevents commanding 350\u00b0 rotation when -10\u00b0 reaches same heading",
       "file_type": "rationale",
       "source_file": "wiki\\theory\\cascaded-pid.md"
     },
@@ -20237,7 +20481,7 @@
     },
     {
       "id": "rotation_matrix_concept",
-      "label": "rotation matrix R(q̂)",
+      "label": "rotation matrix R(q\u0302)",
       "file_type": "concept",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
@@ -20273,31 +20517,31 @@
     },
     {
       "id": "k_p_paper",
-      "label": "kₚ (paper symbol)",
+      "label": "k\u209a (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
     {
       "id": "k_i_paper",
-      "label": "kᵢ (paper symbol)",
+      "label": "k\u1d62 (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
     {
       "id": "q_hat_paper",
-      "label": "q̂ (paper symbol)",
+      "label": "q\u0302 (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
     {
       "id": "omega_err_paper",
-      "label": "ω_err (paper symbol)",
+      "label": "\u03c9_err (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
     {
       "id": "v_z_hat_paper",
-      "label": "v̂_z (paper symbol)",
+      "label": "v\u0302_z (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
@@ -20309,19 +20553,19 @@
     },
     {
       "id": "omega_raw_paper",
-      "label": "ω_raw (paper symbol)",
+      "label": "\u03c9_raw (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
     {
       "id": "delta_t_paper",
-      "label": "Δt (paper symbol)",
+      "label": "\u0394t (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
     {
       "id": "integral_omega_err_paper",
-      "label": "∫ω_err dt (paper symbol)",
+      "label": "\u222b\u03c9_err dt (paper symbol)",
       "file_type": "symbol",
       "source_file": "wiki\\theory\\mahony-filter.md"
     },
@@ -20417,7 +20661,7 @@
     },
     {
       "id": "direction_ccw",
-      "label": "Counter‑clockwise",
+      "label": "Counter\u2011clockwise",
       "type": "direction",
       "source_file": "NOTE\\diagrams\\motor_pin_map.svg"
     },
@@ -20480,7 +20724,7 @@
     },
     {
       "id": "docs_drone_control_guide_md__part_1_keil_vision_manual_debug_session",
-      "label": "Part 1 — Keil µVision Manual Debug Session",
+      "label": "Part 1 \u2014 Keil \u00b5Vision Manual Debug Session",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
@@ -20564,7 +20808,7 @@
     },
     {
       "id": "docs_drone_control_guide_md__part_2_custom_gui_dashboard_py",
-      "label": "Part 2 — Custom GUI (dashboard.py)",
+      "label": "Part 2 \u2014 Custom GUI (dashboard.py)",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
@@ -20696,7 +20940,7 @@
     },
     {
       "id": "docs_drone_control_guide_md__part_3_keil_to_gui_transition_handoff",
-      "label": "Part 3 — Keil to GUI Transition Handoff",
+      "label": "Part 3 \u2014 Keil to GUI Transition Handoff",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
@@ -20714,7 +20958,7 @@
     },
     {
       "id": "docs_drone_control_guide_md__3_3_serial_port_acquisition_can_keil_and_serial_bri",
-      "label": "3.3 Serial Port Acquisition — Can Keil and `serial_bridge.py` Coexist?",
+      "label": "3.3 Serial Port Acquisition \u2014 Can Keil and `serial_bridge.py` Coexist?",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
@@ -20732,31 +20976,31 @@
     },
     {
       "id": "docs_drone_control_guide_md__appendix_a_frame_format_reference",
-      "label": "Appendix A — Frame Format Reference",
+      "label": "Appendix A \u2014 Frame Format Reference",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
     {
       "id": "docs_drone_control_guide_md__telemetry_stm32_pc_0xaa_0xbb",
-      "label": "Telemetry (STM32 → PC) — `0xAA 0xBB`",
+      "label": "Telemetry (STM32 \u2192 PC) \u2014 `0xAA 0xBB`",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
     {
       "id": "docs_drone_control_guide_md__command_pc_stm32_0xcc_0xdd",
-      "label": "Command (PC → STM32) — `0xCC 0xDD`",
+      "label": "Command (PC \u2192 STM32) \u2014 `0xCC 0xDD`",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
     {
       "id": "docs_drone_control_guide_md__appendix_b_cmd_id_quick_reference",
-      "label": "Appendix B — CMD ID Quick Reference",
+      "label": "Appendix B \u2014 CMD ID Quick Reference",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
     {
       "id": "docs_drone_control_guide_md__appendix_c_key_variable_map",
-      "label": "Appendix C — Key Variable Map",
+      "label": "Appendix C \u2014 Key Variable Map",
       "file_type": "document",
       "source_file": "docs\\drone_control_guide.md"
     },
@@ -20768,7 +21012,7 @@
     },
     {
       "id": "docs_keil_watch_reference_md__keil5_watch_window_quick_reference",
-      "label": "Keil5 Watch Window — Quick Reference",
+      "label": "Keil5 Watch Window \u2014 Quick Reference",
       "file_type": "document",
       "source_file": "docs\\keil_watch_reference.md"
     },
@@ -21470,37 +21714,37 @@
     },
     {
       "id": "wiki_concepts_uart_peripheral_map_md__usart1_sbus_receiver",
-      "label": "USART1 — SBUS Receiver",
+      "label": "USART1 \u2014 SBUS Receiver",
       "file_type": "document",
       "source_file": "wiki\\concepts\\uart-peripheral-map.md"
     },
     {
       "id": "wiki_concepts_uart_peripheral_map_md__usart2_optical_flow_ano",
-      "label": "USART2 — Optical Flow (ANO)",
+      "label": "USART2 \u2014 Optical Flow (ANO)",
       "file_type": "document",
       "source_file": "wiki\\concepts\\uart-peripheral-map.md"
     },
     {
       "id": "wiki_concepts_uart_peripheral_map_md__usart3_linux_companion",
-      "label": "USART3 — Linux Companion",
+      "label": "USART3 \u2014 Linux Companion",
       "file_type": "document",
       "source_file": "wiki\\concepts\\uart-peripheral-map.md"
     },
     {
       "id": "wiki_concepts_uart_peripheral_map_md__uart4_t265_tracking_camera_ground_station_",
-      "label": "UART4 — T265 Tracking Camera + Ground Station Commands",
+      "label": "UART4 \u2014 T265 Tracking Camera + Ground Station Commands",
       "file_type": "document",
       "source_file": "wiki\\concepts\\uart-peripheral-map.md"
     },
     {
       "id": "wiki_concepts_uart_peripheral_map_md__uart5_ground_station_telemetry_commands",
-      "label": "UART5 — Ground Station Telemetry + Commands",
+      "label": "UART5 \u2014 Ground Station Telemetry + Commands",
       "file_type": "document",
       "source_file": "wiki\\concepts\\uart-peripheral-map.md"
     },
     {
       "id": "wiki_concepts_uart_peripheral_map_md__usart6_gps_stub",
-      "label": "USART6 — GPS (Stub)",
+      "label": "USART6 \u2014 GPS (Stub)",
       "file_type": "document",
       "source_file": "wiki\\concepts\\uart-peripheral-map.md"
     },
@@ -21632,43 +21876,43 @@
     },
     {
       "id": "wiki_reference_freertos_used_md__1_1_xtaskcreate_task_creation",
-      "label": "1.1 `xTaskCreate()` — Task Creation",
+      "label": "1.1 `xTaskCreate()` \u2014 Task Creation",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
     {
       "id": "wiki_reference_freertos_used_md__1_2_vtaskstartscheduler_start_multitasking",
-      "label": "1.2 `vTaskStartScheduler()` — Start Multitasking",
+      "label": "1.2 `vTaskStartScheduler()` \u2014 Start Multitasking",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
     {
       "id": "wiki_reference_freertos_used_md__1_3_vtaskdelayuntil_deterministic_periodic_sche",
-      "label": "1.3 `vTaskDelayUntil()` — Deterministic Periodic Scheduling",
+      "label": "1.3 `vTaskDelayUntil()` \u2014 Deterministic Periodic Scheduling",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
     {
       "id": "wiki_reference_freertos_used_md__1_4_pdms_to_ticks_convert_milliseconds_to_ticks",
-      "label": "1.4 `pdMS_TO_TICKS()` — Convert Milliseconds to Ticks",
+      "label": "1.4 `pdMS_TO_TICKS()` \u2014 Convert Milliseconds to Ticks",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
     {
       "id": "wiki_reference_freertos_used_md__1_5_xtaskgettickcount_xtaskgettickcountfromisr_",
-      "label": "1.5 `xTaskGetTickCount()` / `xTaskGetTickCountFromISR()` — Current Tick",
+      "label": "1.5 `xTaskGetTickCount()` / `xTaskGetTickCountFromISR()` \u2014 Current Tick",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
     {
       "id": "wiki_reference_freertos_used_md__1_6_taskenter_critical_taskexit_critical_critic",
-      "label": "1.6 `taskENTER_CRITICAL()` / `taskEXIT_CRITICAL()` — Critical Sections",
+      "label": "1.6 `taskENTER_CRITICAL()` / `taskEXIT_CRITICAL()` \u2014 Critical Sections",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
     {
       "id": "wiki_reference_freertos_used_md__1_7_vtaskdelete_task_deletion",
-      "label": "1.7 `vTaskDelete()` — Task Deletion",
+      "label": "1.7 `vTaskDelete()` \u2014 Task Deletion",
       "file_type": "document",
       "source_file": "wiki\\reference\\freertos-used.md"
     },
@@ -21770,7 +22014,7 @@
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__2_tim3_motor_esc_pwm_output",
-      "label": "2. TIM3 — Motor ESC PWM Output",
+      "label": "2. TIM3 \u2014 Motor ESC PWM Output",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
@@ -21794,19 +22038,19 @@
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__3_tim5_microsecond_timestamp",
-      "label": "3. TIM5 — Microsecond Timestamp",
+      "label": "3. TIM5 \u2014 Microsecond Timestamp",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__4_tim4_servo_pwm_output",
-      "label": "4. TIM4 — Servo PWM Output",
+      "label": "4. TIM4 \u2014 Servo PWM Output",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__5_usart_peripherals_async_serial_dma",
-      "label": "5. USART Peripherals — Async Serial + DMA",
+      "label": "5. USART Peripherals \u2014 Async Serial + DMA",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
@@ -21818,13 +22062,13 @@
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__5_2_usart1_sbus_receiver_special_configur",
-      "label": "5.2 USART1 — SBUS Receiver (Special Configuration)",
+      "label": "5.2 USART1 \u2014 SBUS Receiver (Special Configuration)",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__5_3_uart5_ground_station_dma_configuratio",
-      "label": "5.3 UART5 — Ground Station (DMA Configuration Example)",
+      "label": "5.3 UART5 \u2014 Ground Station (DMA Configuration Example)",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
@@ -21836,7 +22080,7 @@
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__6_spi_bmi088_imu_communication",
-      "label": "6. SPI — BMI088 IMU Communication",
+      "label": "6. SPI \u2014 BMI088 IMU Communication",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
@@ -21860,7 +22104,7 @@
     },
     {
       "id": "wiki_reference_stm32f4_peripherals_md__8_adc_battery_voltage_monitor",
-      "label": "8. ADC — Battery Voltage Monitor",
+      "label": "8. ADC \u2014 Battery Voltage Monitor",
       "file_type": "document",
       "source_file": "wiki\\reference\\stm32f4-peripherals.md"
     },
@@ -21914,7 +22158,7 @@
     },
     {
       "id": "wiki_sources_cross_subsystem_interfaces_md__if_04_mixer_output_timer_compare_map",
-      "label": "IF-04: Mixer Output → Timer Compare Mapping",
+      "label": "IF-04: Mixer Output \u2192 Timer Compare Mapping",
       "file_type": "document",
       "source_file": "wiki\\sources\\cross-subsystem-interfaces.md"
     },
@@ -21938,7 +22182,7 @@
     },
     {
       "id": "wiki_theory_yucelen_lectures_md__yucelen_lectures_on_adaptive_control_digest",
-      "label": "Yucelen Lectures on Adaptive Control — Digest",
+      "label": "Yucelen Lectures on Adaptive Control \u2014 Digest",
       "file_type": "document",
       "source_file": "wiki\\theory\\yucelen-lectures.md"
     },
@@ -22028,7 +22272,7 @@
     },
     {
       "id": "wiki_theory_yucelen_lectures_md__3_conceptual_map_lecture_topics_code_architectu",
-      "label": "3. Conceptual Map: Lecture Topics → Code Architecture",
+      "label": "3. Conceptual Map: Lecture Topics \u2192 Code Architecture",
       "file_type": "document",
       "source_file": "wiki\\theory\\yucelen-lectures.md"
     },
@@ -78392,5 +78636,399 @@
       "weight": 1.0
     }
   ],
-  "hyperedges": []
+  "hyperedges": [],
+  "change_log": [
+    {
+      "ts": "2026-07-25T11:56:35+00:00",
+      "session": "demo-session",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T11:57:25+00:00",
+      "session": "demo-session",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T11:59:06+00:00",
+      "session": "demo-session",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T12:00:19+00:00",
+      "session": "e2e-test-session",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T12:00:20+00:00",
+      "session": "e2e-test-session",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T13:41:54+00:00",
+      "session": "autonomy-e2e",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "stabilizertask",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "stabilizertask_stabilizer_task",
+        "stabilizertask_update_data",
+        "stabilizertask_update_motor",
+        "stabilizertask_compute_motor",
+        "stabilizertask_update_des",
+        "stabilizertask_constrain_float",
+        "stabilizertask_fast_atan",
+        "stabilizertask_accel_to_lean_angles",
+        "stabilizertask_fast_atan2",
+        "stabilizertask_get_voltage",
+        "update_des",
+        "twc_arrived",
+        "stabilizer_task_update_des",
+        "update_data",
+        "eff_rc_helpers",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels",
+        "compute_motor_function",
+        "throttle_out_variable",
+        "u_gyrox_variable",
+        "u_gyroy_variable",
+        "u_gyroz_variable",
+        "constrain_float_function",
+        "update_motor_function",
+        "accel_to_lean_angles",
+        "locx_pid",
+        "locy_pid",
+        "locxs_pid",
+        "locys_pid",
+        "pitch_pid",
+        "roll_pid",
+        "yaw_pid",
+        "gyrox_pid",
+        "gyroy_pid",
+        "gyroz_pid",
+        "z_pos_pid",
+        "z_rate_pid",
+        "cos_yaw",
+        "sin_yaw",
+        "cos_yaw_01",
+        "sin_yaw_01",
+        "imu_data_yaw",
+        "gravity_mss",
+        "cnt_loc",
+        "cnt_h"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T13:42:10+00:00",
+      "session": "autonomy-e2e",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "stabilizertask",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "stabilizertask_stabilizer_task",
+        "stabilizertask_update_data",
+        "stabilizertask_update_motor",
+        "stabilizertask_compute_motor",
+        "stabilizertask_update_des",
+        "stabilizertask_constrain_float",
+        "stabilizertask_fast_atan",
+        "stabilizertask_accel_to_lean_angles",
+        "stabilizertask_fast_atan2",
+        "stabilizertask_get_voltage",
+        "update_des",
+        "twc_arrived",
+        "stabilizer_task_update_des",
+        "update_data",
+        "eff_rc_helpers",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels",
+        "compute_motor_function",
+        "throttle_out_variable",
+        "u_gyrox_variable",
+        "u_gyroy_variable",
+        "u_gyroz_variable",
+        "constrain_float_function",
+        "update_motor_function",
+        "accel_to_lean_angles",
+        "locx_pid",
+        "locy_pid",
+        "locxs_pid",
+        "locys_pid",
+        "pitch_pid",
+        "roll_pid",
+        "yaw_pid",
+        "gyrox_pid",
+        "gyroy_pid",
+        "gyroz_pid",
+        "z_pos_pid",
+        "z_rate_pid",
+        "cos_yaw",
+        "sin_yaw",
+        "cos_yaw_01",
+        "sin_yaw_01",
+        "imu_data_yaw",
+        "gravity_mss",
+        "cnt_loc",
+        "cnt_h"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T13:45:43+00:00",
+      "session": "autonomy-e2e",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "stabilizertask",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "stabilizertask_stabilizer_task",
+        "stabilizertask_update_data",
+        "stabilizertask_update_motor",
+        "stabilizertask_compute_motor",
+        "stabilizertask_update_des",
+        "stabilizertask_constrain_float",
+        "stabilizertask_fast_atan",
+        "stabilizertask_accel_to_lean_angles",
+        "stabilizertask_fast_atan2",
+        "stabilizertask_get_voltage",
+        "update_des",
+        "twc_arrived",
+        "stabilizer_task_update_des",
+        "update_data",
+        "eff_rc_helpers",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels",
+        "compute_motor_function",
+        "throttle_out_variable",
+        "u_gyrox_variable",
+        "u_gyroy_variable",
+        "u_gyroz_variable",
+        "constrain_float_function",
+        "update_motor_function",
+        "accel_to_lean_angles",
+        "locx_pid",
+        "locy_pid",
+        "locxs_pid",
+        "locys_pid",
+        "pitch_pid",
+        "roll_pid",
+        "yaw_pid",
+        "gyrox_pid",
+        "gyroy_pid",
+        "gyroz_pid",
+        "z_pos_pid",
+        "z_rate_pid",
+        "cos_yaw",
+        "sin_yaw",
+        "cos_yaw_01",
+        "sin_yaw_01",
+        "imu_data_yaw",
+        "gravity_mss",
+        "cnt_loc",
+        "cnt_h"
+      ],
+      "op": "path_refresh.annotate"
+    },
+    {
+      "ts": "2026-07-25T13:45:58+00:00",
+      "session": "autonomy-e2e",
+      "nodes": [
+        "imu_update",
+        "mrac",
+        "stabilizertask",
+        "imu_update_invsqrt",
+        "imu_update_imu_update_mahony",
+        "mrac_mrac_inversemixer",
+        "mrac_mrac_generatestructuredbasis",
+        "mrac_mrac_projectgradient",
+        "mrac_mrac_updateaxis",
+        "mrac_mrac_init",
+        "mrac_mrac_reset",
+        "mrac_mrac_control",
+        "stabilizertask_stabilizer_task",
+        "stabilizertask_update_data",
+        "stabilizertask_update_motor",
+        "stabilizertask_compute_motor",
+        "stabilizertask_update_des",
+        "stabilizertask_constrain_float",
+        "stabilizertask_fast_atan",
+        "stabilizertask_accel_to_lean_angles",
+        "stabilizertask_fast_atan2",
+        "stabilizertask_get_voltage",
+        "update_des",
+        "twc_arrived",
+        "stabilizer_task_update_des",
+        "update_data",
+        "eff_rc_helpers",
+        "invsqrt",
+        "imu_data_struct",
+        "quaternion_state",
+        "integral_terms",
+        "pi_gains",
+        "scaled_sensor_channels",
+        "compute_motor_function",
+        "throttle_out_variable",
+        "u_gyrox_variable",
+        "u_gyroy_variable",
+        "u_gyroz_variable",
+        "constrain_float_function",
+        "update_motor_function",
+        "accel_to_lean_angles",
+        "locx_pid",
+        "locy_pid",
+        "locxs_pid",
+        "locys_pid",
+        "pitch_pid",
+        "roll_pid",
+        "yaw_pid",
+        "gyrox_pid",
+        "gyroy_pid",
+        "gyroz_pid",
+        "z_pos_pid",
+        "z_rate_pid",
+        "cos_yaw",
+        "sin_yaw",
+        "cos_yaw_01",
+        "sin_yaw_01",
+        "imu_data_yaw",
+        "gravity_mss",
+        "cnt_loc",
+        "cnt_h"
+      ],
+      "op": "path_refresh.annotate"
+    }
+  ]
 }

@@ -62,3 +62,11 @@ No timeout watchdog outside per-path `duration` logic is present; deactivation i
 - [[AutoflyTask]]
 - [[Autonomous Path Generation]]
 - [[Ground-Station Binary Protocol]]
+
+<!-- recent_change:2026-07-25 -->
+## Recent change (2026-07-25)
+
+Auto-flagged by path_refresh. Files affected in this session:
+- `TASK/StabilizerTask.c`
+
+Run `/wiki ingest` or `python -m graphify --update` to verify rationale still holds. Remove this section if confirmed unchanged.
