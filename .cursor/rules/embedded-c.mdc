@@ -1,0 +1,17 @@
+---
+description: STM32F4 / FreeRTOS firmware conventions and high-value gotchas for this flight controller
+globs: API/**/*.c,API/**/*.h,TASK/**/*.c,TASK/**/*.h,BSP/**,USER/**,FreeRTOS/**
+alwaysApply: false
+---
+
+# Firmware Conventions (STM32F4 + FreeRTOS)
+
+- C for embedded; FreeRTOS task-based architecture. Follow existing conventions in `API/`, `TASK/`, `BSP/`, `USER/`.
+- Real-time hazards to watch: no blocking calls or heavy float in ISRs, mind task stack sizes (some tasks are ~500 words / 2 kB), protect shared state against ISR/task races, keep telemetry frame sizes in sync with the ground-station protocol version.
+- Verify changes against a real signal (build in uVision, or offline replay on flight CSVs) before claiming done — not just visual inspection.
+
+## Known gotchas (check wiki/ + memory for full context before assuming)
+- **Flashing:** UART5 is physically shared — swap the wireless debugger onto UART5 to flash, swap the comm module back on for telemetry. Both cannot be connected at once.
+- **Inner-PID axis mapping:** `gyrox` = roll loop, `gyroy` = pitch loop (StabilizerTask). A dashboard label may not match the loop it tunes — confirm at the source.
+- **ekf.c is non-re-entrant** (single instance, two file-scope 9×9 snapshots on purpose). `b_g` states are unobservable; gyro bias comes from `CalHot_Step`, not the EKF.
+- Prefer `ccc search` / `GRAPH_REPORT.md` / `wiki/` to locate a subsystem before editing — this codebase is large and noisy.

@@ -1,0 +1,50 @@
+---
+description: Core working protocol for this repo — how the agent should think, search, and change code
+alwaysApply: true
+---
+
+# Core Agent Protocol
+
+## 1. Knowledge-stack first (before ANY code exploration)
+1. `ccc search "<semantic query>"` → exact `file:line`
+2. Read `graphify-out/GRAPH_REPORT.md` → architecture, god nodes, who-owns-what
+3. Read `wiki/index.md` → design decisions, gotchas
+4. Read `docs/decisions.md` → why something was built a certain way
+
+Do NOT grep/glob/read files for exploration until the stack returns nothing.
+Never read whole files — read targeted line ranges once the stack narrows the target.
+
+## 2. Think before coding — surface confusion
+- State assumptions explicitly. If uncertain, **ASK before implementing**.
+- If multiple interpretations exist, present them — don't silently pick one.
+- If a simpler approach exists, say so. Push back when warranted.
+- Confirm shared understanding on any non-trivial, cross-subsystem, or hard-to-reverse change **before** acting.
+
+## 3. Simplicity + surgical changes
+- Minimum code that solves the problem. Nothing speculative.
+- Touch only what the task requires. Don't refactor or reformat adjacent code.
+- Match existing style even if you'd do it differently.
+- Note unrelated dead code — don't delete it.
+- Every changed line should trace directly to the request.
+
+## 4. Goal-driven execution (loop until verified)
+State a brief plan as verifiable steps:
+```
+1. [step] → verify: [check]
+2. [step] → verify: [check]
+```
+Then loop until each check passes. Do NOT report "done" until verified against a real signal (build, test, or replay) — not just "the code looks right".
+
+## 5. Report format
+`STATUS / COMPLETED / BLOCKED / FILES_CHANGED / TESTS / NEXT_RECOMMENDED / CONFIDENCE`
+
+## 6. Manage the context window
+- Read only files needed for the current task; prefer targeted ranges.
+- Don't re-read files you just wrote.
+- Summarize long outputs rather than quoting them wholesale.
+
+## 7. After editing code
+Keep the knowledge graph current:
+```
+python -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
+```

@@ -1,34 +1,16 @@
-# Copilot Instructions
+# Rules migrated → .cursor/rules/*.mdc
 
-## Tool Priority
-1. FIRST: `ccc search "semantic description"` — zero token cost, finds exact file:line
-2. SECOND: read graphify-out/GRAPH_REPORT.md for architecture/community relationships
-3. LAST RESORT: read specific file:line ranges (only after steps 1-2 narrow the target)
-Never read full files. Never grep the raw codebase without searching first.
+Cursor still loads this file on every turn, so it is intentionally kept thin.
+The real rules are now scoped `.mdc` files under `.cursor/rules/`:
 
-## Self-Audit Protocol
-Before reporting work, verify:
-- [ ] No full files read without prior ccc search
-- [ ] No new files created unless strictly necessary
-- [ ] No code written beyond what was asked
-- [ ] Report uses STATUS / COMPLETED / BLOCKED / FILES_CHANGED / TESTS / NEXT_RECOMMENDED / CONFIDENCE
+- `000-core.mdc`       — always-on protocol: knowledge-stack-first, think-before-coding,
+                         goal-driven loops, surgical changes, report format
+- `knowledge-stack.mdc`— full query-priority stack (ccc / graphify / wiki / decisions / interfaces / lessons)
+- `ccc-search.mdc`     — ccc/cocoindex daemon operational guide (agent-requested)
+- `embedded-c.mdc`     — STM32F4/FreeRTOS conventions + gotchas (auto-attaches on API/TASK/BSP/USER)
 
-## Project
-UAV Six Degrees of Freedom (6DOF) flight controller based on FreeRTOS with ground station integration.
-
-## Architecture
-- **Kernel**: FreeRTOS real-time operating system
-- **Target**: STM32 microcontroller (inferred from BSP)
-- **Main Components**:
-  - FreeRTOS kernel and task scheduler
-  - Board support package (BSP)
-  - Sensor APIs (IMU, GPS)
-  - Ground station communication
-  - User application tasks
-
-See docs/architecture.md for detailed structure.
-
-## Style
-- C/C++ code for embedded systems
-- FreeRTOS task-based architecture
-- Follow existing code conventions in API/, USER/, and TASK/ directories
+Custom commands: `.cursor/commands/` — type `/` in the Agent (session-start, session-end, diagnose, review).
+Custom subagents: `.cursor/agents/` — `uav-conductor` (full pipeline orchestrator, Claude Opus 5
+High), `uav-planner` (Claude Opus 5 High), `uav-implementer` (Cursor Grok 4.5 High Fast), and
+`uav-reviewer` (GPT-5.6 Sol High, readonly). See `.cursor/agents/AGENTS.md` for the full index.
+Hooks: `.cursor/hooks.json` + `.cursor/hooks/knowledge-gate.js` (nudges toward ccc before raw grep).

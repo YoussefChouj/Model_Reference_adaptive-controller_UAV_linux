@@ -1,0 +1,40 @@
+---
+description: Non-negotiable hardware safety constraints for this UAV firmware repo. Always applies.
+alwaysApply: true
+---
+
+# HARDWARE SAFETY — NON-NEGOTIABLE
+
+A physical drone is on the bench, **disarmed, with props installed**. You are a code agent. You
+do not touch the hardware.
+
+## Absolute prohibitions
+
+- **Never** run `pyocd`, `openocd`, `st-flash`, `st-util`, `JLink*`, or any debug-probe tool.
+- **Never** invoke `ground_station.flashtool` or `ground_station.livewatch` (or edit their sources).
+- **Never** halt, reset, or write the target core. Never write firmware to the board.
+- **Never** write code that spins motors, arms the vehicle, or bypasses an arm-state gate.
+- **Never** modify `OBJ/`, `*.hex`, or `*.axf` — build outputs, not source.
+
+Flashing, live target reads, and any bench interaction are performed **only** by the human
+operator or by the Claude Code orchestrator. If a task appears to require them, stop and say so
+in your output instead of doing it.
+
+## Control-path constraint (current, explicit user intent)
+
+The optical-flow bias estimator is the default position source
+(`ano_of.earth_x/y` -> `Ctrler.locxPID.FB` / `locyPID.FB`).
+The 9-state EKF (`s_ekf`) is **shadow mode / compute-only**.
+
+Do **not** wire EKF output into `locxPID.FB`, `locyPID.FB`, or any other control path.
+Read `CLAUDE.md` "Session State" before proposing changes in this area.
+
+## Scope discipline
+
+- Change only files the spec's Scope section lists. Never touch files it excludes.
+- Match surrounding style. No speculative abstractions, no drive-by refactors.
+- Firmware is C for Keil ARMCC V5.06 — C89-ish declarations at block top, no VLAs, no C99-only
+  constructs. Stack is tight (Send_Task = 500 words / 2 kB); prefer file-scope buffers to large
+  locals and say so in a comment when you do.
+- If you believe the spec is wrong, write that at the top of your output and implement it anyway
+  under a stated assumption. Do not silently redesign.

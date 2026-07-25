@@ -4,5 +4,11 @@
 .agent_memory/
 .agent_scripts/__pycache__/
 
+# Session bookkeeping (orchestrator/knowledge-state marker files; not source)
+.agent_state/
+
 # Generated simulation run artifacts (ADR-0006 D7)
 sim/runs/
+
+# Graphify AST cache — regenerable, hash-keyed, churns every rebuild
+graphify-out/cache/

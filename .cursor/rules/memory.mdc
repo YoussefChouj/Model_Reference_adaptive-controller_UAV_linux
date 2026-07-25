@@ -1,0 +1,38 @@
+---
+description: Accumulated project facts, open bugs, and hard-won gotchas for this UAV flight controller (user profile, physical params, protocol, known-dangerous loops). Consult before diagnosing, flying, or changing firmware/ground-station code.
+globs: API/**,TASK/**,BSP/**,USER/**,ground_station/**,sim/**
+alwaysApply: false
+---
+
+# Project Memory (mirrored from Claude Code auto-memory)
+
+> Point-in-time facts, not live state. Cite `file:line` only after confirming against current code.
+> Canonical source: `.claude/projects/.../memory/*.md` + `wiki/` + `docs/`.
+
+## Who / context
+- **User:** beginner–intermediate embedded dev, master's thesis. Explain at intermediate level; show full FreeRTOS calls.
+- **Toolchain:** Keil 5, ARMCC V5.06 — **C99 only**. No C11 atomics, no `_Atomic`/`_Generic`/`stdatomic.h`. Use `typedef struct {} Name_t;` style.
+- **Thesis:** dense-waypoint (5 cm) UAV path tracking; NN policy (Transformer) outputs yaw-rate + x/y/z velocity setpoints, trained by behavioral cloning from an expert pilot; Digital Twin in Gazebo; VRC channel is the policy→firmware injection path.
+
+## ⚠️ OPEN bugs — do not regress
+- **OF position-hold velocity loop is sign-inverted (positive feedback).** Engaging OF hold (ch6 high) airborne makes the drone lunge diagonally and run away in ~1.7 s (flight-confirmed). Wrong sign in the map: OF velocity FB → des_pitch/roll (`StabilizerTask.c` ~246-247 FB, ~773-774 des; comment at ~766 already flags it). **DO NOT FLY OF hold until fixed.** Angle mode (ch6 low, default) flies clean.
+- **Dashboard inner-PID axis swap.** `INNER_PID_AXIS_TO_PIDS` (dashboard.py ~87-91) maps "pitch"→gyroxPID and "roll"→gyroyPID, but firmware truth is **gyrox = roll rate, gyroy = pitch rate** (`StabilizerTask.c:619-620`). So the "pitch" inner slider tunes the roll loop. Latent because gains usually identical. Firmware `StabilizerTask.c:619-620` is the ONLY axis↔gyro authority.
+
+## Fixed, but standing constraints
+- **IMU SPI2 owns PC2–PC5** (PC2=MISO, PC3=MOSI, PC4/PC5=CS; SCK=PB13). Never reconfigure these — an IR-sensor init on them caused flip-on-liftoff (2026-07-21). IR sensors restricted to PC0/PC1. Motors=TIM3 PA6/PA7/PB0/PB1; RPM=PA0/PA1/PC6/PC7.
+- **`send_to_linux()` busy-waits on UART4 DMA.** If UART4 is disabled, Send_Task hangs after one frame → all telemetry dead. Guard: `if ((UART4->CR1 & USART_CR1_UE)==0U) return;`. Gotcha: `USART2_task_cnt` counts the OF-RX ISR (~14 kHz), NOT the send loop — never use it as a "loop alive" signal.
+- **EKF (`API/ekf.c`, ADR-0011) matched golden as of 2026-07-24** after fixing 3 defects (dropped F cross-terms → b_a unobservable; wrong update covariance; in-place aliasing). `b_g` gyro-bias states are **unobservable** (effectively 6-state; gyro bias comes from `CalHot_Step`). Firmware-C replay validation on real CSVs still owed before any control-loop use; EKF is telemetry-only (`EKF_TELEM_ENABLED`).
+
+## Physical / tuning facts
+- **Measured mass = 988.5 g** with battery. Sim notebooks using `DRONE_MASS=0.366 kg` are 2.7× too light — invalidates their inertia, hover-throttle, thrust-to-weight. SysID plant gains (roll/pitch 2nd-order ~44 rad/s, yaw integrator K~37) are input→output, mass-independent, still valid. For true inertia do a bifilar/trifilar pendulum test.
+- **Steady ~3° pitch drift** = IMU bias ~1.3° + uncentered pitch stick ~0.8° + CG/load imbalance ~1.4° (missing ~68 g motor guard on one side). **Flew fine before the sensor swap** → treat drift regressions as swap-related, not the imbalance.
+- **RPM sensor firmware is correct — do NOT re-audit.** EXTI verified in Keil; zero edges = electrical/sensor-power fault (suspected 5 V brownout ~4 s into boot). PA5/CH1 is not 5V-tolerant; use CH2/3/4.
+
+## Protocol (keep BOTH sides in sync — `GS_PROTO_VERSION = 13`)
+- Any frame/CMD change → update firmware (`send_data.c`, `global_declare.h`) AND Python (`serial_bridge.py`, `frame_simulator.py`, `diag_telemetry_link.py`, `docs/channel_map.txt`), then bump the version.
+- CMD frame: `[0xCC][0xDD][CMD_ID][INDEX][float32 LE][CRC8-XOR]`, 8 B. Telemetry: `[0xAA][0xBB][type][LEN_hi][LEN_lo][MAX_NUM_BASIS][payload][CRC8-XOR]`.
+- Frame A (0x01, 100 Hz, payload 41 v13 / 39 v10 accepted); Frame B (0x02, 20 Hz); Frame C (0x06, 50 Hz, CRC16 — GS does not parse yet); 0x03 SysID; 0x04 motor bench; 0x05 OF calib. Full CMD/frame tables live in the `project-protocol-contract` memory + `docs/channel_map.txt`.
+- VRC (CMD 0x06) is always normalized [-1,+1], center 0. TWC units are mixed: X/Y in **cm**, Z in **metres** — convert before any Euclidean distance.
+
+## Ops
+- **Flashing:** UART5 is physically shared — swap the wireless debugger onto UART5 to flash, swap the comm module back for telemetry. Both cannot be connected at once.

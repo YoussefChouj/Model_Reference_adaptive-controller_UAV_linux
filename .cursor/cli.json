@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(ls)",
+      "Shell(git status)",
+      "Shell(git diff)",
+      "Shell(git log)",
+      "Shell(rg)",
+      "Shell(pytest)"
+    ],
+    "deny": [
+      "Shell(pyocd)",
+      "Shell(pyocd-gdbserver)",
+      "Shell(openocd)",
+      "Shell(st-flash)",
+      "Shell(st-util)",
+      "Shell(JLinkExe)",
+      "Shell(UV4)",
+      "Shell(UV4.exe)",
+      "Shell(rm)",
+      "Shell(git push)",
+      "Shell(git reset)",
+      "Shell(git clean)",
+      "Write(**/OBJ/**)",
+      "Write(**/*.hex)",
+      "Write(**/*.axf)",
+      "Write(**/ground_station/flashtool/**)",
+      "Write(**/ground_station/livewatch/**)",
+      "Write(**/.env*)",
+      "Write(**/*.key)"
+    ]
+  }
+}

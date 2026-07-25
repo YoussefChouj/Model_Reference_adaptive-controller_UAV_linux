@@ -1,0 +1,34 @@
+---
+description: Full knowledge-stack query priority and where each knowledge layer lives (ccc, graphify, wiki, decisions, interfaces, lessons). Consult when deciding where to look for information about this codebase.
+alwaysApply: false
+---
+
+# Knowledge Stack
+
+| Layer | Tool | Query method | STOP here when it answers |
+| --- | --- | --- | --- |
+| Code search | CocoIndex | `ccc search "query"` | exact code locations, symbol defs |
+| Code graph | Graphify | read `graphify-out/GRAPH_REPORT.md` | system-wide deps, who owns what |
+| Knowledge wiki | LLM Wiki | read `wiki/index.md` | architecture, design decisions, gotchas |
+| Decisions | decisions.md | read `docs/decisions.md` | why something was built a certain way |
+| Interfaces | interfaces.md | read `docs/interfaces.md` | cross-subsystem contracts |
+| Lessons | lessons.jsonl | read `.agent_memory/lessons.jsonl` | past task learnings, mistakes to avoid |
+
+## Query priority
+```
+1. ccc search        → "where is X?"
+2. GRAPH_REPORT.md   → "what depends on X?"
+3. wiki/             → "why was X designed this way?"
+4. docs/decisions.md → "what was decided about X?"
+5. docs/interfaces.md→ cross-subsystem contracts
+6. lessons.jsonl     → past learnings
+```
+
+## When to use ccc vs grep
+| Use `ccc search` | Use raw grep |
+| --- | --- |
+| conceptual / semantic queries | exact symbol/function name known |
+| cross-subsystem exploration | need ALL call sites (ccc caps ~10) |
+| noisy codebase, broad terms | scoped to a known directory, speed critical |
+
+Adding knowledge: drop sources in `raw/`, then run the wiki ingest. Re-index the graph after wiki/code changes.

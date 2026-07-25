@@ -1,0 +1,34 @@
+---
+description: Operational guide for the ccc/cocoindex semantic search daemon — cold-start latency, the no-parallelism rule, path/language filters, optimization, and internals. Consult before running ccc search or when a search hangs.
+alwaysApply: false
+---
+
+# ccc search — Daemon Behavior
+
+`ccc search` requires the cocoindex daemon running.
+
+| Fact | Detail |
+|------|--------|
+| Cold-start | First query after daemon start ~6 s (SBERT load). Use a ≥120 s timeout on the first call of a session. |
+| Steady-state | ~7 s / query on this project (499 MB vector DB). |
+| **No parallelism** | Do NOT run multiple `ccc search` in parallel — SBERT + SQLite are shared; parallel calls serialize and thermally load the laptop. Run sequentially. |
+| Daemon lifecycle | `ccc daemon status` to check; `ccc daemon restart` if hung / "Failed to connect". |
+| If search hangs | Daemon alive but overloaded on the large DB → `ccc daemon restart`, retry. |
+| Default model | `all-MiniLM-L6-v2`, 384-dim; CUDA on this machine. |
+
+## Internals
+Query → SBERT embed (384-dim) → SQLite `vec0` ANN KNN over `target_sqlite.db` → top-k by cosine → CLI/MCP.
+Chunks: 1000 chars, 150 overlap. Default limit 5, max 100 (paginate via `offset`).
+`refresh_index=True` by default in MCP (incremental re-walk); set `False` for repeat queries on unchanged code.
+`paths=` filter falls back to a **full scan** (slower on big DB); `languages=` uses the partitioned ANN index (fast).
+
+## Optimization
+| Strategy | How | Benefit |
+|----------|-----|---------|
+| Language filter | `languages=["c","python"]` | partitioned ANN, no full scan |
+| Small limit | `limit=5` + `offset` | less transfer |
+| `refresh_index=False` | repeated queries | skips file walk |
+| Warm-up | one dummy query at session start | subsequent queries steady-state |
+
+Two-layer file filtering: `.cocoindex_code/settings.yml` include/exclude + recursive `.gitignore` stacking.
+Shrink the DB by tightening `exclude_patterns` in `settings.yml`, then `ccc index --reindex`.
