@@ -13,7 +13,7 @@ VOFA connection has a fixed float count (JustFloat requirement).
 
 Telemetry from the vehicle/simulator still goes to simulate_udp_port (default 50007)
 for serial_bridge --simulate; the bridge unpacks and forwards to vofa_port_a / vofa_port_b.
-GS_PROTO_VERSION = 8 (ADR-0010: bench frame 0x04 payload grew 12 -> 20 B; serial_bridge accepts both).
+GS_PROTO_VERSION = 14 (ADR-0011: Frame 0x05 grew 39->53 B always-on (acc_bias, gyro_bias, cal_health); with EKF_TELEM_ENABLED=1: 53->73 B (v_body, P_diag, NIS, K_last). Added CMD 0x18 force_recal).
 
 -------------------------------------------------------------------------------
 JUSTFLOAT CHANNEL MAP - Frame A (100 Hz)  --  UDP vofa_port_a (default 1347)

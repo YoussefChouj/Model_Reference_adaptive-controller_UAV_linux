@@ -1,0 +1,315 @@
+{
+  "host": "win32",
+  "pyserial_version": "3.5",
+  "scan_timestamp_local": "2026-07-22 00:03:01 China Standard Time",
+  "phase1_open_at_115200": [
+    {
+      "port": "COM1",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM1': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM2",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM2': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM3",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM3': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM4",
+      "opened": true,
+      "error": "",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM5",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM5': OSError(22, 'The semaphore timeout period has expired.', None, 121)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM6",
+      "opened": true,
+      "error": "",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM7",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM7': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM8",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM8': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM9",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM9': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM10",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM10': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM11",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM11': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM12",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM12': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM13",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM13': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM14",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM14': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM15",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM15': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM16",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM16': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM17",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM17': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM18",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM18': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM19",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM19': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM20",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM20': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM21",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM21': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM22",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM22': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM23",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM23': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM24",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM24': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM25",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM25': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM26",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM26': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM27",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM27': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM28",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM28': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM29",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM29': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    },
+    {
+      "port": "COM30",
+      "opened": false,
+      "error": "SerialException: SerialException: could not open port 'COM30': FileNotFoundError(2, 'The system cannot find the file specified.', None, 2)",
+      "bytes_115200": 0
+    }
+  ],
+  "phase2_baud_sweep": [
+    {
+      "port": "COM4",
+      "baud": 9600,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM4",
+      "baud": 19200,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM4",
+      "baud": 38400,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM4",
+      "baud": 57600,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM4",
+      "baud": 115200,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM4",
+      "baud": 230400,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM4",
+      "baud": 460800,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 9600,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 19200,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 38400,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 57600,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 115200,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 230400,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    },
+    {
+      "port": "COM6",
+      "baud": 460800,
+      "opened": true,
+      "error": "",
+      "bytes": 0,
+      "sync_count": 0,
+      "first32_hex": ""
+    }
+  ]
+}

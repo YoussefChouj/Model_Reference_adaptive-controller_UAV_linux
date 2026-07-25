@@ -380,9 +380,10 @@ class Dashboard:
         self._plot_z_des: List[float] = []
 
         # Unified telemetry: UDP mirror (remote bridge) + direct copy when local SerialBridge in-process.
-        self._telem: Dict[str, Any] = {"a": {}, "b": {}, "id": {}, "of": {}, "max_num_basis": 8}
+        self._telem: Dict[str, Any] = {"a": {}, "b": {}, "c": {}, "id": {}, "of": {}, "max_num_basis": 8}
         self._last_id_counter: float = -1.0  # dedup high-rate ID-frame logging by firmware sample counter
         self._last_of_counter: float = -1.0  # dedup high-rate OF-calibration-frame (0x05) logging by firmware sample counter
+        self._last_c_seq: float = -1.0  # dedup Frame C (0x06) logging by firmware sequence number
         # Live link-quality: rolling window of firmware sample-counter deltas. recv_frac =
         # (#frames) / (sum of deltas). < 1.0 means dropped frames -> drone too far from receiver.
         self._id_link_gaps: "deque[float]" = deque(maxlen=300)
@@ -458,6 +459,17 @@ class Dashboard:
                             self._last_id_counter = c
                             with self._log_lock:
                                 self._flight_logger.log_snapshot("ID", idf)
+                if "c" in msg and isinstance(msg["c"], dict):
+                    cf = {str(k): float(v) for k, v in msg["c"].items()}
+                    self._telem["c"] = cf
+                    # Frame C (0x06) rides with every Frame A on the link — log here at full
+                    # link rate, deduped by the firmware sequence number, so the render loop's
+                    # slower cadence doesn't drop samples. Mirrors the ID/OF paths.
+                    cs = cf.get("c.seq")
+                    if self._recording_flight and cs is not None and cs != self._last_c_seq:
+                        self._last_c_seq = cs
+                        with self._log_lock:
+                            self._flight_logger.log_snapshot("C", cf)
                 if "bench" in msg and isinstance(msg["bench"], dict):
                     self._telem["bench"] = {str(k): float(v) for k, v in msg["bench"].items()}
                 if "of" in msg and isinstance(msg["of"], dict):
@@ -787,7 +799,7 @@ class Dashboard:
             self._set_connection_detail(f"Connected ({src}) - telemetry OK")
         else:
             self._set_connection_detail(
-                "Connected, but telemetry is stale. Check firmware run state, COM cable, and UART4 @ 115200.",
+                "Connected, but telemetry is stale. Check firmware run state, COM cable, and UART5 @ 115200.",
                 is_error=True,
             )
 
@@ -2059,6 +2071,10 @@ class Dashboard:
                         callback=lambda _, a: setattr(self, "_plot_max_s", float(a) * 60.0),
                     )
                     dpg.add_button(label="Reset World Origin", callback=lambda: self._send_cmd(0x10, 0, 1.0))
+                    # CMD 0x17: place the drone level and still, then click. Firmware averages
+                    # of2_dx_fix/dy_fix for ~2 s and stores it as the OF velocity bias, killing
+                    # the unbounded earth_x/y position drift. Confirm via of.bias_x/y in the 0x05 frame.
+                    dpg.add_button(label="Calibrate OF Bias", callback=lambda: self._send_cmd(0x17, 0, 1.0))
                 with dpg.plot(label="X (m)", width=-1, height=280, tag="plot_xyz_x", no_title=False):
                     dpg.add_plot_legend()
                     dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag="plot_x_xax")
@@ -2664,6 +2680,7 @@ class Dashboard:
             self._flight_logger.start(fn)
         self._last_id_counter = -1.0
         self._last_of_counter = -1.0
+        self._last_c_seq = -1.0
         self._recording_flight = True
 
     def _flight_log_stop(self) -> None:

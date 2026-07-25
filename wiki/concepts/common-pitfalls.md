@@ -34,7 +34,9 @@ See [[SDK Arming State Machine]] for the full state diagram.
 
 | Check | Fix |
 |-------|-----|
-| Serial port correct in `config.yaml`? | Verify `serial_port` matches your COM port |
+| Serial port correct in `config.yaml`? | Set `serial_port: AUTO` and let the bridge probe — see [[Ground Station Bridge]] for the resolution flow. Otherwise verify `serial_port` matches your COM port |
+| Bridge can't find dongle? | Run `python -m ground_station.comm.serial_bridge --scan-com` for a per-port probe report (desc, bytes, error) |
+| Dongle stuck in Windows phantom state? | Run `ground_station\comm\Recover-AtkComPort.ps1 -AsSummary` for diagnosis + recovery instructions (Device Manager → Uninstall + "remove driver" + replug). Driver-level `pnputil` reset returns ACCESS DENIED for the phantom — see ADR-0007 |
 | Baud rate match? | Must be `115200` on both sides |
 | UART cable connected? | UART5 pins: PC12 (TX), PD2 (RX) |
 | `DMA1_Stream7_IRQHandler` present? | If removed, UART5 TX hangs permanently |

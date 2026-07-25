@@ -52,6 +52,24 @@ Command frame packing is in `def _pack_command_frame(self, cmd)` (`ground_statio
 - XOR CRC is computed over bytes 2..7 (`ground_station/comm/serial_bridge.py:914-915`)
 - `_xor_crc8` implementation loops all passed bytes and XORs (`ground_station/comm/serial_bridge.py:122-132`)
 
+## COM-Port Resolution (ADR-0007)
+
+The original Rainsun wireless UART bridge was replaced by an ATK/DeveBox CH340 dongle in July 2026. Windows enumerates the new dongle under different COM numbers across replugs, and the device sometimes half-enumerates into a phantom state that driver-level `pnputil` recovery cannot reset. To keep the bridge usable without operator edits:
+
+- `serial_port: AUTO` triggers `resolve_serial_port()` at bridge start
+- `resolve_serial_port` enumerates `com_scan` candidates, filters by `com_match_hints`, then probes each at `baud_rate` for `com_probe_timeout_s` and returns the first that streams >0 bytes
+- If no candidate streams, `serial_port_fallback` is used so the bridge fails loudly downstream (open / read error) instead of crashing at startup
+- One-shot recovery: `ground_station\comm\Recover-AtkComPort.ps1 -AsSummary` reports `<COM>:OK` / `PHANTOM:RECOVER_VIA_DEV_MGR` / `MISSING:PLUG_IN` and prints the only working Windows-side fix for the phantom (Device Manager → Uninstall + "Attempt to remove the driver for this device" + physical replug)
+- Ad-hoc probe: `python -m ground_station.comm.serial_bridge --scan-com` prints (port, desc, bytes, status) and exits 0 if at least one candidate streams
+
+Key functions live in `ground_station/comm/serial_bridge.py`:
+- `_list_com_ports(hints)` → `[(device, description)]`
+- `_probe_port(port, baud, timeout_s)` → byte count or `-1` on open failure
+- `scan_com_ports(candidates, baud, timeout_s, hints)` → `{port: {desc, bytes, error}}`
+- `resolve_serial_port(explicit, candidates, baud, timeout_s)` → chosen COM string
+
+`serial.tools.list_ports` is imported at module load so `_list_com_ports` does not raise `AttributeError` (pyserial exposes the submodule lazily).
+
 ## VOFA and Mirror Forwarding
 
 Forwarding occurs after successful decode:

@@ -1,0 +1,7 @@
+wiki\sources\adaptive-control-tutorial-2-notebook.md
+wiki\sources\adaptive-control-tutorial-notebook.md
+wiki\sources\cross-subsystem-interfaces.md
+wiki\sources\direct-mrac-ff-projection-simulation-notebook.md
+wiki\sources\pid-mrac-notebook.md
+wiki\theory\yucelen-lectures.md
+wiki\sources\motion-planning-dynamic-environments-survey.md

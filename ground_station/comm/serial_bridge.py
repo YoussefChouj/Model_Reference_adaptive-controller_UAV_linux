@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
     import serial  # type: ignore
+    import serial.tools.list_ports  # noqa: F401  (used by _list_com_ports)
 except ImportError:  # pragma: no cover
     serial = None
 
@@ -46,6 +47,14 @@ except ImportError:  # pragma: no cover
 #                          12=of_frame_on (OF calibration frame 0x05 @200Hz, replaces A/B)
 #                          val>=0.5 = ON, val<0.5 = OFF
 #   0x10 reset world-frame optical-flow origin — idx 0 (value ignored; use 1.0)
+#   0x17 capture optical-flow velocity bias — idx 0 (value ignored; use 1.0).
+#        Drone must be level and still; firmware averages of2_dx_fix/dy_fix ~2 s into
+#        s_of_bias_x/y (echoed as of.bias_x/y in the 0x05 frame). Kills earth_x/y drift.
+#   0x18 force_recal (ADR-0011) — idx 0, value ignored (use 1.0).
+#        Refuses unless flight_phase==GROUND_IDLE and DisArmed. On accept: clears
+#        g_cal_health (except MANUAL_ORIGIN_RESET=0x80), resets s_cal_trim/s_cal_hot,
+#        and forces g_estimator_ready=0 so the cold cal runs again. Use after a hard
+#        gyro/accel swap or if cold cal converged badly on the bench.
 #   0x11 figure-8 (lemniscate) path — FlyMode_SDK only:
 #        idx 0=center_x(cm) 1=center_y(cm) 2=center_z(m) 3=amplitude(cm)
 #            4=angular_speed(rad/s) 5=duration(s) 6=type(0=Bernoulli,1=Gerono)
@@ -59,7 +68,10 @@ except ImportError:  # pragma: no cover
 #        Dashboard sends 0x10 (OF-origin reset) immediately before idx 6 start.
 # Must match GS_PROTO_VERSION in Global_file/global_declare.h.
 # Increment both when the telemetry frame layout or CMD semantics change.
-GS_PROTO_VERSION: int = 10
+# v14: Frame 0x05 grew 39->53 B always-on (acc_bias, gyro_bias, cal_health).
+#       With EKF_TELEM_ENABLED=1: 53->73 B (v_body, P_diag, NIS, K_last).
+#       Added CMD 0x18 force_recal (ADR-0011).
+GS_PROTO_VERSION: int = 14
 
 cmd_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
 
@@ -92,11 +104,15 @@ def _parse_simple_yaml(path: Path) -> Dict[str, Any]:
             "simulate_udp_port",
             "cmd_udp_port",
             "telemetry_mirror_port",
+            "com_probe_timeout_s",
         }:
             try:
                 result[key] = int(value)
             except ValueError:
                 pass
+        # Space-separated COM scan list (e.g. "COM3 COM4 COM5").
+        elif key == "com_scan":
+            result[key] = [tok.strip().upper() for tok in value.split() if tok.strip()]
         else:
             result[key] = value
     return result
@@ -104,8 +120,12 @@ def _parse_simple_yaml(path: Path) -> Dict[str, Any]:
 
 def load_config() -> Dict[str, Any]:
     defaults: Dict[str, Any] = {
-        "serial_port": "COM3",
+        "serial_port": "AUTO",
+        "serial_port_fallback": "COM3",
         "baud_rate": 115200,
+        "com_scan": ["COM3", "COM4", "COM5", "COM6", "COM7", "COM8"],
+        "com_probe_timeout_s": 1.5,
+        "com_match_hints": ["CH340", "CP210x", "FTDI", "USB-SERIAL"],
         "vofa_host": "127.0.0.1",
         "vofa_port": 1347,
         # VOFA+ JustFloat: fixed channel count per connection (Frame A vs Frame B differ).
@@ -155,6 +175,126 @@ def _xor_crc8(data: Iterable[int]) -> int:
     return crc & 0xFF
 
 
+def _crc16_ccitt(data: Iterable[int]) -> int:
+    """
+    CRC16-CCITT (XModem), init 0x0000, poly 0x1021, no reflection, no final XOR.
+    Frame C (0x06) uses this instead of the XOR-CRC8 the other frames use.
+    Matches crc16_xmodem() in TASK/send_data.c; transmitted big-endian (hi, lo).
+    """
+    crc = 0x0000
+    for b in data:
+        crc ^= (b & 0xFF) << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if (crc & 0x8000) else (crc << 1) & 0xFFFF
+    return crc & 0xFFFF
+
+
+def _list_com_ports(hints: Optional[List[str]] = None) -> List[Tuple[str, str]]:
+    """Return [(device, description)] for every enumerated COM port.
+
+    If `hints` is given (case-insensitive substrings), filter to ports whose
+    description matches any hint. Falls back to all ports when nothing matches.
+    """
+    if serial is None:  # pragma: no cover
+        return []
+    try:
+        all_ports = sorted(serial.tools.list_ports.comports(), key=lambda p: p.device)
+    except Exception:
+        return []
+    rows = [(p.device, p.description or "") for p in all_ports]
+    if hints:
+        keep = [r for r in rows if any(h.lower() in r[1].lower() for h in hints)]
+        if keep:
+            return keep
+    return rows
+
+
+def _probe_port(port: str, baud: int, timeout_s: float) -> int:
+    """Open `port` briefly and count incoming bytes. Returns -1 on open failure."""
+    if serial is None:  # pragma: no cover
+        return -1
+    try:
+        with serial.Serial(port=port, baudrate=baud, timeout=0.05) as ser:  # type: ignore[attr-defined]
+            t_end = time.monotonic() + float(timeout_s)
+            n = 0
+            while time.monotonic() < t_end:
+                chunk = ser.read(4096)
+                if chunk:
+                    n += len(chunk)
+            return n
+    except Exception:
+        return -1
+
+
+def scan_com_ports(
+    candidates: Optional[List[str]] = None,
+    baud: Optional[int] = None,
+    timeout_s: Optional[float] = None,
+    hints: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Probe each candidate COM port and return {port: {desc, bytes, error}}.
+
+    Used by --scan-com and the AUTO port resolver. Bytes>0 means telemetry
+    is flowing; error is set only on open failure.
+    """
+    cfg = load_config()
+    cand = list(candidates) if candidates is not None else list(cfg.get("com_scan", []))
+    br = int(baud) if baud is not None else int(cfg.get("baud_rate", 115200))
+    to = float(timeout_s) if timeout_s is not None else float(cfg.get("com_probe_timeout_s", 1.5))
+    hint_list = list(hints) if hints is not None else list(cfg.get("com_match_hints", []))
+    enums = {dev: desc for dev, desc in _list_com_ports(hint_list)}
+    out: Dict[str, Dict[str, Any]] = {}
+    for port in cand:
+        info: Dict[str, Any] = {"desc": enums.get(port, ""), "bytes": 0, "error": None}
+        if port not in enums:
+            info["error"] = "not enumerated"
+            out[port] = info
+            continue
+        n = _probe_port(port, br, to)
+        if n < 0:
+            info["error"] = "open failed"
+        else:
+            info["bytes"] = int(n)
+        out[port] = info
+    return out
+
+
+def resolve_serial_port(
+    explicit: Optional[str] = None,
+    *,
+    candidates: Optional[List[str]] = None,
+    baud: Optional[int] = None,
+    timeout_s: Optional[float] = None,
+) -> str:
+    """Pick the COM port the bridge should open.
+
+    - `explicit` is honored if non-empty and not "AUTO" / "auto".
+    - Otherwise enumerate `candidates` (or `com_scan` from config), probe each,
+      return the first that emits >0 bytes within `timeout_s`. If none stream,
+      return `serial_port_fallback` from config so the bridge still starts and
+      fails loudly downstream instead of crashing here.
+    """
+    cfg = load_config()
+    if explicit and explicit.strip().upper() != "AUTO":
+        return explicit.strip()
+    fb = str(cfg.get("serial_port_fallback", "COM3"))
+    rows = scan_com_ports(candidates=candidates, baud=baud, timeout_s=timeout_s)
+    for port, info in rows.items():
+        if info.get("bytes", 0) > 0:
+            print(
+                f"[AUTO-COM] selected {port} (desc='{info.get('desc','')}', "
+                f"{info['bytes']} B in {cfg.get('com_probe_timeout_s', 1.5)}s)",
+                flush=True,
+            )
+            return port
+    print(
+        f"[AUTO-COM] no telemetry seen on candidates "
+        f"{list(rows.keys())}; falling back to {fb}",
+        flush=True,
+    )
+    return fb
+
+
 def vofa_channel_name(internal_name: str) -> str:
     """FireWater / CSV channel names: dots -> underscores (mrac.pitch.e -> mrac_pitch_e)."""
     return internal_name.replace(".", "_")
@@ -185,6 +325,10 @@ class SerialBridge:
         cfg = load_config()
         self.serial_port = serial_port if serial_port is not None else cfg["serial_port"]
         self.baud_rate = baud_rate if baud_rate is not None else int(cfg["baud_rate"])
+        # AUTO port resolution (ADR-0007): probe candidates, pick first that
+        # streams telemetry. Falls back to serial_port_fallback.
+        if isinstance(self.serial_port, str) and self.serial_port.strip().upper() == "AUTO":
+            self.serial_port = resolve_serial_port()
         self.vofa_host = vofa_host if vofa_host is not None else cfg["vofa_host"]
         if vofa_port_a is not None:
             self.vofa_port_a = int(vofa_port_a)
@@ -239,7 +383,12 @@ class SerialBridge:
         self._last_telemetry_id: Dict[str, float] = {}
         self._last_telemetry_bench: Dict[str, float] = {}
         self._last_telemetry_of: Dict[str, float] = {}
+        self._last_telemetry_c: Dict[str, float] = {}
         self._telemetry_lock = threading.Lock()
+
+        # Per-frame arrival timestamps for stale-data guards (used by _get_telemetry_snapshot).
+        self._last_frame_a_t: float = 0.0
+        self._last_frame_b_t: float = 0.0
 
         # Debug printing throttle (simulate mode can be very chatty).
         self._last_telemetry_print_t = 0.0
@@ -266,9 +415,21 @@ class SerialBridge:
             return self._last_sbus_lost
 
     def get_telemetry_snapshot(self) -> Tuple[Dict[str, float], Dict[str, float]]:
-        """Latest decoded Frame A / Frame B variables (thread-safe, for GUI + logging)."""
+        """Latest decoded Frame A / Frame B variables (thread-safe, for GUI + logging).
+
+        If a frame type has not arrived in the last 0.5 s, its values are replaced
+        with None so the dashboard can display '--' instead of stale garbage
+        (e.g., the 1e+33 / 1e+29 / 2.1e+9 values seen when Frame B decode silently
+        fails due to a payload-length mismatch between v13 firmware and a v14-only bridge).
+        """
         with self._telemetry_lock:
-            return (dict(self._last_telemetry_a), dict(self._last_telemetry_b))
+            now = time.monotonic()
+            STALE_S = 0.5  # mirrors Frame A update rate (~0.5 s between 20 Hz frames)
+            a_stale = (now - self._last_frame_a_t) > STALE_S
+            b_stale = (now - self._last_frame_b_t) > STALE_S
+            a = {k: None if a_stale else float(v) for k, v in self._last_telemetry_a.items()}
+            b = {k: None if b_stale else float(v) for k, v in self._last_telemetry_b.items()}
+            return (a, b)
 
     def start(self) -> None:
         if self._rx_thread and self._rx_thread.is_alive():
@@ -454,33 +615,49 @@ class SerialBridge:
         #   uint8 status.twc_execute
         #   uint8 status.twc_arrived
         #   uint8 rc_authority   <- 1=PC authority, 0=RC (added in v2)
+        #   uint8 of_hold        <- 1=OF position-hold, 0=angle mode (added in v13; 41-byte payload only)
+        #   uint8 estimator_ready<- 1=estimator converged/armable (added in v13; 41-byte payload only)
         #   uint8 proto_version  <- GS_PROTO_VERSION
-        if len(payload) != 39:
+        #
+        # v10 firmware emits a 39-byte payload (no of_hold / estimator_ready); v13
+        # emits 41. Accept both so the bridge parses either firmware build.
+        of_hold_u8 = 0
+        estimator_ready_u8 = 0
+        if len(payload) == 39:
+            fmt = "<8fBBBBBBB"
+            (
+                p_e, p_u, r_e, r_u, y_e, y_u, z_e, z_u,
+                arm_u8, flymode_u8, sbus_lost_u8, twc_exec_u8, twc_arr_u8,
+                rc_authority_u8, proto_ver_u8,
+            ) = struct.unpack(fmt, payload)
+        elif len(payload) == 41:
+            fmt = "<8fBBBBBBBBB"
+            (
+                p_e, p_u, r_e, r_u, y_e, y_u, z_e, z_u,
+                arm_u8, flymode_u8, sbus_lost_u8, twc_exec_u8, twc_arr_u8,
+                rc_authority_u8, of_hold_u8, estimator_ready_u8, proto_ver_u8,
+            ) = struct.unpack(fmt, payload)
+        else:
             return []
-        fmt = "<8fBBBBBBB"
-        (
-            p_e,
-            p_u,
-            r_e,
-            r_u,
-            y_e,
-            y_u,
-            z_e,
-            z_u,
-            arm_u8,
-            flymode_u8,
-            sbus_lost_u8,
-            twc_exec_u8,
-            twc_arr_u8,
-            rc_authority_u8,
-            proto_ver_u8,
-        ) = struct.unpack(fmt, payload)
+        # Throttle the warning so a sustained mismatch does not flood the log (1 Hz max).
         if proto_ver_u8 != GS_PROTO_VERSION:
-            print(
-                f"WARNING: firmware proto_version={proto_ver_u8} != expected {GS_PROTO_VERSION}. "
-                "Reflash firmware or update serial_bridge.py.",
-                flush=True,
-            )
+            now = time.monotonic()
+            last = getattr(self, "_last_proto_warn_t", 0.0)
+            if now - last >= 1.0:
+                self._last_proto_warn_t = now
+                if proto_ver_u8 < GS_PROTO_VERSION:
+                    print(
+                        f"WARNING: firmware proto_version={proto_ver_u8} < host {GS_PROTO_VERSION}. "
+                        f"Decoding fields common to both. Some v{GS_PROTO_VERSION}-only fields will be 0. "
+                        f"Reflash firmware to enable full telemetry.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"WARNING: firmware proto_version={proto_ver_u8} > host {GS_PROTO_VERSION}. "
+                        f"Host may be missing newer fields. Update serial_bridge.py.",
+                        flush=True,
+                    )
 
         # Update GUI state for ARM / flymode and MRAC basis hiding.
         with self._state_lock:
@@ -505,11 +682,17 @@ class SerialBridge:
             ("status.twc_execute", float(twc_exec_u8)),
             ("status.twc_arrived", float(twc_arr_u8)),
             ("status.rc_authority", float(rc_authority_u8)),
+            ("status.of_hold", float(of_hold_u8)),
+            ("status.estimator_ready", float(estimator_ready_u8)),
         ]
 
     def _unpack_frame_b(self, max_num_basis: int, payload: bytes) -> List[Tuple[str, float]]:
         # JUSTFLOAT CHANNEL MAP - Frame B (20Hz) -> VOFA UDP vofa_port_b (default 1348)
-        # Map below is for MAX_NUM_BASIS=6 (59 channels). Total count = 4*(MAX_NUM_BASIS+2)+27; theta_* spans 0..MAX_NUM_BASIS-1 per axis.
+        # Float block layout (mirrors TASK/send_data.c Frame B emit):
+        #   MRAC: 3 axes * (max_num_basis + 2) = 3N+6 floats  (pitch/roll/yaw only; z_rate excluded from MRAC)
+        #   PID:  12 loops * 3 = 36 floats  (pitch/roll/yaw/gyrox/gyroy/gyroz/z_rate/locx/locy/z_pos/locxs/locys)
+        #   total_floats = 3N+42
+        # Path tail: 26 B (v3, adds vbat) or 28 B (v13, adds of_hold + estimator_ready).
         # I0  = mrac_pitch_theta_0
         # I1  = mrac_pitch_theta_1
         # I2  = mrac_pitch_theta_2
@@ -573,26 +756,44 @@ class SerialBridge:
         #
         # Payload layout is floats only.
         # MRAC axes: pitch, roll, yaw, z_rate (mapped to axis name 'z')
-        #   theta[0..MAX_NUM_BASIS-1], u_nom, xm  => (MAX_NUM_BASIS + 2) floats per axis
+        #   theta[0..MAX_NUM_BASIS-1], u_nom, xm  => (max_num_basis + 2) floats per axis
         # PID loops (12): + z_pos, locxs, locys (optical flow velocity + altitude)
         #   FB, Des, U => 3 floats per loop
+        # Matches TASK/send_data.c: 4*(MAX_NUM_BASIS+2)+36 = 4N+44 floats.
         total_floats = 4 * (max_num_basis + 2) + 36
         main_len = total_floats * 4
         # Path tail: v3 = 26 bytes (adds real_voltage f), v2 = 22 bytes (no vbat).
         # Accept both so plots keep working before the firmware is reflashed to v3.
+        # tail_len: 26 (v3, adds vbat) or 30 (v13/v14 unknown extra = firmware-specific).
         tail_len = len(payload) - main_len
         has_vbat = tail_len == 26
-        if tail_len not in (22, 26):
+        if tail_len not in (26, 30):
             return []
 
         fmt = "<" + ("f" * total_floats)
         vals = struct.unpack(fmt, payload[:main_len])
         tail = payload[main_len : main_len + tail_len]
-        if has_vbat:
+        if tail_len == 30:
+            # v13/v14 extended tail: v3 (26 B) + of_hold (u8) + estimator_ready (u8) +
+            # 2 trailing bytes (status padding / future flags).
+            # Format: apm u8 | 5f path states | twc_arr u8 | vbat f32 |
+            #         of_hold u8 | est_ready u8 | flag0 u8 | flag1 u8
+            (apm_u8, twc_tx, twc_ty, twc_tz, sin_te, circ_th, twc_arr_u8, vbat,
+             of_hold_u8, estimator_ready_u8, _flag0, _flag1) = struct.unpack(
+                "<BfffffBfBBBB", tail)
+            extra0 = float(_flag0)
+            extra1 = float(_flag1)
+        elif has_vbat:
             (apm_u8, twc_tx, twc_ty, twc_tz, sin_te, circ_th, twc_arr_u8, vbat) = struct.unpack("<BfffffBf", tail)
+            extra0 = extra1 = 0.0
+            of_hold_u8 = 0
+            estimator_ready_u8 = 0
         else:
             (apm_u8, twc_tx, twc_ty, twc_tz, sin_te, circ_th, twc_arr_u8) = struct.unpack("<BfffffB", tail)
             vbat = None
+            extra0 = extra1 = 0.0
+            of_hold_u8 = 0
+            estimator_ready_u8 = 0
 
         # Update GUI state for MRAC basis hiding.
         with self._state_lock:
@@ -642,8 +843,38 @@ class SerialBridge:
         out.append(("path.twc_arrived", float(twc_arr_u8)))
         if vbat is not None:
             out.append(("status.vbat", float(vbat)))
+        out.append(("status.of_hold", float(of_hold_u8)))
+        out.append(("status.estimator_ready", float(estimator_ready_u8)))
 
         return out
+
+    def _unpack_frame_c(self, payload: bytes) -> List[Tuple[str, float]]:
+        # FRAME 0x06 — attitude / body-rate / position, emitted back-to-back with Frame A.
+        # Fixed 46-byte layout (TASK/send_data.c Frame C block):
+        #   rol, pit, yaw (f32, deg) | gyro_x, gyro_y, gyro_z (f32, rad/s)
+        #   | earth_x, earth_y (f32, m) | altitude (f32, m)
+        #   | rpm[0..3] (u16 LE) | seq (u16 LE)
+        # Unlike A/B this frame carries a CRC16 (see _crc16_ccitt), handled by the RX loop.
+        if len(payload) != 46:
+            return []
+        (rol, pit, yaw, gx, gy, gz, ex, ey, alt) = struct.unpack_from("<9f", payload, 0)
+        (r0, r1, r2, r3, seq) = struct.unpack_from("<5H", payload, 36)
+        return [
+            ("c.rol", float(rol)),
+            ("c.pit", float(pit)),
+            ("c.yaw", float(yaw)),
+            ("c.gyro_x", float(gx)),
+            ("c.gyro_y", float(gy)),
+            ("c.gyro_z", float(gz)),
+            ("c.earth_x", float(ex)),
+            ("c.earth_y", float(ey)),
+            ("c.altitude", float(alt)),
+            ("c.rpm0", float(r0)),
+            ("c.rpm1", float(r1)),
+            ("c.rpm2", float(r2)),
+            ("c.rpm3", float(r3)),
+            ("c.seq", float(seq)),
+        ]
 
     def _unpack_frame_id(self, payload: bytes) -> List[Tuple[str, float]]:
         # FRAME 0x03 — high-rate (200 Hz) single-axis system-ID stream. Fixed 36-byte layout:
@@ -728,7 +959,7 @@ class SerialBridge:
         # Purpose: derive the of2_dx_fix→m/s scale (Scenario 1 hand-slide), tune complementary/Kalman
         # filters offline, and validate firmware integration vs offline. See
         # docs/tracking_baseline_and_drift.md. Emitted as of.* so the flight logger can capture it.
-        if len(payload) != 39:
+        if len(payload) not in (39, 53, 73):
             return []
         (
             counter,
@@ -742,7 +973,7 @@ class SerialBridge:
         ) = struct.unpack_from("<H13hH", payload, 0)
         (earth_x, earth_y) = struct.unpack_from("<2f", payload, 30)
         of_quality = payload[38]
-        return [
+        lines: List[Tuple[str, float]] = [
             ("of.sample_counter", float(counter)),
             ("of.of2_dx_fix", float(of2_dx_fix)),
             ("of.of2_dy_fix", float(of2_dy_fix)),
@@ -762,6 +993,34 @@ class SerialBridge:
             ("of.earth_y", float(earth_y)),
             ("of.quality", float(of_quality)),
         ]
+        # ADR-0011 v14: appended acc_bias[3], gyro_bias[3], cal_health, and (when EKF
+        # telemetry is enabled in firmware) v_body[3], P_diag[3], NIS, K_last[3].
+        if len(payload) >= 53:
+            (ab0, ab1, ab2, gb0, gb1, gb2, cal_h) = struct.unpack_from("<6hH", payload, 39)
+            lines += [
+                ("of.acc_bias_x_mg", float(ab0)),
+                ("of.acc_bias_y_mg", float(ab1)),
+                ("of.acc_bias_z_mg", float(ab2)),
+                ("of.gyro_bias_x_1e4radps", float(gb0)),
+                ("of.gyro_bias_y_1e4radps", float(gb1)),
+                ("of.gyro_bias_z_1e4radps", float(gb2)),
+                ("of.cal_health", float(cal_h)),
+            ]
+        if len(payload) >= 73:
+            (vx, vy, vz, p0, p1, p2, nis, k0, k1, k2) = struct.unpack_from("<10h", payload, 53)
+            lines += [
+                ("of.ekf_vx_mmps", float(vx)),
+                ("of.ekf_vy_mmps", float(vy)),
+                ("of.ekf_vz_mmps", float(vz)),
+                ("of.ekf_p0_1e3", float(p0)),
+                ("of.ekf_p1_1e3", float(p1)),
+                ("of.ekf_p2_1e3", float(p2)),
+                ("of.ekf_nis_1e3", float(nis)),
+                ("of.ekf_k0_1e3", float(k0)),
+                ("of.ekf_k1_1e3", float(k1)),
+                ("of.ekf_k2_1e3", float(k2)),
+            ]
+        return lines
 
     def _handle_frame(self, frame_type: int, max_num_basis: int, payload: bytes) -> None:
         if frame_type == 0x01:
@@ -774,22 +1033,30 @@ class SerialBridge:
             lines = self._unpack_frame_bench(payload)
         elif frame_type == 0x05:
             lines = self._unpack_frame_of(payload)
+        elif frame_type == 0x06:
+            lines = self._unpack_frame_c(payload)
         else:
             return
+
+        now = time.monotonic()
 
         if lines:
             mp: Dict[str, float] = {k: float(v) for k, v in lines}
             with self._telemetry_lock:
                 if frame_type == 0x01:
                     self._last_telemetry_a = mp
+                    self._last_frame_a_t = now
                 elif frame_type == 0x03:
                     self._last_telemetry_id = mp
                 elif frame_type == 0x04:
                     self._last_telemetry_bench = mp
                 elif frame_type == 0x05:
                     self._last_telemetry_of = mp
+                elif frame_type == 0x06:
+                    self._last_telemetry_c = mp
                 else:
                     self._last_telemetry_b = mp
+                    self._last_frame_b_t = now
             self._maybe_debug_print_telemetry(frame_type, lines)
             self._emit_vofa_output(frame_type, lines)
             self._mirror_telemetry_udp()
@@ -803,10 +1070,11 @@ class SerialBridge:
                 idf = dict(self._last_telemetry_id)
                 bench = dict(self._last_telemetry_bench)
                 of = dict(self._last_telemetry_of)
+                c = dict(self._last_telemetry_c)
             with self._state_lock:
                 mb = int(self._last_max_num_basis)
             payload = json.dumps(
-                {"a": a, "b": b, "id": idf, "bench": bench, "of": of, "max_num_basis": mb},
+                {"a": a, "b": b, "c": c, "id": idf, "bench": bench, "of": of, "max_num_basis": mb},
                 separators=(",", ":"),
             ).encode("utf-8")
             if len(payload) > 65000:
@@ -930,13 +1198,16 @@ class SerialBridge:
         max_num_basis = data[5]
 
         if frame_type == 0x01:
-            if len_payload != 39:
+            # v10 = 39 B, v13 = 41 B (adds of_hold + estimator_ready). Accept both.
+            if len_payload not in (39, 41):
                 return
         elif frame_type == 0x02:
+            # Matches committed TASK/send_data.c (v10/v13): 4*(MAX_NUM_BASIS+2)+36 = 4N+44 floats.
+            # Observed on live COM3: N=6 → 298 B = 68*4 + 26.
             total_floats = 4 * (max_num_basis + 2) + 36
             main_len = total_floats * 4
-            # Accept v2 (+22) and v3 (+26, adds vbat) Frame B tails.
-            if len_payload not in (main_len + 22, main_len + 26):
+            # Accept v3 tail (26 B = 292 B total) and v13/v14 tail (30 B = 296 B total).
+            if len_payload not in (main_len + 26, main_len + 30):
                 return
         elif frame_type == 0x03:
             if len_payload != 36:
@@ -947,7 +1218,13 @@ class SerialBridge:
             if len_payload not in (12, 20):
                 return
         elif frame_type == 0x05:
-            if len_payload != 39:
+            # v8-v13 = 39 B; v14 = 53 B (acc_bias, gyro_bias, cal_health); v14+EKF = 73 B.
+            if len_payload not in (39, 53, 73):
+                return
+        elif frame_type == 0x06:
+            # Frame C: 46 B live layout. Bounds-only check so a layout bump degrades to
+            # "decoder returns []" rather than a hard resync.
+            if not (0 < len_payload <= 256):
                 return
         else:
             return
@@ -955,13 +1232,19 @@ class SerialBridge:
         if len_payload <= 0 or len_payload > 4096:
             return
 
-        expected_total = 6 + len_payload + 1
+        # Frame C carries a 2-byte CRC16-CCITT; every other frame a 1-byte XOR-CRC8.
+        crc_len = 2 if frame_type == 0x06 else 1
+        expected_total = 6 + len_payload + crc_len
         if len(data) != expected_total:
             return
 
         payload = data[6 : 6 + len_payload]
-        recv_crc = data[6 + len_payload]
-        calc_crc = _xor_crc8([frame_type, len_high, len_low, max_num_basis, *payload])
+        if frame_type == 0x06:
+            recv_crc = int.from_bytes(data[6 + len_payload : 8 + len_payload], "big")
+            calc_crc = _crc16_ccitt([frame_type, len_high, len_low, max_num_basis, *payload])
+        else:
+            recv_crc = data[6 + len_payload]
+            calc_crc = _xor_crc8([frame_type, len_high, len_low, max_num_basis, *payload])
         if calc_crc != recv_crc:
             return
 
@@ -1022,14 +1305,17 @@ class SerialBridge:
 
             # Basic header sanity checks to avoid blocking on corrupted LEN values.
             if frame_type == 0x01:
-                if len_payload != 39:
+                # v10 = 39 B, v13 = 41 B (adds of_hold + estimator_ready). Accept both.
+                if len_payload not in (39, 41):
                     sync_seen = False
                     continue
             elif frame_type == 0x02:
+                # Matches committed TASK/send_data.c (v10/v13): 4*(MAX_NUM_BASIS+2)+36 = 4N+44 floats.
+                # Observed on live COM3: N=6 → 298 B = 68*4 + 26.
                 total_floats = 4 * (max_num_basis + 2) + 36
                 main_len = total_floats * 4
-                # Accept v2 (+22) and v3 (+26, adds vbat) Frame B tails.
-                if len_payload not in (main_len + 22, main_len + 26):
+                # Accept v3 tail (26 B = 292 B total) and v13/v14 tail (30 B = 296 B total).
+                if len_payload not in (main_len + 26, main_len + 30):
                     sync_seen = False
                     continue
             elif frame_type == 0x03:
@@ -1043,7 +1329,13 @@ class SerialBridge:
                     sync_seen = False
                     continue
             elif frame_type == 0x05:
-                if len_payload != 39:
+                if len_payload not in (39, 53, 73):
+                    sync_seen = False
+                    continue
+            elif frame_type == 0x06:
+                # Frame C: 46 B live layout. Bounds-only check so a layout bump degrades to
+                # "decoder returns []" rather than a hard resync.
+                if not (0 < len_payload <= 256):
                     sync_seen = False
                     continue
             else:
@@ -1058,13 +1350,18 @@ class SerialBridge:
             if payload is None:
                 break
 
-            crc_b = self._read_exact(1)
+            # Frame C carries a 2-byte CRC16-CCITT; every other frame a 1-byte XOR-CRC8.
+            crc_b = self._read_exact(2 if frame_type == 0x06 else 1)
             if crc_b is None:
                 break
-            recv_crc = crc_b[0]
 
-            # CRC is XOR over bytes after sync: type, LEN_hi, LEN_lo, MAX_NUM_BASIS, payload
-            calc_crc = _xor_crc8([frame_type, len_high, len_low, max_num_basis, *payload])
+            # CRC covers bytes after sync: type, LEN_hi, LEN_lo, MAX_NUM_BASIS, payload
+            if frame_type == 0x06:
+                recv_crc = int.from_bytes(crc_b, "big")
+                calc_crc = _crc16_ccitt([frame_type, len_high, len_low, max_num_basis, *payload])
+            else:
+                recv_crc = crc_b[0]
+                calc_crc = _xor_crc8([frame_type, len_high, len_low, max_num_basis, *payload])
             if calc_crc != recv_crc:
                 # Drop corrupt frames silently.
                 sync_seen = False
@@ -1195,10 +1492,24 @@ def _main_cli() -> None:
         action="store_true",
         help="Try COM6/COM4/COM5 at config baud for 3s each; print byte counts (no bridge).",
     )
+    p.add_argument(
+        "--scan-com",
+        action="store_true",
+        help="Probe each COM port in com_scan and report (desc, bytes, error); exit 0 on first "
+        "telemetry port, 1 if none stream, 2 on usage/config error. Honors com_probe_timeout_s.",
+    )
     args = p.parse_args()
     if args.test_com:
         test_com_ports_listen()
         return
+    if args.scan_com:
+        rows = scan_com_ports()
+        for port, info in rows.items():
+            tag = info["error"] or ("telemetry" if info["bytes"] > 0 else "idle")
+            print(f"{port:<6} {info['desc']:<40} {info['bytes']:>7} B  [{tag}]")
+        # Exit 0 if at least one candidate is live; non-zero so a launcher can react.
+        any_live = any(r.get("bytes", 0) > 0 for r in rows.values())
+        return 0 if any_live else 1
     port = args.simulate_port
     b = start_bridge_in_background(simulate=args.simulate, simulate_udp_port=port)
     try:

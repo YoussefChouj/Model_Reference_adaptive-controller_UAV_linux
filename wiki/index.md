@@ -17,6 +17,7 @@
 ### Safety & Authority
 - [Virtual RC Authority](concepts/virtual-rc-authority.md) — SBUS-loss + SDK gating for host sticks
 - [SDK Arming State Machine](concepts/sdk-arming-state-machine.md) — Arm/disarm transitions and mode guards
+- [Auto IMU Calibration (cold + hot)](concepts/auto-imu-calibration.md) — three-phase state-owned estimator; blocks arm until cold cal completes
 - [Path Arbitration](concepts/path-arbitration.md) — Single-active path invariant for TWC/sinusoid/circle
 
 ### Scheduling & Hardware

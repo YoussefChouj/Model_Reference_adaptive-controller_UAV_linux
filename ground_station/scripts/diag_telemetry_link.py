@@ -99,12 +99,14 @@ def decode_stream(buf: bytearray, stats: FrameStats) -> None:
             continue
 
         if frame_type == 0x01:
-            if payload_len != 38:
+            # v10 = 39 B, v13 = 41 B (adds of_hold + estimator_ready). Accept both.
+            if payload_len not in (39, 41):
                 stats.len_fail += 1
                 continue
             stats.frame_a_ok += 1
             try:
-                unpacked = struct.unpack("<8fBBBBBB", payload)
+                # First 8 floats + arm/flymode/sbus are at the same offsets in both layouts.
+                unpacked = struct.unpack_from("<8fBBB", payload, 0)
                 stats.last_arm = int(unpacked[8])
                 stats.last_flymode = int(unpacked[9])
                 stats.last_sbus_lost = int(unpacked[10])

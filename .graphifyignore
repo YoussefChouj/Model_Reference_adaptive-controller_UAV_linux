@@ -1,0 +1,39 @@
+# Exclude images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+*.ico
+*.svg
+
+# Exclude data/log files
+*.csv
+*.log
+
+# Exclude analysis result folders
+Analysis_plots/
+graphify-out/
+__pycache__/
+*.pyc
+.git/
+.vscode/
+.agent_state/
+.cocoindex_code/
+raw/
+
+# Exclude binary files
+*.bin
+*.hex
+*.elf
+*.map
+
+# Exclude temporary/transient files
+.tmp_*.py
+*.tmp
+.agent_out/
+.obsidian/
+
+# Exclude agent infrastructure (not relevant to code search)
+.agent_scripts/

@@ -1,5 +1,14 @@
-serial_port: COM6
+serial_port: AUTO
 baud_rate: 115200
+# --- COM-port resolution (ADR-0007) --------------------------------------
+# serial_port = AUTO  → enumerate all CH340/CP210x/FTDI ports, pick first that streams
+#                       telemetry bytes at baud_rate within `com_probe_timeout_s`.
+#                       Fallback to `serial_port_fallback` if AUTO fails.
+# serial_port = COMx  → use that exact port (old behaviour).
+serial_port_fallback: COM3
+com_scan: COM3 COM4 COM5 COM6 COM7 COM8
+com_probe_timeout_s: 1.5
+com_match_hints: USB-SERIAL CH340 Silicon Labs CP210x FTDI
 vofa_host: 127.0.0.1
 # VOFA+ JustFloat: two UDP ports so each connection has a fixed channel count.
 vofa_port_a: 1347

@@ -13,8 +13,12 @@ All ground station runtime configuration lives in `ground_station/config.yaml`. 
 
 | Key | Default | Type | Consumed By | Purpose |
 |-----|---------|------|-------------|---------|
-| `serial_port` | `COM6` | string | `SerialBridge.__init__` | Serial port for MCU connection |
+| `serial_port` | `AUTO` | string | `SerialBridge.__init__` | COM port for MCU connection. `AUTO` → enumerate `com_scan` candidates and probe each; legacy fixed-port values still work. See [[Ground Station Bridge]] |
+| `serial_port_fallback` | `COM3` | string | `resolve_serial_port` | Used when `serial_port: AUTO` finds no live candidate, so bridge fails loudly downstream instead of crashing at startup |
 | `baud_rate` | `115200` | int | `SerialBridge.__init__` | Must match firmware UART config |
+| `com_scan` | `COM3 COM4 COM5 COM6 COM7 COM8` | list | `scan_com_ports` | Candidates probed when `serial_port: AUTO` |
+| `com_probe_timeout_s` | `1.5` | float | `_probe_port` | Per-port probe window when auto-resolving |
+| `com_match_hints` | `USB-SERIAL CH340 Silicon Labs CP210x FTDI` | list | `_list_com_ports` | Substring filter on enumerated port descriptions; empty → all ports probed |
 
 Both consumed via `load_config()` in `serial_bridge.py`. Firmware UART4 and UART5 both use 115200 (`BSP/usart4.c:36`, `BSP/usart5.c:55`).
 

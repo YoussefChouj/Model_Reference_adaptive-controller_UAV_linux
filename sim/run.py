@@ -6,6 +6,13 @@ metrics call (sim.metrics), and the per-run artifact folder.
 
 Each run writes sim/runs/<ts>_<scenario>/{plots/, data.csv, metrics.json, report.md}
 (ADR-0006 D7). Pass write_artifacts=False for a pure in-memory run (tests).
+
+ADR-0011 Phases 3 & 4: AccBiasTrim and GyroBiasHotFsm step every tick from the
+main loop. AccBiasTrim gates on flight_phase_flying and elapsed_t > 0.3;
+GyroBiasHotFsm gates internally (flying + rc_active + stillness + translational).
+Both require the scenario to expose a calibrator interface (get_accel_mg,
+get_gyro_rads, flight_phase_flying, rc_active) — existing scenarios return
+None and the calibrators idle.
 """
 from __future__ import annotations
 
@@ -13,19 +20,33 @@ import csv
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
 from sim import metrics as metrics_mod
 from sim.adaptive_law import AdaptiveFlags, AdaptiveLaw, AxisAdaptiveConfig
 from sim.baseline import RatePID, RatePIDConfig
+from sim.calibrator import AccBiasTrim, GyroBiasHotFsm
 from sim.loop import ControlLoop
 from sim.reference_model import ReferenceModel, RefType
+
+# Calibrator result dict appended to run() return value
+_CAL_KEYS = [
+    "acc_trim_b_a",   # last b_a tuple, mg
+    "acc_trim_settled",
+    "gyro_hot_b_g",   # last b_g tuple, rad/s
+    "gyro_hot_state",
+    "gyro_hot_rejected",
+]
 
 _RUNS_DIR = Path(__file__).resolve().parent / "runs"
 
 # log columns, in CSV order
 _COLS = ["t", "r", "d", "xm", "x", "e", "u_nom", "u_ad", "u", "U", "wnorm", "edot"]
+# Optional calibrator columns (NaN for non-calibrator runs)
+_CAL_COLS = ["b_a_x", "b_a_y", "b_a_z", "b_g_x", "b_g_y", "b_g_z",
+             "gyro_state", "gyro_rejected"]
 
 
 def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
@@ -49,6 +70,10 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
     to force passthrough/1st/2nd order on the axis; ``None`` keeps the axis' firmware
     default order (roll/pitch=2nd, yaw=1st). Pass 0 to reproduce the as-flown
     power-on default (``DEFAULT_REF_MODEL_TYPE = 0``).
+
+    ADR-0011 Phases 3 & 4: AccBiasTrim is updated every tick when the scenario
+    plant exposes ``get_accel_mg()`` and ``is_flying`` is True + elapsed_t > 0.3.
+    GyroBiasHotFsm is updated every tick via ``get_gyro_rads()`` and ``is_flying``.
     """
     axis = scenario.axis
     plant = scenario.make_plant(dt)
@@ -62,10 +87,24 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
     law = AdaptiveLaw(config, flags, dt=dt, state_space=state_space, wc_edot=wc_edot)
     loop = ControlLoop(ref=ref, pid=pid, law=law, plant=plant, axis=axis,
                        injection=injection)
+
+    # ADR-0011 Phase 3 + 4 calibrators (idle when plant has no sensor interface)
+    acc_trim = AccBiasTrim()
+    gyro_hot = GyroBiasHotFsm()
+
+    _has_cal = hasattr(plant, "get_accel_mg") and hasattr(plant, "get_gyro_rads")
+
     n = int(round(scenario.duration / dt))
 
     log = {k: np.empty(n) for k in _COLS}
     theta_hist = np.empty((n, law.n))
+
+    # Calibrator telemetry log (flat arrays for CSV export)
+    cal_log = {
+        "b_a_x": np.empty(n), "b_a_y": np.empty(n), "b_a_z": np.empty(n),
+        "b_g_x": np.empty(n), "b_g_y": np.empty(n), "b_g_z": np.empty(n),
+        "gyro_state": np.empty(n, dtype=int), "gyro_rejected": np.empty(n, dtype=bool),
+    }
 
     x = 0.0  # rad/s; lagged one tick by the plant seam
     for k in range(n):
@@ -80,6 +119,42 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
         log["U"][k], log["wnorm"][k], log["edot"][k] = rec["U"], rec["wnorm"], rec["edot"]
         theta_hist[k] = rec["theta"]
 
+        # ADR-0011 Phase 3 + 4: calibrator step every tick (once per tick at 200 Hz)
+        if _has_cal:
+            g_ref = (0.0, 0.0, 1000.0)  # mg, world gravity
+            g_meas = plant.get_accel_mg()
+            gyro_rads = plant.get_gyro_rads()
+
+            # Phase 3 — AccBiasTrim: gate matches ADR-0011 cold-cal → CAL_AIRBORNE
+            # transition.  The firmware gates on: flight_phase_flying + sticks-centred
+            # + altitude > 0.5 m + ~0.5 s.  Approximate as:
+            #   - flying condition: |r| < 0.1 rad/s (hover / no stick demand)
+            #   - elapsed_t > 2.0 s: covers both cold-cal (0-2 s) and take-off
+            #     transient (2-3 s); AccBiasTrim only starts at tick 600 = 3.0 s.
+            flying = abs(r) < 0.1
+            if flying and t > 2.0:
+                acc_trim.update(g_ref, g_meas)
+
+            # Phase 4 — GyroBiasHotFsm: flies, RC idle, stillness+trans guard
+            # (internal guards; no extra time gate needed — FSM only accumulates
+            # when conditions are met, and will complete at tick 499 = 2.495 s)
+            gyro_res = gyro_hot.update(gyro_rads, (g_meas[0], g_meas[1], 0.0),
+                                       flying, rc_active=False)
+
+            cal_log["b_a_x"][k] = acc_trim.b_a[0]
+            cal_log["b_a_y"][k] = acc_trim.b_a[1]
+            cal_log["b_a_z"][k] = acc_trim.b_a[2]
+            cal_log["b_g_x"][k] = gyro_hot.b_g[0]
+            cal_log["b_g_y"][k] = gyro_hot.b_g[1]
+            cal_log["b_g_z"][k] = gyro_hot.b_g[2]
+            cal_log["gyro_state"][k] = gyro_res["state"]
+            cal_log["gyro_rejected"][k] = gyro_res["rejected"]
+        else:
+            for kk in ("b_a_x", "b_a_y", "b_a_z", "b_g_x", "b_g_y", "b_g_z"):
+                cal_log[kk][k] = float("nan")
+            cal_log["gyro_state"][k] = -1
+            cal_log["gyro_rejected"][k] = False
+
     metrics = metrics_mod.compute(
         log, theta_hist, dt,
         umax=pid.cfg.UMax,
@@ -89,7 +164,13 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
         e_freeze=config.e_freeze if flags.hard_freeze_on else None)
     result = {"scenario": scenario.name, "axis": axis, "injection": injection,
               "dt": dt, "ref_model_type": int(ref.kind), "log": log,
-              "theta": theta_hist, "metrics": metrics}
+              "theta": theta_hist, "metrics": metrics,
+              "acc_trim_b_a": acc_trim.b_a,
+              "acc_trim_settled": acc_trim.settled,
+              "gyro_hot_b_g": gyro_hot.b_g,
+              "gyro_hot_state": int(cal_log["gyro_state"][-1]) if _has_cal else -1,
+              "gyro_hot_rejected": bool(cal_log["gyro_rejected"][-1]) if _has_cal else False,
+              "_cal_log": cal_log if _has_cal else None}
 
     if write_artifacts:
         result["outdir"] = str(_write(scenario, result, runs_dir))
@@ -106,9 +187,16 @@ def _write(scenario, result: dict, runs_dir: Path | None) -> Path:
     # data.csv
     with open(out / "data.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(_COLS)
+        w.writerow(_COLS + _CAL_COLS)
         for i in range(len(log["t"])):
-            w.writerow([f"{log[c][i]:.6g}" for c in _COLS])
+            row = [f"{log[c][i]:.6g}" for c in _COLS]
+            if result.get("_cal_log") is not None:
+                cl = result["_cal_log"]
+                row += [f"{float(cl[c][i]):.6g}" if np.isfinite(cl[c][i]) else "nan"
+                        for c in _CAL_COLS]
+            else:
+                row += ["nan"] * len(_CAL_COLS)
+            w.writerow(row)
 
     # metrics.json
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2))
@@ -228,4 +316,7 @@ if __name__ == "__main__":  # pragma: no cover
     sc = scenarios.ALL[name]()
     res = run(sc)
     print(f"{name}: {json.dumps(res['metrics'], indent=2)}")
-    print(f"artifacts -> {res['outdir']}")
+    if res.get("_cal_log") is not None:
+        print(f"acc_trim: b_a={res['acc_trim_b_a']}, settled={res['acc_trim_settled']}")
+        print(f"gyro_hot: b_g={res['gyro_hot_b_g']}, state={res['gyro_hot_state']}")
+    print(f"artifacts -> {res.get('outdir', 'N/A')}")

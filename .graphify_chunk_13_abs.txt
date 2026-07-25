@@ -1,0 +1,7 @@
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\sources\adaptive-control-tutorial-2-notebook.md
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\sources\adaptive-control-tutorial-notebook.md
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\sources\cross-subsystem-interfaces.md
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\sources\direct-mrac-ff-projection-simulation-notebook.md
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\sources\pid-mrac-notebook.md
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\theory\yucelen-lectures.md
+C:\Users\Acer\Desktop\UAV_lab\FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller\wiki\sources\motion-planning-dynamic-environments-survey.md

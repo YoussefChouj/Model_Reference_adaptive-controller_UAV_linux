@@ -113,7 +113,43 @@ while `xm` diverges), so the firmware port must clamp `crm_l1` against `DT`; rec
 `l1 ≤ ~0.4/DT`. Re-test the Lavretsky tradeoff on Gazebo, where real HF/actuator dynamics
 exist.
 
-## Not in Phase 1 (reserved, not faked)
+## Phase 3 + Phase 4 calibrators (ADR-0011)
+
+Phases 3 and 4 of the IMU auto-calibration sequence are implemented in
+[`sim/calibrator.py`](sim/calibrator.py) with 10 unit tests (see
+[`sim/tests/test_calibrator.py`](sim/tests/test_calibrator.py)).
+
+**Phase 3 — `AccBiasTrim`** (CAL_AIRBORNE_HOVER_TRIM): closed-form least-squares
+accel-bias estimator using the gravity vector as a reference.  Cost
+`||g_ref − (g_meas + b_a)||²` is minimised with gain `μ=0.02`; settled when
+residual < 5 mg for 200 consecutive ticks (1 s at 200 Hz).  Degrades to
+best-so-far after 10 s.
+
+**Phase 4 — `GyroBiasHotFsm`** (CAL_HOT_HOVER): finite-state machine mirroring
+the OF-bias FSM in `TASK/StabilizerTask.c:46-143`.  Awaits 0.5 s of stillness
+(still_ticks=100), accumulates 2 s of gyro samples (acc_ticks=400), then refreshes
+`b_g` with an EWMA filter at `α=1e-4` — intentionally very slow to avoid
+upsetting the loop during flight.  Any guard violation (RC active, not flying,
+translational acceleration, gyro motion) resets to WAIT_STILL and sets
+`rejected=True`.
+
+Integration into the closed-loop runner: [`sim/run.py`](sim/run.py) steps both
+calibrators **every tick** at 200 Hz.  `AccBiasTrim` is gated on `|r| < 0.1`
+(≈ hover setpoint) and `elapsed_t > 0.3 s` (the combined sticks-centred +
+altitude gate, approximated).  `GyroBiasHotFsm` carries its own internal guards.
+
+Two new integration scenarios are registered in `scenarios.py`:
+
+| Scenario | What it tests | Key assertion |
+|---|---|---|
+| `cold_with_bias` | Phase 3 on tilted surface; 50 mg X-accel bias; cold-cal gate 0-2 s then AccBiasTrim | `\|b_a_x − 50\| < 5` mg |
+| `hot_gyro_drift` | Phase 4; 0.02 rad/s Y-gyro bias; clean hover | `0 < b_g_y < 0.01` rad/s (correct direction, < 50% of injected) |
+
+Run the calibrator integration tests:
+
+```bash
+cd sim && python -m pytest tests/test_scenarios_cal.py -v
+```
 
 6-DOF / Gazebo plant (`GazeboPlant` is a `NotImplementedError` stub, Linux-partition
 bring-up later), outer position/attitude loops, operational/geofence limits, and the
