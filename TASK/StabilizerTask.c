@@ -74,6 +74,15 @@ static float s_land_sink_bias = 0.0f;
 /* Non-static: streamed in the 0x05 OF-calibration frame (send_data.c) to validate the v3
  * bias against an offline-derived Kalman estimate. See docs/tracking_baseline_and_drift.md. */
 float s_of_bias_x = 0.0f, s_of_bias_y = 0.0f;
+/* Seed-on-first-sample. Starting the EMA at 0.0 and letting it converge is NOT free:
+ * integrating the debiased flow is a high-pass, and the integral of the convergence
+ * ramp is exactly OF_BIAS_EMA_TAU_S * (bias_final - bias_initial) -- i.e. the whole
+ * cold-start error lands in DISTANCE/earth_x/y multiplied by tau. The sensor's raw
+ * zero-point is power-cycle dependent (observed 6..7 one session, 1 the next), so from
+ * a 0.0 start that is tau*6.6 ~= 130 units of pure garbage position injected over the
+ * first ~3-5 tau. Snapping to the first locked sample makes the initial residual zero,
+ * which removes the ramp entirely. */
+static u8 s_of_bias_seeded = 0;
 
 /* ADR-0011 Phase 3 (CAL_AIRBORNE_HOVER_TRIM) + Phase 4 (CAL_HOT_HOVER).
  * Initialised once at boot by CalTrim_Init / CalHot_Init, ticked each control
@@ -187,6 +196,13 @@ void Update_Data(void)
 					s_of_bias_x = (float)ano_of.of2_dx_fix;
 					s_of_bias_y = (float)ano_of.of2_dy_fix;
 				}
+			}
+
+			/* First locked sample seeds the estimate outright — see s_of_bias_seeded. */
+			if (of_ok && !s_of_bias_seeded) {
+				s_of_bias_seeded = 1;
+				s_of_bias_x = (float)ano_of.of2_dx_fix;
+				s_of_bias_y = (float)ano_of.of2_dy_fix;
 			}
 
 			/* Continuous background tracking — see the OF_BIAS_EMA_ALPHA comment above. */
