@@ -161,18 +161,60 @@ Skills in `~/.claude/skills/` do **not** appear in the Claude Code command autoc
 
 ## Self-adaptive loop (no human in the loop)
 
-The system runs itself. The `knowledge_loop.py` orchestrator ties everything together:
+The system runs itself. The split is:
 
-| Trigger | What runs |
+| Layer | Who runs it |
 |---|---|
-| Every `Write|Edit|MultiEdit|NotebookEdit` | `trail.py add` records the path |
-| Every Stop | `knowledge_loop.py run` (full pipeline: drift-detect, structural annotation, LLM delta_update, wiki write-through, fresh stamp) |
-| SessionStart | `knowledge_loop.py run --no-llm` (cheap structural catch-up) |
-| Git post-commit | same as Stop, fires in background |
+| Trail recording | `.claude/settings.json` `PostToolUse` hook → `trail.py add` |
+| Structural annotation (graph nodes, wiki Recent change markers, fresh stamp) | `knowledge_loop.py run` |
+| LLM-driven delta_update (graph re-extraction) | the **current agent** mid-task, OR the **`uav-knowledge-writer` subagent** for end-of-task rewrites |
+| LLM-driven wiki write-through (rewrite concept pages whose rationale shifted) | same as above — agent or subagent, with its own model |
 
-The LLM stages (`delta_update_graph`, `autonomous_wiki_rewrite`) are off by default until `OPENROUTER_API_KEY` is set. Without the key, the loop falls back to **structural-only** mode: graph nodes get annotated, wiki pages get `## Recent change (YYYY-MM-DD)` markers, manifest is stamped fresh. The circuit breaker in `llm_call.py` opens after 3 consecutive failures and stays open for 5 minutes, so a flaky network cannot stall the loop.
+### Where the LLM lives
 
-When the LLM IS available, `autonomous_wiki_rewrite` will REPLACE wiki concept pages whose rationale has shifted. Every replacement is backed up to `.agent_state/wiki_backup/<date>/<page>.md` before the rewrite. To roll back: `cp .agent_state/wiki_backup/<date>/<page>.md wiki/concepts/<page>.md`.
+The LLM is **never** a third-party HTTP call (no OpenRouter, no external API).
+Two options:
+
+1. **Mid-task** — the agent that's currently working invokes:
+   ```bash
+   python .agent_scripts/knowledge_loop.py delta_update --paths "API/ekf.c,TASK/StabilizerTask.c"
+   ```
+   The script returns JSON prompts. The agent runs them through **its own model**,
+   parses the JSON, and calls `path_refresh.merge_delta_into_graph(...)` directly.
+
+2. **End-of-task** — the agent dispatches the dedicated `uav-knowledge-writer` subagent
+   (`.cursor/agents/uav-knowledge-writer.md`, pinned to `cursor-grok-4.5-high`).
+   That subagent has its own model + system prompt + read-only access to source files;
+   it does the LLM call, parses the result, applies the rewrites (with backup), and
+   appends to the audit log.
+
+The agent that handles the loop is **the agent that's already running**, not a
+new HTTP round-trip. The `uav-knowledge-writer` subagent exists for cases where
+you want a focused, dedicated leg rather than letting the parent agent handle
+it inline.
+
+### `knowledge_loop.py` CLI
+
+| Command | What it does |
+|---|---|
+| `python .agent_scripts/knowledge_loop.py run` | full structural pipeline (drift + annotate + Recent change + fresh stamp) |
+| `python .agent_scripts/knowledge_loop.py status` | last loop run summary |
+| `python .agent_scripts/knowledge_loop.py delta_update --paths a,b,c` | print JSON prompts for the calling agent's LLM to extract graph entities |
+| `python .agent_scripts/knowledge_loop.py wiki_check --paths a,b,c` | print JSON prompts for the calling agent's LLM to check rationale shifts on affected wiki pages |
+
+### Wiring
+
+| Trigger | Hook | Mode |
+|---|---|---|
+| Every `Write|Edit|MultiEdit|NotebookEdit` | `PostToolUse` → `trail.py add` | records path |
+| Every Stop | Stop → `knowledge_loop.py run` | structural pipeline |
+| SessionStart | `SessionStart` → `knowledge_loop.py run` | structural catch-up |
+| Git commit | `.git/hooks/post-commit` → `knowledge_loop.py run` (background) | structural catch-up |
+| Manual | `python .agent_scripts/knowledge_loop.py run` | structural pipeline |
+
+The LLM stages are NOT in the hook path. They happen when the working agent or
+the `uav-knowledge-writer` subagent invokes `delta_update` / `wiki_check`. That
+keeps the LLM model choice local to the agent doing the work.
 
 ### Install
 
@@ -180,21 +222,29 @@ When the LLM IS available, `autonomous_wiki_rewrite` will REPLACE wiki concept p
 # Optional: post-commit hook (already installed if you ran install_post_commit.py install)
 python .agent_scripts/install_post_commit.py install
 
-# Optional: enable LLM stages (set the API key)
-export OPENROUTER_API_KEY=sk-or-v1-...
-
 # Manual one-shot run
 python .agent_scripts/knowledge_loop.py run
 ```
 
-### Circuit breaker
-
-`llm_call.py` keeps a rolling count of failures in `.agent_state/llm_circuit.json`. After 3 failures the circuit opens for 5 minutes; during that window, the loop skips LLM stages but continues structural updates. This means a bad API key or a rate-limited endpoint cannot block the agent.
-
 ### Auditing
 
 - Every loop run is logged to `.agent_state/knowledge_loop_log.json` (last 100 entries).
-- Every LLM call is logged to `.agent_state/llm_calls.jsonl`.
+- Graph nodes get `meta.last_touched_session` and `meta.last_touched_at` fields.
 - Wiki rewrites are backed up to `.agent_state/wiki_backup/<date>/`.
 - Graph.json gets a top-level `change_log` array recording every merge.
-- The graph node `meta.last_touched_session` field tracks which session touched each node.
+
+### Hard constraints (all agent roles)
+
+- **Never edit source code.** Only edit `graphify-out/`, `wiki/`, `.agent_state/`.
+- **Never flash firmware, halt the core, or write to the target.**
+- **Never bypass the backup step.** If `autonomous_wiki_rewrite_from_verdict` is broken, fix it first.
+- **Never delete a wiki page.** Append `<!-- superseded by: ... -->` and link the replacement.
+
+<!-- recent_change:2026-07-25 -->
+## Recent change (2026-07-25)
+
+Auto-flagged by path_refresh. Files affected in this session:
+- `API/ekf.c`
+- `TASK/StabilizerTask.c`
+
+Run `/wiki ingest` or `python -m graphify --update` to verify rationale still holds. Remove this section if confirmed unchanged.

@@ -69,3 +69,12 @@ This is intentional for low latency, but it means temporal consistency depends o
 - [[AutoflyTask]]
 - [[FreeRTOS Primitives Used]] — exact API primitives, what's used and what's deliberately omitted
 - [[STM32F4 Peripherals Reference]] — timer and NVIC configuration underlying task scheduling
+
+<!-- recent_change:2026-07-25 -->
+## Recent change (2026-07-25)
+
+Auto-flagged by path_refresh. Files affected in this session:
+- `API/imu_update.c`
+- `TASK/StabilizerTask.c`
+
+Run `/wiki ingest` or `python -m graphify --update` to verify rationale still holds. Remove this section if confirmed unchanged.

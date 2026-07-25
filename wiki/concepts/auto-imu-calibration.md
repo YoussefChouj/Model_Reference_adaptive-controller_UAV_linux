@@ -192,3 +192,15 @@ knob. Citations to land in `wiki/literature/`:
 firmware protocol authoritative); implementation deferred until pilot sign-off on the
 four-phase restructure. Empirical `R_OF`/`Q_OF_BIAS` tuning will run on first replay cycle.
 **Tags:** #imu #calibration #bias #estimator #cold-cal #air-trim #hot-cal #ekf #arming-gate #of-sensor
+
+<!-- recent_change:2026-07-25 -->
+## Recent change (2026-07-25)
+
+Auto-flagged by path_refresh. Files affected in this session:
+- `API/ekf.c`
+- `API/imu_update.c`
+- `API/mrac.c`
+- `StabilizerTask.c`
+- `TASK/StabilizerTask.c`
+
+Run `/wiki ingest` or `python -m graphify --update` to verify rationale still holds. Remove this section if confirmed unchanged.

@@ -8,7 +8,7 @@
       "Bash(python .agent_scripts/trail.py*)",
       "Bash(python .agent_scripts/path_refresh.py*)",
       "Bash(python .agent_scripts/knowledge_loop.py*)",
-      "Bash(python .agent_scripts/llm_call.py*)",
+      "Bash(python .agent_scripts/install_post_commit.py*)",
       "Bash(python -m ground_station.livewatch*)",
       "Bash(python -m ground_station.flashtool*)",
       "Bash(python C:\\Users\\Acer\\AppData\\Local\\Temp\\claude\\**\\scratchpad\\*.py*)",
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .agent_scripts/knowledge_loop.py run --no-llm"
+            "command": "python .agent_scripts/knowledge_loop.py run"
           }
         ]
       }

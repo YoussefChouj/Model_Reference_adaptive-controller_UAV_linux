@@ -49,14 +49,16 @@ Claude Code's `PreToolUse` hook on `Glob|Grep` runs `.agent_scripts/knowledge_ga
 Claude Code's `Stop` hook runs `knowledge_loop.py` after every turn. The flow is:
 
 1. The `PostToolUse` hook on `Write|Edit|MultiEdit|NotebookEdit` records each file the agent touches to a session-keyed JSONL trail: `.agent_state/trail_<session>.jsonl`.
-2. At session stop, `knowledge_loop.py run` reads the trail, identifies the touched files, and runs **six stages**:
+2. At session stop, `knowledge_loop.py run` reads the trail, identifies the touched files, and runs **the structural stages**:
    - **drift detect** — re-evaluate stale flags in the manifest
-   - **delta_update** — LLM re-extracts structure for touched code files → merges into `graph.json` (only when `OPENROUTER_API_KEY` is set)
-   - **wiki write-through** — LLM checks if rationale shifted on touched concept pages; rewrites pages whose rationale shifted; backs up old version to `.agent_state/wiki_backup/<date>/`
-   - **structural annotation** — always runs, marks touched graph nodes with `last_touched_session`, appends `## Recent change (YYYY-MM-DD)` to wiki pages
-   - **fresh stamp** — marks all layers fresh in the manifest
-   - **audit** — logs everything to `.agent_state/knowledge_loop_log.json`
-3. Without an API key, the LLM stages degrade to no-ops and the circuit breaker (3 failures → 5-min open) prevents bad networks from blocking.
+   - **annotate graph** — mark touched graph nodes with `last_touched_session` + append a `change_log` entry
+   - **Recent change** — append `## Recent change (YYYY-MM-DD)` to affected wiki concept pages (idempotent — same date is skipped)
+   - **fresh stamp** — mark `graphify`, `wiki`, and `ccc` fresh in `knowledge_manifest.json`
+   - **audit** — log everything to `.agent_state/knowledge_loop_log.json`
+3. **The LLM stages are NOT in the hook path.** Two options for them:
+   - **Mid-task:** the working agent invokes `knowledge_loop.py delta_update --paths a,b,c` (or `wiki_check --paths a,b,c`). The script returns JSON prompts; the agent runs them through its own model and applies the result via `path_refresh.merge_delta_into_graph(...)` or `path_refresh.autonomous_wiki_rewrite_from_verdict(...)`.
+   - **End-of-task:** the working agent dispatches the dedicated `uav-knowledge-writer` subagent (`.cursor/agents/uav-knowledge-writer.md`, pinned to `cursor-grok-4.5-high`). That subagent has its own model + system prompt + read access to source files; it does the LLM call, parses the result, applies the rewrites (with backup), and appends to the audit log.
 4. The whole-corpus `/graphify` is **not** triggered automatically — only the structural annotation. The next user-initiated `/graphify --update` is when the LLM re-extraction runs.
+5. The git post-commit hook fires the same structural loop in the background on every commit (installed via `python .agent_scripts/install_post_commit.py install`).
 
-This means the knowledge graph becomes a **journal** of the agent's path, growing richer with each task, with no human in the loop. Git post-commit hook fires the same loop in the background on every commit (installed via `python .agent_scripts/install_post_commit.py install`).
+This means the knowledge graph becomes a **journal** of the agent's path, growing richer with each task, with no human in the loop and no external LLM API key required.

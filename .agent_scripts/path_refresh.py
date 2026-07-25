@@ -323,28 +323,22 @@ def merge_delta_into_graph(delta: dict) -> int:
     return added
 
 
-def wiki_write_through(concept_path: Path, recent_change_files: list[str]) -> dict:
-    """LLM-powered rationale check: did the recent change shift the wiki page's
-    rationale? If yes, return a proposed rewrite. The caller decides whether
-    to apply it (autonomous mode = yes, conservative = no).
+def wiki_write_through_from_text(concept_path: Path, recent_change_files: list[str],
+                                  llm_caller=None) -> dict:
+    """Build the prompt for the calling agent to drive with its own model.
+
+    If `llm_caller` is provided, the script parses the result itself and returns
+    the same shape as the old `wiki_write_through`. Without a caller, returns
+    the messages + instructions for the agent to handle.
 
     Returns:
       {
-        'shift': bool,         # does the rationale shift?
-        'reason': str,         # one-line explanation
-        'rewritten_body': str  # the proposed full page body if shift=True,
-                              # else empty
+        'shift': bool,
+        'reason': str,
+        'rewritten_body': str,
+        'mode':  'agent-driven' | 'caller-resolved' | 'caller-failed'
       }
     """
-    sys.path.insert(0, str(ROOT / '.agent_scripts'))
-    try:
-        from llm_call import chat, circuit_is_open
-    except Exception:
-        return {'shift': False, 'reason': 'no_llm_module', 'rewritten_body': ''}
-
-    if circuit_is_open():
-        return {'shift': False, 'reason': 'circuit_open', 'rewritten_body': ''}
-
     body = _read_file_safe(concept_path, max_bytes=20000)
     files_str = '\n'.join(f'- {f}' for f in recent_change_files)
 
@@ -374,57 +368,71 @@ def wiki_write_through(concept_path: Path, recent_change_files: list[str]) -> di
          'If shift is false, set rewritten_body to "". '
          'Be conservative — only mark shift=true for substantive rationale changes.'},
     ]
-    text = chat(messages, max_tokens=2000, temperature=0.0,
-                purpose=f'wiki.write_through.{concept_path.name}')
+    instructions = (
+        'Call your own LLM with the messages above (do NOT route through '
+        'OpenRouter or any external API — use whatever model you are currently '
+        'running as). Parse the JSON response. If `shift=true` and '
+        '`rewritten_body` is non-empty, call '
+        '`autonomous_wiki_rewrite_from_verdict(...)` to apply it (with backup).'
+    )
+    if llm_caller is None:
+        return {
+            'mode':  'agent-driven',
+            'concept': str(concept_path.relative_to(ROOT)),
+            'recent_change_files': recent_change_files,
+            'prompt_messages': messages,
+            'instructions': instructions,
+            'shift': False,
+            'reason': 'agent-driven',
+            'rewritten_body': '',
+        }
+
+    text = llm_caller(messages)
     if not text:
-        return {'shift': False, 'reason': 'no_response', 'rewritten_body': ''}
+        return {'mode': 'caller-failed', 'shift': False,
+                'reason': 'no_response', 'rewritten_body': ''}
     try:
         cleaned = text.strip().strip('`').strip()
         if cleaned.startswith('json'):
             cleaned = cleaned[4:].strip()
         data = json.loads(cleaned)
-        if not isinstance(data, dict):
-            return {'shift': False, 'reason': 'bad_shape', 'rewritten_body': ''}
-        # Safety: only honor the rewrite if the rationale really shifted
-        shift = bool(data.get('shift'))
-        rewritten = str(data.get('rewritten_body', '')).strip()
-        if shift and not rewritten:
-            shift = False
-        return {
-            'shift': shift,
-            'reason': str(data.get('reason', '')),
-            'rewritten_body': rewritten,
-        }
     except json.JSONDecodeError:
         start = text.find('{')
         end = text.rfind('}')
         if start >= 0 and end > start:
             try:
                 data = json.loads(text[start:end+1])
-                return {
-                    'shift': bool(data.get('shift', False)),
-                    'reason': str(data.get('reason', '')),
-                    'rewritten_body': str(data.get('rewritten_body', '')).strip(),
-                }
             except Exception:
-                pass
-        return {'shift': False, 'reason': 'parse_fail', 'rewritten_body': ''}
+                return {'mode': 'parse-fail', 'shift': False,
+                        'reason': 'parse_fail', 'rewritten_body': ''}
+        else:
+            return {'mode': 'parse-fail', 'shift': False,
+                    'reason': 'parse_fail', 'rewritten_body': ''}
+    shift = bool(data.get('shift'))
+    rewritten = str(data.get('rewritten_body', '')).strip()
+    if shift and not rewritten:
+        shift = False
+    return {
+        'mode': 'caller-resolved',
+        'shift': shift,
+        'reason': str(data.get('reason', '')),
+        'rewritten_body': rewritten,
+    }
 
 
-def autonomous_wiki_rewrite(concept_path: Path, recent_files: list[str],
-                            today_marker: str) -> dict:
-    """Apply wiki_write_through and, if the rationale shifted, REPLACE the
-    page body (no human approval). Records what happened in the audit log.
+def autonomous_wiki_rewrite_from_verdict(concept_path: Path,
+                                          verdict: dict,
+                                          today_marker: str) -> dict:
+    """Apply a verdict returned by `wiki_write_through_from_text` (or directly
+    constructed by the calling agent). Back up the original page first.
 
-    Returns the verdict for the caller.
+    Returns the verdict augmented with `applied` and `backup` keys.
     """
-    verdict = wiki_write_through(concept_path, recent_files)
-    if not verdict['shift']:
+    if not verdict.get('shift'):
         return verdict
-    new_body = verdict['rewritten_body']
+    new_body = verdict.get('rewritten_body', '').strip()
     if not new_body:
         return verdict
-    # Backup the current page so we can roll back if the rewrite is bad.
     backup = STATE_DIR / 'wiki_backup' / today_marker / concept_path.name
     backup.parent.mkdir(parents=True, exist_ok=True)
     backup.write_text(concept_path.read_text(encoding='utf-8'),
