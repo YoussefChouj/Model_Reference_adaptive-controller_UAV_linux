@@ -3,22 +3,111 @@ description: Non-negotiable hardware safety constraints for this UAV firmware re
 alwaysApply: true
 ---
 
-# HARDWARE SAFETY — NON-NEGOTIABLE
+# HARDWARE SAFETY
 
-A physical drone is on the bench, **disarmed, with props installed**. You are a code agent. You
-do not touch the hardware.
+A physical drone is on the bench. Bench work is done **disarmed with props off**; props go on
+only for flight sessions, which the operator runs. You are a code agent — you do not flash,
+write to the target, or physically touch the bench.
+
+## Default posture: act
+
+This rule has a **short, specific** prohibition list. Everything not on it is allowed, and you
+should just do it rather than asking permission. Over-caution has a real cost here: a session
+that stops to ask before every command burns the operator's time and teaches them to ignore
+your warnings, which is worse for safety than the thing you were being careful about.
+
+**Always allowed without asking — no exception, no preamble:**
+
+- Any read-only `ground_station.livewatch` subcommand, including `verify`, `read`, `log`,
+  `watch`, `names`, `fields`, `manifests`, `budget`. It has no write path (see below).
+- Reading, searching, editing, and creating source files; running the test suite; `git` reads.
+- Any shell command that does not appear on the prohibition list.
+- Retrying a command that failed for an environmental reason — busy resource, wrong
+  interpreter, quoting bug, transient probe `TransferError`.
+
+**Scope note:** this rule governs *the physical target*. A failure in tooling, Python, git, or
+the shell is not a hardware-safety event and this rule has nothing to say about it — diagnose
+and fix it yourself. See `.cursor/rules/environment.mdc`.
 
 ## Absolute prohibitions
 
-- **Never** run `pyocd`, `openocd`, `st-flash`, `st-util`, `JLink*`, or any debug-probe tool.
-- **Never** invoke `ground_station.flashtool` or `ground_station.livewatch` (or edit their sources).
+- **Never** run `pyocd`, `openocd`, `st-flash`, `st-util`, `JLink*`, or any debug-probe tool
+  **directly**. Raw probe access can write any address, halt, and reset — including peripheral
+  registers and RAM. Only `ground_station.livewatch` is permitted, and only as described below.
+- **Never** invoke `ground_station.flashtool` (or edit its sources). It writes flash.
 - **Never** halt, reset, or write the target core. Never write firmware to the board.
 - **Never** write code that spins motors, arms the vehicle, or bypasses an arm-state gate.
 - **Never** modify `OBJ/`, `*.hex`, or `*.axf` — build outputs, not source.
 
-Flashing, live target reads, and any bench interaction are performed **only** by the human
-operator or by the Claude Code orchestrator. If a task appears to require them, stop and say so
-in your output instead of doing it.
+Flashing, any target **write**, and any physical bench interaction are performed **only** by the
+human operator. If a task requires one of those specific things, name it and hand it to the
+operator — then **carry on with everything else in the task**. Handing off one step is not a
+reason to stop the session.
+
+## PERMITTED: read-only live reads via `ground_station.livewatch`
+
+`livewatch` is in a different risk class from the tools above: **it has no write path.**
+`reader.py` opens `connect_mode="attach"` with `resume_on_disconnect=False` and contains no
+`write_memory`, `halt`, or `reset` call at all. It cannot arm the vehicle, spin a motor, halt
+the core, or change any state — reading RAM cannot move the ARM flag. Use it to check your
+reasoning against the running firmware instead of guessing.
+
+```bash
+python -m ground_station.livewatch verify              # ALWAYS FIRST — see below
+python -m ground_station.livewatch names --filter ekf  # offline, no hardware
+python -m ground_station.livewatch fields s_ekf        # offline
+python -m ground_station.livewatch read s_ekf.x[3] DroneStatus.ARM_Status
+python -m ground_station.livewatch manifests           # offline
+python -m ground_station.livewatch budget of_drift     # offline
+python -m ground_station.livewatch log of_drift --secs 60
+```
+
+### MANDATORY: run `verify` before trusting any live read
+
+Every read resolves a NAME to an ADDRESS out of `OBJ/JX_FLY.axf`. **If that ELF is not the
+build that is flashed, the addresses are wrong and you get plausible-looking garbage, not an
+error** — a float is a float whatever it points at. This is not hypothetical: the 2026-07-26
+rebuild shifted `.bss` by 12 bytes and silently invalidated two pinned test goldens.
+
+`verify` compares sampled flash bytes against the ELF and exits non-zero on a mismatch. If it
+reports `STALE ELF`, **stop** — do not report any value you read, and tell the operator the ELF
+needs rebuilding or the board needs reflashing.
+
+### Operational notes
+
+- Only **one** process can hold the CMSIS-DAP interface at a time. If Keil has a debug session
+  open, or the operator is running `watch`/`log`, your read will fail with a connection error.
+
+  **This is a busy resource, not a safety event.** Nothing is at risk; another program simply
+  holds the handle. Say which program probably holds it and what closes it (usually: uVision
+  still has a debug session open after a flash — press Ctrl+F5 / *Stop Debug Session*), then
+  ask the operator to free it. Do not retry in a tight loop, but a couple of spaced retries are
+  fine, and this must **never** escalate into refusing to run further commands. Everything that
+  does not need the probe stays available: offline `livewatch` subcommands, tests, the UART5
+  serial path, and all code work.
+- The probe throws `TransferError` in **clusters**, not uniformly. Retry with exponential
+  backoff; a fixed short delay burns every attempt inside one bad patch.
+- `watch` and `log` hold the interface for their whole duration. Prefer one-shot `read` unless
+  the operator asked for a stream.
+- Do not edit `ground_station/livewatch/reader.py`'s connection options. The `attach` /
+  `resume_on_disconnect=False` / read-only-methods combination is what makes this safe.
+
+## What is NOT a safety event
+
+Do not apply hardware-safety caution to these. They are ordinary engineering problems — fix
+them and continue:
+
+| Symptom | What it actually is | Do |
+|---------|--------------------|-----|
+| Probe connection fails / device busy | Another process holds CMSIS-DAP | Name the likely holder, ask operator to close it, continue non-probe work |
+| `ModuleNotFoundError` | Wrong Python interpreter | Use `.venv/Scripts/python.exe` |
+| Command hangs with no output | Git pager, or a shell-syntax error | `--no-pager`; check shell syntax |
+| `TransferError` mid-read | Probe errors arrive in clusters | Retry with exponential backoff |
+| Test failure | A bug | Debug it |
+| Path not found | Unquoted path containing a space | Quote it |
+
+The only things that warrant stopping the session outright are on the prohibition list above:
+writing to the target, flashing, arming/motor code, and wiring EKF into a control path.
 
 ## Control-path constraint (current, explicit user intent)
 

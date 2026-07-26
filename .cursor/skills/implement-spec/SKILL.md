@@ -50,6 +50,13 @@ or `.cursor/rules/hardware-safety.mdc`:
 - Do not commit, do not push, do not run hardware/flashing/debug-probe tooling.
 - Run tests if the spec names them. Say so if you could not.
 
+**Parallel-mode override:** if you are dispatched as part of a parallel-implementer run
+(specified by the per-task prompt naming a sub-scope and listing owner files), the
+"DO NOT run tests" rule in the prompt OVERRIDES this skill's "Run tests if the spec names
+them" rule. The conductor runs the suite once after all parallel sub-scopes join. Running
+tests in parallel mode is wasted work AND may return false failures because sibling
+sub-scopes' writes haven't landed yet.
+
 ## 4. Append to the journal — mandatory
 
 Append this block to `.agent_contracts/<TASK_ID>/journal.md`. Never edit existing entries.

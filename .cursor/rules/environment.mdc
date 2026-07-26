@@ -1,0 +1,127 @@
+---
+description: Machine-specific environment facts — Python interpreter, packages, shell, git. Prevents redundant installs and shell-syntax failures. Always applies.
+alwaysApply: true
+---
+
+# ENVIRONMENT — read before running any command
+
+These are verified facts about this machine, not suggestions. Checking them costs nothing;
+guessing costs a reinstall loop or a hung command.
+
+## Start here: `tasks.py`
+
+Every routine operation has one canonical form. **Use it instead of composing your own
+invocation** — the runner always re-launches under the venv interpreter, so a task cannot land
+on the wrong Python regardless of shell or activation state.
+
+```bash
+.venv/Scripts/python.exe tasks.py doctor    # FIRST COMMAND OF ANY FRESH SESSION
+.venv/Scripts/python.exe tasks.py test      # full suite (206 tests, ~11 s)
+.venv/Scripts/python.exe tasks.py test sim  # one lane: livewatch | gui | sim | flight
+.venv/Scripts/python.exe tasks.py verify    # ELF-vs-flash check (needs the SWD probe)
+.venv/Scripts/python.exe tasks.py graph     # rebuild the graphify code graph
+.venv/Scripts/python.exe tasks.py freeze    # regenerate requirements.txt
+```
+
+`doctor` answers, in one command, everything below this line — which interpreter, which
+packages, whether git will hang, whether the probe is free. Run it before asking the operator
+anything about the environment. It exits non-zero only on real problems; an absent probe is
+reported as a note, since it blocks `verify` and nothing else.
+
+## Python — always use the venv interpreter explicitly
+
+**There are three Pythons on PATH.** The venv is *usually* auto-activated but you cannot rely
+on it:
+
+```text
+.venv/Scripts/python          <- has every dependency   (auto-activated, but not guaranteed)
+~/AppData/.../Python311/python  <- bare, no deps
+~/AppData/.../Python313/python  <- bare, no deps
+```
+
+If you run bare `python` in a shell where the venv did not activate, you land on **3.11 with no
+dependencies**, get `ModuleNotFoundError`, and "fix" it by installing into the wrong
+interpreter. That is the reinstall loop. Avoid it by never writing bare `python`:
+
+```bash
+.venv/Scripts/python.exe -m ground_station.livewatch verify
+.venv/Scripts/python.exe -m pytest -q ground_station/livewatch/tests
+```
+
+Verified working: `.venv/Scripts/python.exe -m ground_station.livewatch manifests` from the
+repo root. Module invocation needs the repo root as CWD.
+
+`pytest.ini` pins `testpaths`, so a bare `pytest` from the repo root now collects all four
+lanes (206 tests) instead of inferring rootdir per-invocation.
+
+## Packages — check before you install
+
+`requirements.txt` is a full pinned freeze of the venv (57 packages). **Read it before running
+any install.** Already present, current versions:
+
+| Package | Version | | Package | Version |
+|---------|---------|-|---------|---------|
+| pyocd | 0.45.1 | | numpy | 2.4.4 |
+| pyserial | 3.5 | | scipy | 1.18.0 |
+| pytest | 9.0.3 | | matplotlib | 3.10.8 |
+| PyYAML | 6.0.3 | | | |
+
+Rules:
+
+- **Never** run `pip install` for something already in `requirements.txt`. Check first.
+- If something is genuinely missing, install it into the venv explicitly
+  (`.venv/Scripts/python.exe -m pip install X`), then regenerate the freeze:
+  `.venv/Scripts/python.exe -m pip freeze > requirements.txt`.
+- Never `pip install --user`, never install into a system Python, never `sudo`.
+- A `ModuleNotFoundError` is far more likely to be *the wrong interpreter* than a missing
+  package. Check `sys.executable` before installing anything.
+
+## Git — the pager is the thing that hangs you
+
+`core.pager` is now set to `cat` **in this repo**. Before that, `git log` / `git diff` / `git
+show` opened a pager and blocked until the tool timed out — that was the git slowness, not the
+repo (156 MiB packed, `git status` runs in 0.1 s).
+
+Belt and braces, since the setting is repo-local and won't follow a fresh clone or worktree:
+
+```bash
+git --no-pager log --oneline -20
+git --no-pager diff --stat
+```
+
+Other git notes for this repo:
+
+- Interactive flags (`-i`) do not work here. No `rebase -i`, no `add -i`.
+- The tree carries large build artifacts; prefer `--stat` or explicit paths over bare
+  `git diff` on the whole tree.
+- `git stash` is **repo-level and shared across worktrees**. Do not use it as a checkpoint
+  when more than one agent may be running. Use a scratch-branch commit instead.
+
+## Shell — two shells, two syntaxes, do not mix
+
+PowerShell is primary; Git Bash is also available. Each tool call picks one — write that
+shell's syntax and do not blend them.
+
+PowerShell (Windows PowerShell 5.1) gotchas that cost the most time here:
+
+- No `&&` or `||`. Use `A; if ($?) { B }`.
+- No ternary, no `??`, no `?.`.
+- `head`/`tail`/`which`/`touch` do not exist — `Select-Object -First N`, `-Last N`,
+  `(Get-Command x).Source`.
+- Do not redirect a native `.exe`'s stderr with `2>&1`; 5.1 wraps it in an ErrorRecord and
+  reports failure on exit code 0.
+
+Paths on this machine **contain spaces** (`FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller`
+— note the space before `_Adaptive`). Always quote paths. This bites nearly every fresh session.
+
+## When a command fails
+
+Diagnose before escalating. The three failures that account for most of it:
+
+1. Wrong Python interpreter (see above).
+2. Unquoted path with a space.
+3. Wrong shell's syntax.
+
+None of these are reasons to stop the task or ask the operator for help — fix and retry. See
+`.cursor/rules/hardware-safety.mdc` for the (short) list of things that genuinely require
+stopping.

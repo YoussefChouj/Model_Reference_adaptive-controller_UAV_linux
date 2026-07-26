@@ -36,7 +36,14 @@ State a brief plan as verifiable steps:
 Then loop until each check passes. Do NOT report "done" until verified against a real signal (build, test, or replay) — not just "the code looks right".
 
 ## 5. Report format
+For **execution** work (implementing, fixing, refactoring, reviewing a diff):
 `STATUS / COMPLETED / BLOCKED / FILES_CHANGED / TESTS / NEXT_RECOMMENDED / CONFIDENCE`
+
+**Does not apply to interactive legs** — `/dispatcher`, `/uav-planner`, `/grilling`,
+`/wayfinder`, `/domain-modeling`. Those report in plain conversation and end on a question,
+not a completion block. Reaching for the execution format inside an interactive leg is a
+symptom of having skipped the conversation: `FILES_CHANGED` and `TESTS` on a leg that decides
+rather than builds means artifacts got written that the user never argued with.
 
 ## 6. Manage the context window
 - Read only files needed for the current task; prefer targeted ranges.

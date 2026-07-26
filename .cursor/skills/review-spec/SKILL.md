@@ -26,9 +26,9 @@ produce a clean, parseable findings block in your return buffer.
 Read, in order:
 
 1. `.agent_contracts/<TASK_ID>/spec.md` — what was supposed to be built.
-2. `.agent_contracts/<TASK_ID>/journal.md` — **the whole file.** The implementer's entry names
-   its assumptions, its deviations, what it could not verify, and where it is least confident.
-   Start your review there — that is a map of the risk.
+2. `.agent_contracts/<TASK_ID>/journal.md` — **the whole file.** The implementer's entry (or
+   entries, in parallel mode) names its assumptions, its deviations, what it could not verify,
+   and where it is least confident. Start your review there — that is a map of the risk.
 3. The implementation: `git status` and `git diff` for the working diff. Open changed files for
    surrounding context; a diff alone hides most real bugs.
 4. `.cursor/rules/project-context.mdc` for subsystem context and the **"Decisions not to

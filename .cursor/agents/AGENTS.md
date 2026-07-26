@@ -6,8 +6,8 @@ five legs can run from inside the Cursor Agents Window now — no Claude Code re
 | Subagent | Model | Read-only | Invocation | Behaviour |
 |----------|-------|-----------|------------|-----------|
 | `uav-conductor` | `claude-opus-5-high` | no | `/uav-conductor <TASK_ID>` | Orchestrates the full pipeline; delegates to planner + implementer + reviewer |
-| `uav-planner` | `claude-opus-5-high` | no | `/uav-planner <TASK_ID>` | `.cursor/skills/planner/SKILL.md` (or inline if `/wayfinder`/`/grill-with-docs`/`/to-spec` unreachable) |
-| `uav-implementer` | `cursor-grok-4.5-high` | no | `/uav-implementer <TASK_ID>` | `.cursor/skills/implement-spec/SKILL.md` |
+| `uav-planner` | `claude-opus-5-high` | no | `/uav-planner <TASK_ID>` | `.cursor/skills/planner/SKILL.md` — grilling conversation with the user, then writes spec.md |
+| `uav-implementer` | `cursor-grok-4.5-high-fast` | no | `/uav-implementer <TASK_ID>` | `.cursor/skills/implement-spec/SKILL.md` |
 | `uav-reviewer` | `gpt-5.6-sol-high` | **yes** | `/uav-reviewer <TASK_ID>` | `.cursor/skills/review-spec/SKILL.md` |
 
 **`uav-conductor`** is the one-stop entry point. Type `/uav-conductor <TASK_ID>` in the
@@ -17,6 +17,18 @@ the Task tool. No manual intervention between legs.
 Use the individual subagents directly when you want to run a single leg only — e.g.
 `/uav-planner` to think through a design without committing to implement yet, or
 `/uav-reviewer` to re-review after a quick fix without re-running implement.
+
+### Parallel mode (opt-in)
+
+When the spec carries a `## Sub-scope manifest` section, the conductor can dispatch **two
+implementers in parallel** instead of one serial implementer. The protocol is
+`.cursor/skills/parallel-implement/SKILL.md`. Trade-off: ~1.5× speedup on the implementer
+leg at the cost of higher review surface. **Firmware specs are serial by default** —
+parallel mode is for ground_station / sim / docs specs only.
+
+To opt in, the spec must include the sub-scope manifest. The conductor falls back to serial
+automatically if the manifest is missing, if the spec is firmware, or if the scope is < 6
+files / < 200 lines.
 
 ## Why three different families
 

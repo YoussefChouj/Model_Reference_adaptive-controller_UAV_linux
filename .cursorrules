@@ -9,7 +9,21 @@ The real rules are now scoped `.mdc` files under `.cursor/rules/`:
 - `ccc-search.mdc`     — ccc/cocoindex daemon operational guide (agent-requested)
 - `embedded-c.mdc`     — STM32F4/FreeRTOS conventions + gotchas (auto-attaches on API/TASK/BSP/USER)
 
-Custom commands: `.cursor/commands/` — type `/` in the Agent (session-start, session-end, diagnose, review).
+Custom commands: `.cursor/commands/` — type `/` in the Agent (session-start, session-end, diagnose, review, livewatch).
+
+Workflow altitude — pick the right one:
+- `/dispatcher`  — main session: what to build, which lane, flight-test queue (`.agent_contracts/ROADMAP.md`)
+- `/wayfinder`   — one effort too big for a single spec; charts a map, resolves it one ticket per session
+- `/uav-planner` — one task → `spec.md`. **Interactive** — grills you first. Never delegated to a subagent.
+- `/uav-conductor` — implement → review → adjudicate, unattended, from an existing spec.
+
+Skills live in `~/.cursor/skills/` (global) and `.cursor/skills/` (project). Invoke by the
+`name:` in frontmatter, which for a few differs from the folder (`/ccc-search`,
+`/karpathy-wiki`, `/karpathy-llm-wiki`, `/karpathy-project-wiki`).
+
+Live firmware reads: `/livewatch` — read ANY firmware variable off the running drone by name
+(read-only, no write path). ALWAYS `python -m ground_station.livewatch verify` first; a stale
+`OBJ/JX_FLY.axf` returns plausible garbage, not an error. See `.cursor/rules/hardware-safety.mdc`.
 Custom subagents: `.cursor/agents/` — `uav-conductor` (full pipeline orchestrator, Claude Opus 5
 High), `uav-planner` (Claude Opus 5 High), `uav-implementer` (Cursor Grok 4.5 High Fast), and
 `uav-reviewer` (GPT-5.6 Sol High, readonly). See `.cursor/agents/AGENTS.md` for the full index.
