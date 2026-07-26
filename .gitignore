@@ -22,3 +22,6 @@ OBJ/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# generated livewatch CSVs, meta, and build logs
+logs/
