@@ -96,6 +96,13 @@ Other git notes for this repo:
   `git diff` on the whole tree.
 - `git stash` is **repo-level and shared across worktrees**. Do not use it as a checkpoint
   when more than one agent may be running. Use a scratch-branch commit instead.
+- **An hourly scheduled task (`UAV-autopush`) pushes the current branch to origin.** So a
+  branch may reach the remote without anyone running `git push` — that is expected, not a
+  sign someone else pushed. It only ever pushes existing commits: it never commits, stages,
+  force-pushes, or touches the working tree. Log: `.agent_state/autopush.log`.
+  Remove with `schtasks /Delete /TN "UAV-autopush" /F`.
+- Because commits reach the remote within the hour, **do not amend or rebase a commit that is
+  more than an hour old** without checking `git log @{u}..` first.
 
 ## Shell — two shells, two syntaxes, do not mix
 
