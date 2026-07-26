@@ -27,3 +27,33 @@ __pycache__/
 # Leading slash matters: a bare `logs/` also matches ground_station/logs/, which holds
 # tracked flight telemetry -- new flight logs would be silently ignored.
 /logs/
+
+# Flight telemetry: write-once bulk data, archived outside git (see ground_station/logs/README.md).
+# Ignore all telemetry by default, then re-include only the runs cited by docs/ADRs/analysis.
+# NOTE: these are file globs, not a bare directory -- excluding the directory itself would
+# make the '!' re-includes below silently inoperative.
+ground_station/logs/*.csv
+ground_station/logs/*.png
+ground_station/logs/**/*.csv
+ground_station/logs/**/*.png
+
+# The manifest of what was archived is itself a .csv -- keep it tracked.
+!ground_station/logs/ARCHIVE_MANIFEST.csv
+
+# Cited runs -- keep tracked:
+!ground_station/logs/bench/thrust_20260625_000238.csv
+!ground_station/logs/flight_1783831067.csv
+!ground_station/logs/flight_1783831920.csv
+!ground_station/logs/flight_1783833738.csv
+!ground_station/logs/flight_1783834592.csv
+!ground_station/logs/flight_1783845799.csv
+!ground_station/logs/flight_1783944984.csv
+!ground_station/logs/flight_1783948890.csv
+!ground_station/logs/flight_1783996082.csv
+!ground_station/logs/flight_1783998534.csv
+!ground_station/logs/flight_1784534170.csv
+!ground_station/logs/flight_1784537204.csv
+!ground_station/logs/flight_1784537769.csv
+!ground_station/logs/flight_1784538359.csv
+!ground_station/logs/flight_1784725604.csv
+!ground_station/logs/sysid_pitch_1781788765.csv
