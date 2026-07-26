@@ -50,8 +50,15 @@ extern void Ekf9_Predict(Ekf9_t *e,
  *  of_x, of_y: body-frame velocity, m/s */
 extern void Ekf9_UpdateOf(Ekf9_t *e, float of_x, float of_y);
 
-/** Body-lin-acc XY measurement update (gravity-removed).
- *  lin_acc_x, lin_acc_y: body-frame specific force, m/s^2 */
+/** Body-XY VELOCITY measurement update (m/s) — MISNAMED, see warning.
+ *
+ *  WARNING: do NOT pass linear acceleration. H selects v_body[0..1], so the
+ *  arguments must be a VELOCITY in m/s. Passing lin_acc makes the innovation
+ *  (acceleration - velocity), a unit error, and double-counts the accelerometer
+ *  that already drives Ekf9_Predict — measured on hardware 2026-07-26, that let
+ *  b_a converge onto raw Acc_*_Real (ratio 1.000) so the predict step contributed
+ *  nothing. The only valid use is (0,0): a zero-velocity update when stationary.
+ *  No production call site uses this; TASK/send_data.c deliberately does not. */
 extern void Ekf9_UpdateAccXY(Ekf9_t *e, float lin_acc_x, float lin_acc_y);
 
 /** Z-rate (altitude derivative) measurement update (scalar).

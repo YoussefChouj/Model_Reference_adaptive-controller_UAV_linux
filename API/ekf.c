@@ -229,7 +229,11 @@ void Ekf9_UpdateOf(Ekf9_t *e, float of_x, float of_y)
 }
 
 /* ------------------------------------------------------------------ */
-/* Update — Body-lin-acc XY (gravity-removed)                          */
+/* Update — Body-XY VELOCITY (m/s). MISNAMED: the args are a velocity,  */
+/* not an acceleration — H selects x[0..1]. Passing lin_acc here is a   */
+/* unit error and double-counts the accelerometer already feeding       */
+/* Ekf9_Predict. Only (0,0) is valid: a ZUPT. See ekf.h. Unused by      */
+/* TASK/send_data.c on purpose.                                         */
 /* ------------------------------------------------------------------ */
 void Ekf9_UpdateAccXY(Ekf9_t *e, float lin_acc_x, float lin_acc_y)
 {

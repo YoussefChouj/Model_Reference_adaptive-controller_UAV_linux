@@ -152,14 +152,23 @@ class Ekf9State:
         self._K_of = K[0:3, 0].copy()  # Kalman gain for X (first column of K)
 
     def update_acc_xy(self, lin_acc_xy: tuple):
-        """Body-frame linear acceleration XY measurement (m/s²), gravity removed.
+        """Body-XY VELOCITY measurement (m/s). Misnamed — see the warning below.
 
-        Measurement model: z = H @ x + v
-        H selects v_body[0] and v_body[1] (the same observation as OF).
-        In a body-frame EKF with a constant-velocity predict, the measurement
-        residual z - Hx tells us how much the velocity estimate is off — the
-        acceleration bias lives in the predict step, not directly in the
-        measurement model, so the Jacobians and update are identical to OF.
+        WARNING — do NOT pass linear acceleration to this method.
+        H selects v_body[0] and v_body[1], so z must be a *velocity* in m/s. The
+        original docstring argued the Jacobians "are identical to OF" and therefore
+        acceleration could be passed directly; that is a unit error. Doing so tells
+        the filter "your velocity equals 1.9 mg", and because the accelerometer is
+        already the input to predict(), it also double-counts one sensor — which is
+        what let b_a drift until it exactly cancelled a. Measured on hardware
+        2026-07-26: b_a matched raw Acc_*_Real to a ratio of 0.999/1.004/1.000 and
+        the predict step contributed nothing (NIS ~1e-5).
+
+        The one legitimate use is z = (0.0, 0.0): a zero-velocity update (ZUPT) when
+        the vehicle is known to be stationary. That is the only form the unit tests
+        ever exercised, which is why they stayed green while the flight path was wrong.
+        Both real call sites (TASK/send_data.c, sim/tools/replay_ekf_flight.py) no
+        longer call this at all.
         """
         H = np.zeros((2, 9), dtype=np.float64)
         H[0, 0] = 1.0

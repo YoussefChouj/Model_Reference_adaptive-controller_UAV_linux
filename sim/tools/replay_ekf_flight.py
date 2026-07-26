@@ -12,9 +12,9 @@ What it does
 1. Loads the long-format CSV (t_s, frame, key, value).
 2. Pivots the OF frame rows into per-tick dicts of measured signals.
 3. Steps a 9-state EKF through every tick:
-     - predict(a_body_from_acc_x/y in m/s^2, gyro=0 since logs lack raw gyro)
-     - update_acc_xy(lin_acc_x/y in m/s^2) using gravity-removed logs
-     - update_of(of2_dx_fix, of2_dy_fix) in m/s (s16 * 0.01)
+     - predict(gravity-removed lin_acc_x/y in m/s^2, gyro=0 since logs lack raw gyro)
+     - update_of(of2_dx_fix - bias_x, of2_dy_fix - bias_y) in m/s
+     - (no update_acc_xy: the accelerometer is the predict input, not a measurement)
      - update_z_rate(of2_h_f2_v if present else 0)
 4. Tracks (a) the residual between EKF-estimated v_body and the OF-corrected
    ground-truth velocity (where available) and (b) the converged b_a / b_g.
@@ -37,7 +37,10 @@ from sim.ekf import Ekf9State
 
 # Scale factors matched to firmware (send_data.c OF_PUT_S16 encoding)
 OF_LSB_MPS = 0.01           # s16 -> m/s
-ACC_LSB_MS2 = 0.001         # mg -> m/s^2 (used on the body-frame lin_acc side)
+# mg -> m/s^2. Was 0.001, which is mg -> *g*, not m/s^2 (1000 mg = 1 g = 9.81 m/s^2).
+# r_of/r_acc/q_* are all specified in SI, so the old value made the inertial term
+# ~9.81x too small against the m/s optical-flow update. Matches send_data.c ACC_MG_TO_MS2.
+ACC_LSB_MS2 = 0.00981       # mg -> m/s^2
 GRAV_MS2 = 9.81
 HOVER_TRANSITION_S = 1.0    # first second may be cold-cal ground noise; skip for stats
 
@@ -94,26 +97,39 @@ def replay(csv_path: Path) -> dict:
     bias_ekf_history: list[tuple[float, float, float, float, float, float]] = []
 
     for tk in ticks:
-        # Body-frame accel from gravity-included logs (of.acc_x_mg is mg)
-        ax_mg = tk.get("of.acc_x_mg", float("nan"))
-        ay_mg = tk.get("of.acc_y_mg", float("nan"))
-        if not (math.isnan(ax_mg) or math.isnan(ay_mg)):
-            a_body = (ax_mg * ACC_LSB_MS2, ay_mg * ACC_LSB_MS2, 0.0)
-            ekf.predict(a_body, (0.0, 0.0, 0.0), dt=0.005)
-            n_steps += 1
-
-        # Gravity-removed body accel (mg -> m/s^2)
+        # Predict on GRAVITY-REMOVED body accel (of.lin_acc_*_mg), matching send_data.c.
+        # This used to predict on of.acc_*_mg (gravity-included) with a hard-coded
+        # a_body[2] = 0.0, which is what hid the firmware bug: on hardware the real
+        # Acc_Z_Real (+1 g) went in, b_a absorbed it, and `v += (a - b_a)*dt` collapsed
+        # to zero. Zeroing Z here meant gravity was never presented to the golden.
         lax_mg = tk.get("of.lin_acc_x_mg", float("nan"))
         lay_mg = tk.get("of.lin_acc_y_mg", float("nan"))
         if not (math.isnan(lax_mg) or math.isnan(lay_mg)):
-            ekf.update_acc_xy((lax_mg * ACC_LSB_MS2, lay_mg * ACC_LSB_MS2))
-            n_acc_updates += 1
+            a_body = (lax_mg * ACC_LSB_MS2, lay_mg * ACC_LSB_MS2, 0.0)
+            ekf.predict(a_body, (0.0, 0.0, 0.0), dt=0.005)
+            n_steps += 1
 
-        # OF velocity
+        # NO update_acc_xy — the accelerometer is the predict INPUT above; using it again
+        # as a measurement double-counts one sensor. Passing lin_acc as z is also a unit
+        # error: that method's H selects v_body[0..1], so z must be a velocity. (With
+        # z = 0 it is a valid zero-velocity update, which is the only way the unit tests
+        # ever exercised it — see sim/ekf.py update_acc_xy docstring.)
+
+        # OF velocity — DEBIASED, matching send_data.c. The logged of.of2_dx_fix is the
+        # RAW sensor field: send_data.c packs of2_dx_fix and s_of_bias_x/y as SEPARATE
+        # fields, so the bias is NOT pre-subtracted (the note further down claiming it is
+        # was simply wrong). The 9-state vector has no optical-flow bias state, so feeding
+        # raw leaves a constant velocity error only b_a can absorb.
         of_dx = tk.get("of.of2_dx_fix", float("nan"))
         of_dy = tk.get("of.of2_dy_fix", float("nan"))
+        ofb_x = tk.get("of.bias_x", 0.0)
+        ofb_y = tk.get("of.bias_y", 0.0)
+        if math.isnan(ofb_x):
+            ofb_x = 0.0
+        if math.isnan(ofb_y):
+            ofb_y = 0.0
         if not (math.isnan(of_dx) or math.isnan(of_dy)):
-            of_vel_mps = (of_dx * OF_LSB_MPS, of_dy * OF_LSB_MPS)
+            of_vel_mps = ((of_dx - ofb_x) * OF_LSB_MPS, (of_dy - ofb_y) * OF_LSB_MPS)
             ekf.update_of(of_vel_mps)
             n_of_updates += 1
             # Compare EKF v_body vs OF (they should converge after warm-up)
@@ -123,11 +139,11 @@ def replay(csv_path: Path) -> dict:
             res_sq_sum += dx * dx + dy * dy
             res_n += 1
 
-        # Cross-check: the firmware's v3 OF-bias estimator already subtracted
-        # of.bias_x / of.bias_y from of2_dx_fix / of2_dy_fix. The EKF sees the
-        # already-corrected velocity, so its b_a estimate should sit near zero
-        # unless there's a residual the firmware's PI estimator hasn't captured
-        # (which would be the body-frame accel bias that Phase 3 is for).
+        # Cross-check: of.bias_x / of.bias_y is the firmware's v3/EMA OF-bias estimate,
+        # subtracted above (it is NOT pre-subtracted in the logged frame). With the OF
+        # velocity debiased and the predict driven by gravity-removed accel, b_a should
+        # now sit near zero unless there is a genuine body-frame accel bias left for
+        # Phase 3 to trim.
         bias_x = tk.get("of.bias_x", float("nan"))
         bias_y = tk.get("of.bias_y", float("nan"))
         if not (math.isnan(bias_x) or math.isnan(bias_y)):

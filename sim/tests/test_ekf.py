@@ -88,9 +88,11 @@ def test_ekf_bias_convergence_static():
     # Run predict + accel update for 1000 ticks
     # With lin_acc = (0, 0) measurement, the filter should learn b_a_x
     for _ in range(1000):
-        # True accel is 0.294 m/s² but we lie and say 0 (sensor reads true accel - bias)
-        # The EKF sees: predict with a=0, so v_body grows due to bias being subtracted
-        # Then accel update with z=(0,0) corrects both v_body and b_a
+        # The accelerometer reports 0.294 m/s² while the vehicle is genuinely stationary,
+        # so all of it is bias. z=(0,0) is a zero-velocity update (ZUPT) — a VELOCITY of
+        # zero, not an acceleration. That is the only valid use of update_acc_xy; passing
+        # a real lin_acc there is a unit error (see its docstring). The filter keeps
+        # v_body pinned at 0 and therefore attributes the whole 0.294 to b_a.
         ekf.predict((0.294, 0.0, 0.0), (0.0, 0.0, 0.0), dt=0.001)
         ekf.update_acc_xy((0.0, 0.0))
     # After convergence, b_a_x should track ~0.294 m/s²
