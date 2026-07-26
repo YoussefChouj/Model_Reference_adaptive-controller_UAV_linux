@@ -14,6 +14,7 @@
 #include "imu_update.h"  /* imu_data, Lin_Acc_X/Y_body */
 #include "calib.h"       /* CalTrim_t, CalHot_t */
 #include "ekf.h"         /* Ekf9_t, ADR-0011 9-state EKF */
+#include "usart5.h"      /* UART5 extended-prefix subscribe hook (uart5_address_subscription_cmd) */
 
 /* Body-frame gyroscope rates (rad/s) — needed for Frame C body-rate telemetry.
  * Declared as extern in bmi088_driver.h. */
@@ -364,7 +365,13 @@ UCHAR8 Buf_Telemetry_UART4[512] = {0};
 extern FP32 Acc_X_Real;
 extern FP32 Acc_Y_Real;
 extern float s_of_bias_x, s_of_bias_y;
-extern float Lin_Acc_X_body, Lin_Acc_Y_body;   /* gravity-removed body accel (mg), imu_update.c */
+extern float Lin_Acc_X_body, Lin_Acc_Y_body, Lin_Acc_Z_body;   /* gravity-removed body accel (mg), imu_update.c */
+
+/* mg -> m/s^2. NOT 0.001: that yields g, not m/s^2 (1000 mg = 1 g = 9.81 m/s^2).
+ * The EKF's R_of (6.16e-4 m^2/s^2) and Q are specified in SI, so feeding the predict
+ * step in g made the inertial contribution ~9.81x too small against the m/s optical-flow
+ * update. sim/tools/replay_ekf_flight.py:40 carries the same mislabelled 0.001. */
+#define ACC_MG_TO_MS2  0.00981f
 
 /* Optical-flow scale: metres/second per raw of2_dx_fix count, for the EKF measurement.
  * UNRESOLVED INCONSISTENCY — left at the historical 0.01 deliberately, do not change
@@ -404,9 +411,18 @@ void Send_Groundstation_Telemetry_UART4(void)
         s_ekf_inited = 1U;
     }
     if (s_ekf.active) {
-        float ax = Acc_X_Real * 0.001f;  /* mg -> m/s^2 */
-        float ay = Acc_Y_Real * 0.001f;
-        float az = Acc_Z_Real * 0.001f;
+        /* Predict input must be GRAVITY-REMOVED linear acceleration, not raw specific
+         * force. Feeding Acc_*_Real (which reads +1 g on Z at rest) left b_a as the only
+         * free state able to cancel it, so b_a converged to the gravity projection:
+         * measured on the bench, b_a matched Acc_*_Real to a ratio of 0.999/1.004/1.000
+         * on x/y/z (b_a.z = +1008 mg). With b_a == a, `v += (a - b_a)*dt` contributes
+         * exactly nothing and the filter degenerates into a low-pass on the OF velocity
+         * (NIS ~1e-5, no innovation). sim/ekf.py's predict docstring says "gravity NOT
+         * removed (caller removes)" — this is the caller. The golden replay hid the bug
+         * by hard-coding a_body[2] = 0.0, so gravity was never presented to it. */
+        float ax = Lin_Acc_X_body * ACC_MG_TO_MS2;
+        float ay = Lin_Acc_Y_body * ACC_MG_TO_MS2;
+        float az = Lin_Acc_Z_body * ACC_MG_TO_MS2;
         /* dt is MEASURED, not assumed. This function is called from Send_Task, which
          * paces at 10 ms (100 Hz) in normal flight and only ~5 ms (200 Hz) while
          * id_frame_on/of_frame_on is set (main.c) — and the 73 B EKF-telemetry variant
@@ -438,10 +454,17 @@ void Send_Groundstation_Telemetry_UART4(void)
             float ofy = ((float)ano_of.of2_dy_fix - s_of_bias_y) * OF_LSB_MPS;
             Ekf9_UpdateOf(&s_ekf, ofx, ofy);
         }
-        /* Accel measurement: gravity-removed, mg -> m/s^2 */
-        Ekf9_UpdateAccXY(&s_ekf,
-                         Lin_Acc_X_body * 0.001f,
-                         Lin_Acc_Y_body * 0.001f);
+        /* NO accelerometer measurement update — deliberate, do not re-add.
+         * Ekf9_UpdateAccXY sets H to select v_body[0..1] and then passes it a *linear
+         * acceleration* as z, so its innovation is (acceleration - velocity): a unit
+         * mismatch, telling the filter "your velocity equals 1.9 mg". Worse, the
+         * accelerometer is already the input to Ekf9_Predict above; using it a second
+         * time as a measurement double-counts one sensor, and that is what let b_a slide
+         * until it exactly cancelled a. The genuine velocity measurements are optical
+         * flow (XY, above) and Z-rate (below); b_a stays observable through the OF update
+         * via the P[0,3] cross-covariance restored by the 2026-07-24 F-cross-term fix.
+         * NOTE b_a therefore needs motion to converge — on a static bench it will simply
+         * decay toward zero rather than identify a bias. */
         /* Z-rate: use the smoothed derivative of of2_h computed in StabilizerTask
          * (of2_h_f2_v is the LP-filtered d(altitude)/dt, m/s). This is the same
          * signal that feeds Ctrler.Z_ratePID.FB so the EKF and the control loop
@@ -977,6 +1000,16 @@ void Send_Groundstation_Telemetry_UART4(void)
     DMA1_Stream7->M0AR = (uint32_t)&Buf_Telemetry_UART4;
     DMA1_Stream7->NDTR = len;
     DMA_Cmd(DMA1_Stream7, ENABLE);
+
+    /* ADR-0011 follow-up (uart5_address_subscription_cmd): if a UART5
+     * subscribe request has been staged by the IRQ-side parser (BSP/usart5.c),
+     * build the 0x07 / 0x7F reply and emit it on a *second* DMA1_Stream7
+     * turn. The reply observes the same UART5 timing contract as A/B
+     * telemetry; no new FreeRTOS task is created, and the live telemetry
+     * cadence is unchanged when no request is pending. */
+    if (UA5RxSubscribePending != 0U) {
+        Uart5_Subscribe_HandleRequest();
+    }
 }
 
 typedef struct { uint8_t id; uint8_t index; float value; } GS_Cmd_t;

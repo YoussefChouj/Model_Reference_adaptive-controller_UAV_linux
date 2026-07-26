@@ -18,12 +18,41 @@ from pathlib import Path
 
 from .registry import Registry
 from .symbols import SymbolResolver
+from .transport import LiveTransportError, SwdCmsisDap, Uart5LongRange
 
 _DEFAULT_ELF = Path(__file__).resolve().parents[2] / "OBJ" / "JX_FLY.axf"
+_DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "config.yaml"
 
 
 def _resolver(args) -> SymbolResolver:
     return SymbolResolver(args.elf)
+
+
+def _transport_config() -> dict[str, str]:
+    out = {}
+    if _DEFAULT_CONFIG.exists():
+        for raw in _DEFAULT_CONFIG.read_text(errors="replace").splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            out[key.strip()] = value.strip()
+    return out
+
+
+def _transport(args):
+    if getattr(args, "transport", "swd") == "uart5":
+        cfg = _transport_config()
+        port = getattr(args, "uart5_port", None) or cfg.get("livewatch_uart5_port", "")
+        baud = getattr(args, "uart5_baud", None) or int(
+            cfg.get("livewatch_uart5_baud", 115200))
+        return Uart5LongRange(port=port, baud=baud)
+    return SwdCmsisDap()
+
+
+def _live_reader(args):
+    from .reader import LiveReader
+    return LiveReader(args.elf, transport=_transport(args))
 
 
 def cmd_names(args):
@@ -53,9 +82,8 @@ def _expand(args) -> list[str]:
 
 
 def cmd_read(args):
-    from .reader import LiveReader
     names = _expand(args)
-    with LiveReader(args.elf) as lr:
+    with _live_reader(args) as lr:
         plan = lr.plan(names)
         print(f"# {len(plan.regions)} region(s) / {len(names)} vars")
         row = lr.sample(plan)
@@ -65,11 +93,10 @@ def cmd_read(args):
 
 
 def cmd_watch(args):
-    from .reader import LiveReader
     names = _expand(args)
     writer = None
     fh = None
-    with LiveReader(args.elf) as lr:
+    with _live_reader(args) as lr:
         try:
             for row in lr.stream(names, hz=args.hz, duration=args.secs):
                 if args.csv and writer is None:
@@ -86,6 +113,117 @@ def cmd_watch(args):
             if fh:
                 fh.close()
                 print(f"# wrote {args.csv}", file=sys.stderr)
+
+
+def cmd_verify(args):
+    """Prove OBJ/JX_FLY.axf is the build running on the target before trusting a read."""
+    from .reader import LiveReader
+    from .verify import compare, flash_segments, plan_samples
+
+    segs = flash_segments(args.elf)
+    samples = plan_samples(segs, n=args.chunks)
+    print(f"# {len(segs)} flash segment(s), sampling {len(samples)} chunk(s)", file=sys.stderr)
+    with LiveReader(args.elf) as lr:
+        res = compare(samples, lambda a, n: lr._target.read_memory_block8(a, n))
+    print(res.describe())
+    return 0 if res.ok else 2
+
+
+def cmd_manifests(args):
+    from .manifest import ManifestStore
+    store = ManifestStore()
+    for n in store.names():
+        m = store.get(n)
+        doc = " ".join(m.doc.split())
+        print(f"{n:16s} {m.hz:>5g} Hz  {len(m.vars):>3} vars   {doc[:90]}")
+
+
+def cmd_transports(args):
+    for transport in (SwdCmsisDap(), Uart5LongRange(port="CONFIGURED")):
+        print(f"{transport.name:8s} {transport.cost_model.describe()}")
+
+
+def _manifest_for(args):
+    """Either a named manifest or an ad-hoc one built from --vars."""
+    from .manifest import ManifestStore
+    store = ManifestStore()
+    if args.vars:
+        return store.adhoc(args.vars, hz=args.hz or 20.0, name=args.name or "adhoc")
+    m = store.get(args.manifest)
+    if args.hz:
+        m.hz = args.hz
+    return m
+
+
+def cmd_budget(args):
+    """Feasible sample rate for a manifest. Pure DWARF + cost model, no hardware."""
+    from .manifest import feasibility
+    from .reader import build_plan
+    m = _manifest_for(args)
+    transport = _transport(args)
+    plan = build_plan(_resolver(args), m.vars, transport.gap_merge_bytes)
+    feas = feasibility(plan, cost_model=transport.cost_model)
+    print(f"{m.name}: {feas.describe()}")
+    if feas.ok_for(m.hz):
+        print(f"  requested {m.hz:g} Hz -> OK ({m.hz / feas.max_hz * 100:.0f}% of ceiling)")
+    else:
+        print(f"  requested {m.hz:g} Hz -> TOO FAST, ceiling is ~{feas.max_hz:.0f} Hz")
+    for r in plan.regions:
+        print(f"    region 0x{r.start:08X} +{r.size} B")
+
+
+def cmd_log(args):
+    """Log a manifest to a uniquely named CSV, after checking the rate is real."""
+    from .manifest import unique_csv_path, write_meta
+    m = _manifest_for(args)
+    with _live_reader(args) as lr:
+        plan = lr.plan(m.vars)
+        feas = lr.transport.calibrate(lr, plan)
+        print(f"# {m.name}: {feas.describe()}", file=sys.stderr)
+
+        hz = m.hz
+        if not feas.ok_for(hz):
+            if args.clamp:
+                hz = feas.max_hz
+                print(f"# requested {m.hz:g} Hz exceeds the ceiling; clamped to {hz:.0f} Hz",
+                      file=sys.stderr)
+            else:
+                print(f"ERROR: {m.name} cannot sustain {hz:g} Hz; measured ceiling is "
+                      f"{feas.max_hz:.0f} Hz.\n"
+                      f"       Re-run with --hz {feas.max_hz:.0f} or fewer vars, or pass "
+                      f"--clamp to log at the ceiling.", file=sys.stderr)
+                return 1
+
+        out = unique_csv_path(args.outdir, m, hz)
+        meta = write_meta(out, m, plan, args.elf, requested_hz=m.hz, feas=feas,
+                          extra={"logged_hz": hz,
+                                 "transport": lr.transport.cost_model.transport_name})
+        print(f"# -> {out}\n# -> {meta}", file=sys.stderr)
+
+        n = 0
+        t_last = None
+        fh = open(out, "w", newline="")
+        writer = None
+        try:
+            for row in lr.stream(m.vars, hz=hz, duration=args.secs):
+                if writer is None:
+                    writer = csv.DictWriter(fh, fieldnames=list(row))
+                    writer.writeheader()
+                writer.writerow(row)
+                n += 1
+                t_last = row["t"]
+                if args.quiet:
+                    if n % 50 == 0:
+                        print(f"\r# {n} samples", end="", file=sys.stderr)
+                else:
+                    print("  ".join(f"{k}={_fmt(v)}" for k, v in row.items()))
+        except KeyboardInterrupt:
+            print("\n# stopped", file=sys.stderr)
+        finally:
+            fh.close()
+            rate = (n / t_last) if t_last else 0.0
+            print(f"\n# wrote {n} samples to {out} (effective {rate:.1f} Hz)", file=sys.stderr)
+    return 0
 
 
 def _fmt(v):
@@ -113,8 +251,12 @@ def build_parser():
     sp = sub.add_parser("groups", help="list registry watch groups")
     sp.set_defaults(func=cmd_groups)
 
+    sp = sub.add_parser("transports", help="list live-read transports and cost models")
+    sp.set_defaults(func=cmd_transports)
+
     sp = sub.add_parser("read", help="one-shot read (needs hardware)")
     sp.add_argument("names", nargs="+", help="paths and/or group:<name> tokens")
+    _transport_args(sp)
     sp.set_defaults(func=cmd_read)
 
     sp = sub.add_parser("watch", help="stream at N Hz (needs hardware)")
@@ -122,13 +264,58 @@ def build_parser():
     sp.add_argument("--hz", type=float, default=20.0)
     sp.add_argument("--secs", type=float, default=None, help="stop after S seconds")
     sp.add_argument("--csv", help="also log samples to CSV")
+    _transport_args(sp)
     sp.set_defaults(func=cmd_watch)
+
+    sp = sub.add_parser("verify", help="check the ELF matches the flashed firmware (needs hardware)")
+    sp.add_argument("--chunks", type=int, default=5, help="chunks sampled per flash segment")
+    sp.set_defaults(func=cmd_verify)
+
+    sp = sub.add_parser("manifests", help="list logging manifests")
+    sp.set_defaults(func=cmd_manifests)
+
+    sp = sub.add_parser("budget", help="feasible sample rate for a manifest (no hardware)")
+    _manifest_args(sp)
+    _transport_args(sp)
+    sp.set_defaults(func=cmd_budget)
+
+    sp = sub.add_parser("log", help="log a manifest to a uniquely named CSV (needs hardware)")
+    _manifest_args(sp)
+    _transport_args(sp)
+    sp.add_argument("--secs", type=float, default=None, help="stop after S seconds")
+    sp.add_argument("--outdir", default="logs/livewatch", help="CSV output directory")
+    sp.add_argument("--clamp", action="store_true",
+                    help="log at the measured ceiling instead of refusing when --hz is too fast")
+    sp.add_argument("--quiet", action="store_true", help="progress counter instead of every row")
+    sp.set_defaults(func=cmd_log)
     return p
+
+
+def _transport_args(sp):
+    sp.add_argument("--transport", choices=("swd", "uart5"), default="swd")
+    sp.add_argument("--uart5-port", help="manual UART5 COM port (overrides config.yaml)")
+    sp.add_argument("--uart5-baud", type=int,
+                    help="UART5 baud (overrides config.yaml; default 115200)")
+    return sp
+
+
+def _manifest_args(sp):
+    """A manifest is named, or built ad-hoc from --vars; --hz overrides either."""
+    sp.add_argument("manifest", nargs="?", help="manifest name from manifests.yaml")
+    sp.add_argument("--vars", nargs="+",
+                    help="ad-hoc variable list (paths and/or group:<name>) instead of a manifest")
+    sp.add_argument("--name", help="name for an ad-hoc manifest (used in the CSV filename)")
+    sp.add_argument("--hz", type=float, default=None, help="override the manifest sample rate")
+    return sp
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    args.func(args)
+    try:
+        return args.func(args) or 0
+    except LiveTransportError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

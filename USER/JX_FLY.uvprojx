@@ -500,6 +500,11 @@
               <FilePath>..\API\calib.c</FilePath>
             </File>
             <File>
+              <FileName>subscribe.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\API\subscribe.c</FilePath>
+            </File>
+            <File>
               <FileName>rc_input.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\API\rc_input.c</FilePath>

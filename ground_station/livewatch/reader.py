@@ -1,16 +1,10 @@
-"""Safe attach-mode live reader over the wireless CMSIS-DAP probe (pyOCD).
+"""Transport-agnostic, read-only live variable reader.
 
-Safety contract (do not weaken):
-  connect_mode="attach"        -> never halts or resets the running core
-  target_override="cortex_m"   -> generic core access, no STM32 flash/reset logic
-  resume_on_disconnect=False   -> nothing to resume; we never halted
-  read paths only              -> no write_memory / halt / reset call exists here
-Reading RAM cannot change the ARM flag, so a disarmed drone stays disarmed.
-
-Performance: watched symbols are coalesced into the minimum number of contiguous
-block reads (one CMSIS-DAP transaction each), because per-transaction USB latency
-dominates, not bytes transferred. Watching a whole struct therefore costs ~1
-transaction regardless of field count.
+Safety contract (do not weaken): transport implementations expose block-read paths
+only. The default SWD transport preserves ``connect_mode=attach``,
+``target_override=cortex_m`` and ``resume_on_disconnect=False``; neither transport
+has a halt, reset, core-memory write, arm, or motor path. UART5 sends only the
+confirmed benign ID-frame handshake and observes replies.
 
 The coalescing (`build_plan`) and decoding (`Plan.decode`) are pure functions with
 no hardware dependency, so they are unit-tested offline against synthetic bytes.
@@ -24,6 +18,7 @@ from pathlib import Path
 from typing import Iterator
 
 from .symbols import Symbol, SymbolResolver
+from .transport import LiveTransport, LiveTransportError, SwdCmsisDap
 
 # Merge two symbols into one block read only when the gap between them is smaller
 # than the cost of a second transaction, expressed in bytes.
@@ -89,35 +84,26 @@ def build_plan(resolver: SymbolResolver, names: list[str],
 
 
 class LiveReader:
-    """Opens a read-only attach session and samples a Plan on demand or as a stream."""
+    """Resolves symbols and samples them through a read-only transport."""
 
-    def __init__(self, elf_path: str | Path, gap_merge_bytes: int = _GAP_MERGE_BYTES):
+    def __init__(self, elf_path: str | Path, transport: LiveTransport | None = None,
+                 gap_merge_bytes: int | None = None):
         self.resolver = SymbolResolver(elf_path)
-        self.gap_merge_bytes = gap_merge_bytes
-        self._session = None
+        self.transport = transport or SwdCmsisDap()
+        self.gap_merge_bytes = (self.transport.gap_merge_bytes
+                                if gap_merge_bytes is None else gap_merge_bytes)
         self._target = None
 
     # ---- connection (lazy; keeps offline tests hardware-free) ----------
 
     def connect(self):
-        from pyocd.core.helpers import ConnectHelper
-        self._session = ConnectHelper.session_with_chosen_probe(
-            options={
-                "target_override": "cortex_m",
-                "connect_mode": "attach",       # non-halting
-                "resume_on_disconnect": False,
-            }
-        )
-        if self._session is None:
-            raise RuntimeError("no CMSIS-DAP probe found (is Keil holding it? close its debug session)")
-        self._session.open()
-        self._target = self._session.target
+        self.transport.connect()
+        self._target = getattr(self.transport, "target", None)
         return self
 
     def close(self):
-        if self._session is not None:
-            self._session.close()
-            self._session = self._target = None
+        self.transport.close()
+        self._target = None
         self.resolver.close()
 
     def __enter__(self):
@@ -132,10 +118,10 @@ class LiveReader:
         return build_plan(self.resolver, names, self.gap_merge_bytes)
 
     def sample(self, plan: Plan) -> dict[str, object]:
-        if self._target is None:
-            raise RuntimeError("not connected; call connect() or use as context manager")
-        blocks = [bytes(self._target.read_memory_block8(r.start, r.size))
-                  for r in plan.regions]
+        try:
+            blocks = self.transport.sample(plan)
+        except LiveTransportError:
+            raise
         return plan.decode(blocks)
 
     def stream(self, names: list[str], hz: float = 20.0,

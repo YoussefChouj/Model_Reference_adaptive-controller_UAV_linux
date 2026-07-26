@@ -13,6 +13,18 @@
 
 UCHAR8 UA5RxDMAbuf[USART5_RXDMA_LEN] = {0};
 UCHAR8 UA5RxMailbox[USART5_RXMB_LEN] = {0};
+/* UART5 extended-prefix (0xCC 0xDE) subscribe request staging buffer. File-scope:
+ * Send_Task stack is 500 words / 2 kB; the largest legal request is
+ * 6 (header) + 32 * 6 (tuples) + 1 (CRC) = 199 B, too big for any stack local.
+ * `UA5RxSubscribeLen` is set by the IRQ-side parser when a complete 0xCC 0xDE
+ * frame lands; Send_Task picks it up off the back of the UART5 DMA hand-off in
+ * TASK/send_data.c. */
+UCHAR8 UA5RxSubscribeBuf[USART5_SUBSCRIBE_RX_LEN] = {0};
+uint16_t UA5RxSubscribeLen = 0U;
+/* Set by the IRQ-side parser when a complete, CRC-valid 0xCC 0xDE subscribe
+ * request lands. Cleared by Send_Task after the reply DMA completes (or by
+ * the validator if the request is rejected with a 0x7F error reply). */
+volatile uint8_t UA5RxSubscribePending = 0U;
 USART_RX_TypeDef UART5_Rcr = {UART5,UART5_RX_STREAM,UA5RxMailbox,UA5RxDMAbuf,USART5_RXMB_LEN,USART5_RXDMA_LEN,0,0,0};
 
 void UART5_Configuration(void)
@@ -117,12 +129,37 @@ extern volatile uint8_t gs_cmd_head;
 extern volatile uint8_t gs_cmd_tail;
 extern volatile uint32_t gs_cmd_drop_count;
 
+/* Second DMA1_Stream7 turn for the 0x07 / 0x7F reply. Caller (API/subscribe.c
+ * via Send_Task) is responsible for ensuring the live telemetry DMA has
+ * completed; the existing pattern in Send_Groundstation_Telemetry_UART4 is
+ * `while (DMA_GetCurrDataCounter(DMA1_Stream7));` followed by clearing the
+ * stream-7 flags. Mirrors that exact sequence so the second turn does not
+ * corrupt the live telemetry burst. */
+void Uart5_Subscribe_TxSend(const uint8_t* buf, uint16_t len)
+{
+    if ((buf == 0) || (len == 0U)) {
+        return;
+    }
+    while (DMA_GetCurrDataCounter(DMA1_Stream7));
+    DMA_Cmd(DMA1_Stream7, DISABLE);
+    while (DMA_GetCmdStatus(DMA1_Stream7) == ENABLE);
+    DMA_ClearFlag(DMA1_Stream7, DMA_FLAG_TCIF7 | DMA_FLAG_HTIF7 | DMA_FLAG_TEIF7
+                              | DMA_FLAG_DMEIF7 | DMA_FLAG_FEIF7);
+    DMA1_Stream7->M0AR = (uint32_t)buf;
+    DMA1_Stream7->NDTR = len;
+    DMA_Cmd(DMA1_Stream7, ENABLE);
+}
+
 void Handle_UART5_GroundStation_Command(void)
 {
 	// CONSTRAINT: Frame layout and XOR CRC must match serial_bridge.py _pack_command_frame().
 	// ARCH: Queue storage ownership is in BSP/usart4.c; this function is an additional ingress source.
 	// Format: [0xCC] [0xDD] [CMD_ID: uint8] [INDEX: uint8] [VALUE: float32 LE] [CRC8]
 	// Total frame length is 9 bytes.
+	// ADR-0011 follow-up: extended-prefix subscribe request.
+	// Format: [0xCC] [0xDE] [CMD_ID: 0x20] [LEN_HI] [LEN_LO] [MAX_NUM_BASIS] [payload: N * 6 bytes] [CRC8].
+	// Total frame length is 6 + LEN + 1, where LEN = N * 6 (each tuple is 4-byte address LE + 2-byte size LE).
+	// The IF-01 (0xCC 0xDD) 9-byte parser runs first and is untouched.
 	// WHY loop: the PC serial bridge coalesces multiple rapid writes into one OS-level burst.
 	// IDLE fires once for the whole burst; parsing only mailbox[0..8] silently drops every
 	// frame after the first (e.g. the execute flag sent last in a TWC sequence).
@@ -130,7 +167,67 @@ void Handle_UART5_GroundStation_Command(void)
 	uint16_t offset = 0;
 	while (offset + 9U <= total)
 	{
-		if (UA5RxMailbox[offset] == 0xCC && UA5RxMailbox[offset + 1U] == 0xDD)
+		if (UA5RxMailbox[offset] == 0xCC && UA5RxMailbox[offset + 1U] == 0xDE)
+		{
+			// Extended-prefix subscribe request: variable payload, run-length encoded.
+			// Header layout (offsets inside mailbox):
+			//   +0  0xCC (SYNC_HI)
+			//   +1  0xDE (SYNC_LO)
+			//   +2  CMD (0x20)
+			//   +3  LEN_HI
+			//   +4  LEN_LO
+			//   +5  MAX_NUM_BASIS (tuple count)
+			//   +6 .. +6+LEN-1  payload tuples (each 6 B)
+			//   +6+LEN         CRC8 XOR
+			// Minimum frame is 7 B (zero tuples: 6 header + 0 payload + 1 CRC).
+			uint16_t len_hi = UA5RxMailbox[offset + 3U];
+			uint16_t len_lo = UA5RxMailbox[offset + 4U];
+			uint16_t payload_len = (uint16_t)((len_hi << 8) | len_lo);
+			// Reject malformed frames early: total in mailbox must cover header + payload + 1 CRC.
+			// Payload must be a multiple of 6 (4-byte address + 2-byte size per tuple).
+			if ((payload_len % 6U) != 0U ||
+			    payload_len > (USART5_SUBSCRIBE_RX_LEN - 7U))
+			{
+				offset += 1U;
+				continue;
+			}
+			uint16_t frame_len = (uint16_t)(6U + payload_len + 1U);
+			if (offset + frame_len > total)
+			{
+				// Truncated: stop walking, leave the partial frame for the next IDLE.
+				break;
+			}
+			// Verify CMD byte and CRC8 XOR over [CMD, LEN_HI, LEN_LO, MAX_NUM_BASIS, payload...].
+			uint8_t calc_crc = 0;
+			uint16_t i;
+			for (i = 2U; i < (uint16_t)(frame_len - 1U); i++)
+			{
+				calc_crc ^= UA5RxMailbox[offset + i];
+			}
+			uint8_t crc = UA5RxMailbox[offset + frame_len - 1U];
+			if (calc_crc == crc)
+			{
+				// Stage the validated frame for Send_Task. Copy into the file-scope
+				// UA5RxSubscribeBuf (NOT a stack local — Send_Task = 500 words / 2 kB).
+				// The IRQ path does NOT arm the reply DMA; that happens off the back
+				// of the live-telemetry DMA hand-off in TASK/send_data.c, so the
+				// reply observes the same UART5 timing contract as A/B telemetry.
+				// If a previous reply is still pending (i.e. Send_Task hasn't picked
+				// it up yet), drop the new request silently — protects against a
+				// runaway host that re-sends faster than 60 Hz Send_Task cadence.
+				if (UA5RxSubscribePending == 0U)
+				{
+					for (i = 0U; i < frame_len; i++)
+					{
+						UA5RxSubscribeBuf[i] = UA5RxMailbox[offset + i];
+					}
+					UA5RxSubscribeLen = frame_len;
+					UA5RxSubscribePending = 1U;
+				}
+			}
+			offset = (uint16_t)(offset + frame_len);
+		}
+		else if (UA5RxMailbox[offset] == 0xCC && UA5RxMailbox[offset + 1U] == 0xDD)
 		{
 			uint8_t cmd_id = UA5RxMailbox[offset + 2U];
 			uint8_t index  = UA5RxMailbox[offset + 3U];

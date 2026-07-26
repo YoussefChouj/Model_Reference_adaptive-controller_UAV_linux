@@ -3,18 +3,30 @@
 No hardware required. The resolver runs against the real firmware ELF; the reader
 logic is exercised with synthetic region bytes via the pure build_plan/decode path.
 """
+import re
 import struct
 from pathlib import Path
 
 import pytest
 
 from ground_station.livewatch.symbols import SymbolResolver, Symbol, _parse_path
-from ground_station.livewatch.reader import build_plan, Plan, Region
+from ground_station.livewatch.reader import LiveReader, build_plan, Plan, Region
+from ground_station.livewatch.transport import SwdCmsisDap
 from ground_station.livewatch.registry import Registry
 
 ELF = Path(__file__).resolve().parents[3] / "OBJ" / "JX_FLY.axf"
+MAP = ELF.with_suffix(".map")
 
 pytestmark = pytest.mark.skipif(not ELF.exists(), reason="firmware ELF not built")
+
+# "    s_ekf     0x20000ca8   Data   572  send_data.o(.bss)"
+_MAP_SYM = re.compile(r"^\s+(\S+)\s+0x([0-9a-fA-F]{8})\s+Data\s+\d+", re.M)
+
+
+def _map_addresses() -> dict:
+    if not MAP.exists():
+        pytest.skip(f"{MAP.name} not present")
+    return {n: int(a, 16) for n, a in _MAP_SYM.findall(MAP.read_text(errors="replace"))}
 
 
 @pytest.fixture(scope="module")
@@ -35,11 +47,16 @@ def test_parse_path_dotted_indexed():
 # ---- DWARF resolution against real firmware ----------------------------
 
 def test_known_addresses(r):
-    # Golden addresses cross-checked against OBJ/JX_FLY.map.
-    assert r.resolve("s_ekf").address == 0x20000CB4
-    assert r.resolve("imu_data").address == 0x2000028C
-    assert r.resolve("system_monitor").address == 0x20015680
-    assert r.resolve("mrac_state").address == 0x20014B98
+    """DWARF resolution must agree with the linker map, symbol for symbol.
+
+    Read from the map rather than hardcoded: absolute addresses shift on any
+    rebuild that changes .bss layout, so pinned constants fail for a reason that
+    has nothing to do with the resolver being wrong.
+    """
+    m = _map_addresses()
+    for name in ("s_ekf", "imu_data", "system_monitor", "mrac_state"):
+        assert name in m, f"{name} missing from {MAP.name}"
+        assert r.resolve(name).address == m[name], f"{name} disagrees with the linker map"
 
 
 def test_field_and_array_offsets(r):
@@ -70,15 +87,33 @@ def test_names_and_fields(r):
 
 # ---- coalescing (pure, no hardware) ------------------------------------
 
+def test_live_reader_defaults_to_swd():
+    reader = LiveReader(ELF)
+    try:
+        assert isinstance(reader.transport, SwdCmsisDap)
+    finally:
+        reader.close()
+
+
+def test_explicit_swd_transport_is_preserved():
+    transport = SwdCmsisDap()
+    reader = LiveReader(ELF, transport=transport)
+    try:
+        assert reader.transport is transport
+    finally:
+        reader.close()
+
+
 def test_build_plan_coalesces_adjacent_but_splits_holes(r):
     # x[0..3] are contiguous -> merge. nis is 392 B past x[3] (unwatched P[81]
     # hole) -> beyond the 48 B break-even -> split. active is 12 B past nis -> merge.
     # Net: two regions, NOT one. This is the bandwidth-optimal plan for the probe.
     names = ["s_ekf.x[0]", "s_ekf.x[3]", "s_ekf.nis", "s_ekf.active"]
     plan = build_plan(r, names)
+    base = r.resolve("s_ekf.x[0]").address
     assert len(plan.regions) == 2
-    assert plan.regions[0].start == 0x20000CB4          # x[0..3] block
-    assert plan.regions[0].end == 0x20000CB4 + 16
+    assert plan.regions[0].start == base                 # x[0..3] block
+    assert plan.regions[0].end == base + 16
     assert plan.regions[1].start == r.resolve("s_ekf.nis").address  # nis+active block
 
 

@@ -1,0 +1,89 @@
+# livewatch logging manifests
+#
+# Each entry is a named variable set + a default sample rate, logged to a uniquely
+# named CSV. Adding one is free: it is just a list of DWARF paths, so no firmware
+# change and no reflash are needed to log a new variable.
+#
+#   python -m ground_station.livewatch manifests          # list these
+#   python -m ground_station.livewatch budget <name>      # feasible rate, no hardware
+#   python -m ground_station.livewatch log <name> --secs 60
+#
+# `vars` accepts anything `livewatch names` / `fields` resolves, plus group:<name>
+# tokens from registry.yaml. Rate ceilings are checked before logging starts --
+# see manifest.py. Keep hot manifests small: cost is per-byte AND per memory
+# region, so a few adjacent struct fields are far cheaper than the same count
+# scattered across the map.
+
+manifests:
+
+  ekf_ba_check:
+    doc: >
+      Post-reflash acceptance test for the D5 gravity fix. b_a must NOT track
+      Acc_*_Real any more: if b_a/Acc_Real is still ~1.0 on every axis the filter
+      is still a no-op and the fix did not take. Expect b_a to decay toward zero
+      on a static bench, since b_a is now identifiable only through OF and needs
+      motion. Predict input is Lin_Acc_*_body (gravity-removed), logged alongside.
+    hz: 20
+    vars:
+      - s_ekf.active
+      - s_ekf.x[3]        # b_a x
+      - s_ekf.x[4]        # b_a y
+      - s_ekf.x[5]        # b_a z
+      - s_ekf.nis
+      - Acc_X_Real
+      - Acc_Y_Real
+      - Acc_Z_Real
+      - Lin_Acc_X_body
+      - Lin_Acc_Y_body
+      - Lin_Acc_Z_body
+
+  ekf_vs_of:
+    doc: >
+      Side-by-side of the two position/velocity sources: EKF body velocity vs the
+      OF-bias estimator that remains the default. OF stays the control path; the
+      EKF is shadow-mode only.
+    hz: 50
+    vars:
+      - group:ekf
+      - ano_of.earth_x
+      - ano_of.earth_y
+      - ano_of.of2_dx_fix
+      - ano_of.of2_dy_fix
+      - ano_of.of_quality
+      - s_of_bias_x
+      - s_of_bias_y
+
+  of_drift:
+    doc: >
+      Optical-flow drift audit. DISTANCE_* against tau*(bias(t)-bias(0)) -- the
+      identity that showed the drift was the cold-start EMA ramp, not sensor noise.
+      s_of_bias_seeded should read 1 within the first locked sample.
+    hz: 50
+    vars:
+      - ano_of.of2_dx_fix
+      - ano_of.of2_dy_fix
+      - ano_of.DISTANCE_X
+      - ano_of.DISTANCE_Y
+      - ano_of.earth_x
+      - ano_of.earth_y
+      - ano_of.of_quality
+      - s_of_bias_x
+      - s_of_bias_y
+      - s_of_bias_seeded
+
+  pos_loop:
+    doc: "Outer position loop setpoint vs feedback, both axes."
+    hz: 50
+    vars:
+      - Ctrler.locxPID.Des
+      - Ctrler.locxPID.FB
+      - Ctrler.locxPID.U
+      - Ctrler.locyPID.Des
+      - Ctrler.locyPID.FB
+      - Ctrler.locyPID.U
+
+  health:
+    doc: "Task rates and liveness counters. Cheap; safe to leave running."
+    hz: 5
+    vars:
+      - group:health

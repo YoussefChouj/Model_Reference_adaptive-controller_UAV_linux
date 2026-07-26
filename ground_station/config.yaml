@@ -9,6 +9,10 @@ serial_port_fallback: COM3
 com_scan: COM3 COM4 COM5 COM6 COM7 COM8
 com_probe_timeout_s: 1.5
 com_match_hints: USB-SERIAL CH340 Silicon Labs CP210x FTDI
+# Manual livewatch UART5 endpoint. This path never auto-discovers or takes over
+# the serial_bridge COM port; the operator must select the long-range receiver.
+livewatch_uart5_port: COM6
+livewatch_uart5_baud: 115200
 vofa_host: 127.0.0.1
 # VOFA+ JustFloat: two UDP ports so each connection has a fixed channel count.
 vofa_port_a: 1347

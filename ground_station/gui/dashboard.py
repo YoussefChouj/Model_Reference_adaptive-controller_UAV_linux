@@ -2858,6 +2858,334 @@ class Dashboard:
         except Exception:
             pass
 
+    # -- Live Log tab --------------------------------------------------
+    # Read-only streaming through a selected livewatch transport. SWD remains
+    # the default; UART5 fails loud until the firmware subscription producer lands.
+
+    _LIVELOG_TRANSPORTS = ("Debugger (SWD)", "Long-range (UART5)")
+
+    def _build_live_log_tab(self) -> None:
+        from ground_station.livewatch.manifest import ManifestStore
+
+        self._livelog_stop_event = threading.Event()
+        self._livelog_thread: Optional[threading.Thread] = None
+        self._livelog_fh = None
+        self._livelog_writer = None
+        # Path inside the dashboard process. ground_station/ lives at repo_root,
+        # so logs/livewatch/ matches both the CLI's default and the existing
+        # _build_flight_log_tab convention.
+        livelog_dir = self.repo_root / "logs" / "livewatch"
+        livelog_dir.mkdir(parents=True, exist_ok=True)
+        self._livelog_dir = livelog_dir
+
+        dpg.add_text("Live Log -- read-only transport streaming",
+                     color=(180, 220, 255, 255))
+        dpg.add_text(
+            "Logs any firmware variable set to a uniquely named CSV under "
+            "ground_station/logs/livewatch/. The probe is read-only and non-halting.",
+            color=(160, 160, 160, 255), wrap=600)
+
+        store = ManifestStore()
+        manifest_names = store.names() or ["(none)"]
+
+        dpg.add_text("Link", color=(200, 200, 200, 255))
+        dpg.add_combo(
+            items=list(self._LIVELOG_TRANSPORTS), default_value=self._LIVELOG_TRANSPORTS[0],
+            tag="combo_livelog_link", width=300,
+            callback=self._on_livelog_link_select,
+        )
+
+        dpg.add_text("Manifest", color=(200, 200, 200, 255))
+        dpg.add_combo(
+            items=manifest_names, default_value=manifest_names[0],
+            tag="combo_livelog_manifest", width=300,
+            callback=self._on_livelog_manifest_select,
+        )
+        dpg.add_text("", tag="txt_livelog_doc", color=(170, 170, 170, 255), wrap=600)
+
+        with dpg.group(horizontal=True):
+            dpg.add_input_float(label="Hz", tag="inp_livelog_hz",
+                                default_value=20.0, width=140)
+            dpg.add_input_text(label="Ad-hoc vars (override)",
+                               tag="inp_livelog_vars", width=420,
+                               hint="space-separated, e.g. s_ekf.nis Acc_X_Real")
+
+        dpg.add_text("", tag="txt_livelog_budget", color=(170, 190, 220, 255))
+        dpg.add_text("", tag="txt_livelog_verify", color=(170, 190, 220, 255))
+
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="Check budget", callback=self._livelog_check_budget)
+            dpg.add_button(label="Verify ELF", callback=self._livelog_verify_elf)
+            dpg.add_button(label="Start", tag="btn_livelog_start",
+                           callback=self._livelog_start)
+            dpg.add_button(label="Stop", tag="btn_livelog_stop",
+                           callback=self._livelog_stop)
+        dpg.add_text("", tag="txt_livelog_status", color=(100, 255, 100, 255))
+        dpg.add_text("", tag="txt_livelog_path", color=(160, 160, 160, 255))
+
+        # Seed doc/hz from the default-selected manifest.
+        self._on_livelog_manifest_select(None, manifest_names[0])
+
+    def _on_livelog_link_select(self, sender: Any, app_data: Any) -> None:
+        link = str(app_data)
+        if link.startswith("Long-range"):
+            dpg.set_value("txt_livelog_status",
+                          "Long-range (UART5) selected; reads require a firmware "
+                          "subscription reply and never fall back to SWD.")
+            dpg.configure_item("txt_livelog_status", color=(255, 200, 50, 255))
+        else:
+            dpg.set_value("txt_livelog_status", "Link: Debugger (SWD).")
+            dpg.configure_item("txt_livelog_status", color=(100, 255, 100, 255))
+
+    def _on_livelog_manifest_select(self, sender: Any, app_data: Any) -> None:
+        from ground_station.livewatch.manifest import ManifestStore
+        name = str(app_data)
+        if not name or name == "(none)":
+            dpg.set_value("txt_livelog_doc", "")
+            return
+        try:
+            m = ManifestStore().get(name)
+        except Exception as exc:
+            dpg.set_value("txt_livelog_doc", f"<resolve error: {exc}>")
+            return
+        dpg.set_value("txt_livelog_doc", m.doc.strip())
+        dpg.set_value("inp_livelog_hz", float(m.hz))
+        dpg.set_value("inp_livelog_vars", "")
+
+    def _livelog_current_elf(self) -> Path:
+        # ELF is one level up from ground_station/ (project root), under OBJ/.
+        # `_DEFAULT_ELF` in cli.py uses the same parents[2]/OBJ/JX_FLY.axf.
+        return self.repo_root.parent / "OBJ" / "JX_FLY.axf"
+
+    def _livelog_transport(self):
+        from ground_station.livewatch.transport import (
+            LiveTransportError, SwdCmsisDap, Uart5LongRange,
+        )
+        selected = dpg.get_value("combo_livelog_link")
+        if selected == self._LIVELOG_TRANSPORTS[0]:
+            return SwdCmsisDap()
+        # The dashboard's SerialBridge owns the long-range COM port. On Windows
+        # the COM port is exclusive, so opening a second serial.Serial for the
+        # livewatch transport would fail with access-denied. Refuse loud here
+        # and surface the message in the status box instead; demux-with-bridge
+        # is a separate HANDOFF follow-on.
+        if self.connected and self.bridge is not None:
+            raise LiveTransportError(
+                "disconnect the dashboard's COM6 link first, then retry"
+            )
+        cfg = _simple_yaml_kv_load(self.repo_root / "config.yaml")
+        return Uart5LongRange(
+            port=str(cfg.get("livewatch_uart5_port", "")),
+            baud=int(cfg.get("livewatch_uart5_baud", 115200)),
+        )
+
+    def _livelog_resolve_manifest(self):
+        """Build a (Manifest, list[str], float) from the current widgets.
+        Returns (None, msg) on user-visible error."""
+        from ground_station.livewatch.manifest import ManifestStore
+        adhoc = dpg.get_value("inp_livelog_vars").strip()
+        if adhoc:
+            tokens = [t for t in adhoc.split() if t]
+            hz = float(dpg.get_value("inp_livelog_hz") or 20.0)
+            try:
+                m = ManifestStore().adhoc(tokens, hz=hz, name="adhoc")
+            except Exception as exc:
+                return None, f"<vars error: {exc}>"
+            return m, tokens, hz
+        name = dpg.get_value("combo_livelog_manifest")
+        try:
+            m = ManifestStore().get(name)
+        except Exception as exc:
+            return None, f"<manifest error: {exc}>"
+        hz = float(dpg.get_value("inp_livelog_hz") or m.hz)
+        return m, m.vars, hz
+
+    def _livelog_check_budget(self) -> None:
+        from ground_station.livewatch.manifest import feasibility
+        from ground_station.livewatch.reader import LiveReader
+
+        m, tokens, hz = self._livelog_resolve_manifest()
+        if m is None:
+            dpg.set_value("txt_livelog_budget", str(tokens))
+            return
+        try:
+            transport = self._livelog_transport()
+            lr = LiveReader(self._livelog_current_elf(), transport=transport)
+            try:
+                plan = lr.plan(tokens)
+                if transport.name == "uart5":
+                    lr.connect()
+                    lr.sample(plan)
+                feas = feasibility(plan, cost_model=transport.cost_model)
+            finally:
+                lr.close()
+        except Exception as exc:
+            dpg.set_value("txt_livelog_budget", f"<plan error: {exc}>")
+            return
+        ok = feas.ok_for(hz)
+        verdict = "OK" if ok else "TOO FAST"
+        dpg.set_value(
+            "txt_livelog_budget",
+            f"{m.name} @ {hz:g} Hz -> {verdict}. "
+            f"{feas.n_vars} vars / {feas.n_regions} region(s) / {feas.n_bytes} B, "
+            f"max ~{feas.max_hz:.0f} Hz ({'measured' if feas.measured else 'estimated'}).",
+        )
+
+    def _livelog_verify_elf(self) -> None:
+        from ground_station.livewatch.verify import (
+            compare, flash_segments, plan_samples,
+        )
+        from ground_station.livewatch.reader import LiveReader
+        from ground_station.livewatch.transport import SwdCmsisDap
+
+        elf = self._livelog_current_elf()
+        if not elf.exists():
+            dpg.set_value("txt_livelog_verify",
+                          f"ELF not found at {elf}. Build firmware first.")
+            return
+        try:
+            segs = flash_segments(elf)
+            samples = plan_samples(segs, n=5)
+            with LiveReader(elf, transport=SwdCmsisDap()) as lr:
+                res = compare(samples,
+                              lambda a, n: lr._target.read_memory_block8(a, n))
+        except Exception as exc:
+            dpg.set_value("txt_livelog_verify", f"<verify error: {exc}>")
+            return
+        dpg.set_value("txt_livelog_verify", res.describe())
+        dpg.configure_item(
+            "txt_livelog_verify",
+            color=(100, 255, 100, 255) if res.ok else (255, 80, 80, 255),
+        )
+
+    def _livelog_start(self) -> None:
+        from ground_station.livewatch.manifest import (
+            ManifestStore, unique_csv_path, write_meta,
+        )
+        from ground_station.livewatch.reader import LiveReader
+
+        if self._livelog_thread is not None and self._livelog_thread.is_alive():
+            dpg.set_value("txt_livelog_status", "Already recording.")
+            return
+        m, tokens, hz = self._livelog_resolve_manifest()
+        if m is None:
+            dpg.set_value("txt_livelog_status", str(tokens))
+            dpg.configure_item("txt_livelog_status", color=(255, 80, 80, 255))
+            return
+
+        elf = self._livelog_current_elf()
+        if not elf.exists():
+            dpg.set_value("txt_livelog_status",
+                          f"ELF not found at {elf}. Build firmware first.")
+            dpg.configure_item("txt_livelog_status", color=(255, 80, 80, 255))
+            return
+
+        self._livelog_stop_event.clear()
+        try:
+            transport = self._livelog_transport()
+        except Exception as exc:
+            dpg.set_value("txt_livelog_status", str(exc))
+            dpg.configure_item("txt_livelog_status", color=(255, 80, 80, 255))
+            return
+
+        def run():
+            import csv as _csv
+            try:
+                with LiveReader(elf, transport=transport) as lr:
+                    plan = lr.plan(tokens)
+                    feas = lr.transport.calibrate(lr, plan)
+                    use_hz = hz
+                    if not feas.ok_for(use_hz):
+                        self._post_ui_call(
+                            dpg.set_value, "txt_livelog_status",
+                            f"Refusing: {m.name} cannot sustain {use_hz:g} Hz "
+                            f"(ceiling ~{feas.max_hz:.0f} Hz).",
+                        )
+                        self._post_ui_call(
+                            dpg.configure_item, "txt_livelog_status",
+                            color=(255, 80, 80, 255),
+                        )
+                        return
+                    out = unique_csv_path(self._livelog_dir, m, use_hz)
+                    write_meta(out, m, plan, elf, requested_hz=hz, feas=feas,
+                               extra={"logged_hz": use_hz,
+                                      "transport": lr.transport.cost_model.transport_name,
+                                      "source": "dashboard_live_log_tab"})
+                    self._post_ui_call(
+                        dpg.set_value, "txt_livelog_path", str(out),
+                    )
+                    self._post_ui_call(
+                        dpg.set_value, "txt_livelog_status",
+                        f"Recording {m.name} @ {use_hz:g} Hz -> {out.name}",
+                    )
+                    self._post_ui_call(
+                        dpg.configure_item, "txt_livelog_status",
+                        color=(255, 200, 50, 255),
+                    )
+
+                    fh = open(out, "a", newline="")
+                    writer: Optional[_csv.DictWriter] = None
+                    n = 0
+                    t_last = None
+                    try:
+                        for row in lr.stream(tokens, hz=use_hz, duration=None):
+                            if self._livelog_stop_event.is_set():
+                                break
+                            if writer is None:
+                                writer = _csv.DictWriter(
+                                    fh, fieldnames=list(row))
+                                writer.writeheader()
+                            writer.writerow(row)
+                            n += 1
+                            t_last = row["t"]
+                            if n % 50 == 0:
+                                rate = (n / t_last) if t_last else 0.0
+                                self._post_ui_call(
+                                    dpg.set_value, "txt_livelog_status",
+                                    f"Recording... {n} samples, "
+                                    f"effective {rate:.1f} Hz.",
+                                )
+                    finally:
+                        fh.close()
+                        rate = (n / t_last) if t_last else 0.0
+                        self._post_ui_call(
+                            dpg.set_value, "txt_livelog_status",
+                            f"Stopped. {n} samples written, "
+                            f"effective {rate:.1f} Hz. -> {out.name}",
+                        )
+                        self._post_ui_call(
+                            dpg.configure_item, "txt_livelog_status",
+                            color=(100, 255, 100, 255),
+                        )
+            except Exception as exc:
+                if transport.name == "uart5":
+                    status = ("Long-range (UART5): no firmware subscription reply yet -- "
+                              "re-flash after uart5_address_subscription_cmd lands "
+                              f"({exc})")
+                else:
+                    status = f"<stream error: {exc}>"
+                self._post_ui_call(
+                    dpg.set_value, "txt_livelog_status", status,
+                )
+                self._post_ui_call(
+                    dpg.configure_item, "txt_livelog_status",
+                    color=(255, 80, 80, 255),
+                )
+            finally:
+                self._livelog_thread = None
+
+        self._livelog_thread = threading.Thread(
+            target=run, name="livelog", daemon=True,
+        )
+        self._livelog_thread.start()
+
+    def _livelog_stop(self) -> None:
+        if self._livelog_thread is None or not self._livelog_thread.is_alive():
+            dpg.set_value("txt_livelog_status", "Not recording.")
+            return
+        self._livelog_stop_event.set()
+        dpg.set_value("txt_livelog_status", "Stopping... (file flush pending)")
+
     def _build_gui(self) -> None:
         dpg.create_context()
 
@@ -3019,6 +3347,8 @@ class Dashboard:
                                 self._build_flight_log_tab()
                             with dpg.tab(label="Motor Bench", tag="tab_bench"):
                                 self._build_motor_bench_tab()
+                            with dpg.tab(label="Live Log", tag="tab_livelog"):
+                                self._build_live_log_tab()
                         dpg.add_separator()
                         with dpg.group(horizontal=True):
                             dpg.add_text("Load preset:")
