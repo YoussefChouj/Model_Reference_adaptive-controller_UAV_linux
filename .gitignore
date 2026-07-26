@@ -23,5 +23,7 @@ OBJ/
 __pycache__/
 *.pyc
 
-# generated livewatch CSVs, meta, and build logs
-logs/
+# generated livewatch CSVs, meta, and build logs.
+# Leading slash matters: a bare `logs/` also matches ground_station/logs/, which holds
+# tracked flight telemetry -- new flight logs would be silently ignored.
+/logs/
