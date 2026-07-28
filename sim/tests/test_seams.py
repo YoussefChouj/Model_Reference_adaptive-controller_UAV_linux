@@ -95,3 +95,92 @@ def test_canonical_airframe_is_measured_values():
     assert af.Ixx == pytest.approx(0.00839, rel=1e-9)
     assert af.Iyy == pytest.approx(0.00930, rel=1e-9)
     assert af.Izz == pytest.approx(0.01485, rel=1e-9)
+
+
+# --- #6 Spec 4b GazeboPlant seam: importable on Windows, helpful probe ---
+
+def test_gazebo_plant_satisfies_plant_seam():
+    """GazeboPlant is a Plant subclass (conformance)."""
+    from sim.plant import GazeboPlant, Plant
+    assert issubclass(GazeboPlant, Plant)
+    # The seam declares step(u_dict) -> state_dict and reset().
+    assert callable(GazeboPlant.step)
+    assert callable(GazeboPlant.reset)
+
+
+def test_gazebo_plant_importable_on_windows():
+    """Importing sim.plant succeeds on Windows (spec 4b bridge constraint).
+
+    The bridge to Gazebo is a separate module; sim.plant itself must
+    never fail to import on Windows because Gazebo is not installed.
+    """
+    import sim.plant  # noqa: F401
+    from sim.plant import GazeboPlant
+    # Probe must be callable; it does not raise on either OS.
+    avail, reason = GazeboPlant.is_available()
+    assert isinstance(avail, bool)
+    assert isinstance(reason, str)
+
+
+def test_gazebo_plant_probe_reports_windows_when_absent():
+    """On Windows with no Gazebo, the probe returns (False, reason)."""
+    import platform
+    from sim.plant import GazeboPlant
+    avail, reason = GazeboPlant.is_available()
+    if platform.system() == "Windows":
+        assert avail is False
+        assert "Linux" in reason or "Linux partition" in reason
+    else:
+        # On Linux, the probe may pass or fail depending on the
+        # install — we only assert that it returns a tuple of the
+        # right shape.
+        assert isinstance(avail, bool)
+        assert reason
+
+
+def test_gazebo_plant_step_message_mentions_linux_partition():
+    """GazeboPlant.step raises with a message that names the handoff."""
+    from sim.plant import GazeboPlant
+    with pytest.raises(NotImplementedError) as exc_info:
+        GazeboPlant().step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+    msg = str(exc_info.value)
+    assert "spec 4b" in msg
+    assert "Linux" in msg or "is_available" in msg
+
+
+def test_gazebo_plant_reset_message_mentions_linux_partition():
+    """GazeboPlant.reset raises with a message that names the handoff."""
+    from sim.plant import GazeboPlant
+    with pytest.raises(NotImplementedError) as exc_info:
+        GazeboPlant().reset()
+    msg = str(exc_info.value)
+    assert "spec 4b" in msg
+
+
+def test_sim_plant_does_not_pull_gazebo_at_import_time():
+    """Importing sim.plant must not load gazebo (Windows must succeed).
+
+    The Gazebo bridge is a separate optional module. If a future
+    refactor ever moves the import into sim.plant, this test fails
+    on any host without gazebo installed.
+
+    The test is anchored to **gazebo-specific** module names so
+    stdlib modules whose names happen to start with ``gz`` (notably
+    ``gzip``, which ``xml.etree.ElementTree`` pulls in) do not
+    trigger a false positive.
+    """
+    import sys
+    for mod in list(sys.modules):
+        if mod.startswith("sim.gazebo") or mod == "sim.plant":
+            sys.modules.pop(mod, None)
+    import sim.plant  # noqa: F401
+    gazebo_mods = [
+        m for m in sys.modules
+        if m == "gazebo" or m.startswith("gazebo.")
+        or m == "gz" or m.startswith("gz.")
+        or m == "sdformat" or m.startswith("sdformat.")
+    ]
+    assert gazebo_mods == [], (
+        f"sim.plant transitively pulled {gazebo_mods}; the Gazebo "
+        f"bridge must remain a separate optional import."
+    )

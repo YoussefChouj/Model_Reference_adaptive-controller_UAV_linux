@@ -49,8 +49,8 @@ Rung glossary:
 | RQ-023 | Build budget: code ≤ 80 KB, RO-data ≤ 2 KB, RW-data ≤ 4 KB, ZI-data ≤ 112 KB | documented in spec 3 | Build | spec 3 verifier |
 | RQ-024 | Flash budget: ≤ 256 KB total image | documented in spec 3 | Build | spec 3 verifier |
 | RQ-025 | Stack budget: no task overflow at 200 Hz worst-case | Send_Task 500 words verified | PIL | spec 3 verifier |
-| RQ-026 | Gazebo bring-up cross-check: hover-equilibrium thrust agrees with analytic plant within 2 % | TBD until spec 4b lands | MIL | spec 4b verifier |
-| RQ-027 | URDF inertial origin placed at CG (offset not applied twice) | URDF/SDF generator emits correct `<inertial>` | MIL | spec 4b verifier |
+| RQ-026 | Gazebo bring-up cross-check: hover-equilibrium thrust agrees with analytic plant within 2 % | TBD until spec 4b lands on Linux | MIL | `sim.tests.test_urdf.py` (URDF tense) + spec 4b Linux-side cross-check |
+| RQ-027 | URDF inertial origin placed at CG (offset not applied twice) | generator emits `<inertial>` with origin (0,0,0) and tensor = measured I about CG | MIL | `sim.tests.test_urdf.py::test_urdf_inertial_origin_is_at_cg`, `::test_urdf_cg_offset_appears_in_inertial_zero_times`, `::test_urdf_inertia_tensor_matches_airframe` |
 | RQ-028 | PIL: host-compiled firmware C identifies the same `K`/`p` on synthetic data as `sim/sysid_analysis.py` | K within 5 %, p within 10 % | PIL | spec 1 + spec 2 verifier |
 | RQ-029 | Hardware: position hold RMSE within green-zone spec (±0.3 m steady-state) | TBD — first-baseline freeze | Hardware | post-flight replay (`sim.tools.replay_flight_plant`) |
 | RQ-030 | Hardware: trajectory-tracking RMSE ≤ 0.5 m on a 1 m/s circular path | TBD — first-baseline freeze | Hardware | post-flight replay |
@@ -90,3 +90,27 @@ must use Gazebo or hardware, not the analytic plant.
    under the implementer/reviewer entry: `T:<row-id> <old> -> <new>,
    <reason>`.
 4. Commit.
+
+## Verification surface
+
+The rows above split naturally into three groups by where their
+verifier runs:
+
+- **Windows- or Linux-runnable (now):** every analytics row from
+  spec 4a (RQ-001..RQ-021, RQ-028 Pilot), the Build rungs (RQ-022..RQ-025),
+  and the URDF generator half of spec 4b (RQ-027).
+- **Linux-only (spec 4b on the dual-boot partition):** RQ-026
+  (hover-equilibrium cross-check between the analytic plant and a
+  running Gazebo instance), and the Linux-side half of RQ-027
+  (loading the URDF into a real Gazebo and confirming the rig
+  matches the analytic plant). The Windows-runnable half of RQ-027
+  is implemented in `sim/urdf.py` + `sim/tests/test_urdf.py`;
+  the Linux-side half is a hand-test, not a unit test.
+- **Hardware-only (post-flight):** RQ-029, RQ-030, RQ-031.
+
+The "Runs anywhere, no simulator required" group in spec 4b
+(URDF generation, `GazeboPlant` probe, `sim.plant` importability
+on Windows) is implemented in this leg. The "Requires Linux and
+Gazebo" group (hover equilibrium, free-fall, determinism, control-
+rate independence, cross-check, trajectory scenarios against the
+Gazebo plant) is parked until the Linux partition has Gazebo.

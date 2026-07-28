@@ -263,14 +263,118 @@ class IdentifiedPlant(Plant):
 
 
 class GazeboPlant(Plant):
-    """Reserved 6-DOF / Gazebo seam (ADR-0006 D6). Bring-up is a later
-    session on the dual-boot Linux partition; the contract is fixed now."""
+    """Gazebo-backed 6-DOF rigid-body plant (spec 4b).
+
+    The :class:`Plant` seam is the contract (ADR-0006 D3/D6). The
+    contractual shape is fixed; the backend is the only thing this
+    spec fills in.
+
+    Bring-up status (2026-07-29): the airframe model is declared
+    (``sim/urdf.py`` emits the URDF from the same ``CANONICAL_AIRFRAME``
+    the analytic plant reads), and the import-time probe confirms
+    that ``sim.plant`` is consistently importable on Windows. The
+    actual bridge to a running Gazebo instance, the per-motor thrust
+    plugin, and the cross-check against the analytic plant run on
+    the developer's dual-boot Linux partition and are not part of
+    this Windows-side leg.
+
+    The probe (:meth:`is_available`) reports whether the simulator
+    is reachable. On Windows it returns ``(False, reason)`` with
+    a clear reason; on the Linux partition with a working Gazebo
+    install, it returns ``(True, "gazebo reachable")``.
+
+    ``step`` and ``reset`` raise ``NotImplementedError`` with a
+    message that points to the spec and the probe, so a caller
+    that mistakenly depends on either method gets a clear handoff
+    rather than a generic stub error.
+    """
+
+    @staticmethod
+    def _probe() -> tuple[bool, str]:
+        """Check whether the Gazebo backend is reachable.
+
+        Returns
+        -------
+        (available, reason)
+            ``available`` is True iff a Gazebo bridge can be imported
+            and a ``gz`` binary is on PATH. ``reason`` is a short
+            human-readable explanation, suitable for a log line or a
+            ``NotImplementedError`` message.
+        """
+        # 1. Working directory assertion: bring-up is destined for the
+        #    Linux partition. On Windows we report it explicitly so the
+        #    operator sees the message in the test log, not a
+        #    "command not found" mystery.
+        import platform
+        if platform.system() == "Windows":
+            return (False,
+                    "Gazebo bring-up is sequenced for the dual-boot "
+                    "Linux partition (spec 4b); no Gazebo install on "
+                    "this host. Importing sim.plant succeeds on Windows "
+                    "by design.")
+        # 2. Optional import of the Gazebo shim. The shim is a
+        #    separate module so its dependencies (e.g. gz-python or
+        #    ros_gz_bridge) are not required to import sim.plant.
+        try:
+            import sim.gazebo_bridge  # type: ignore  # noqa: F401
+        except ImportError as exc:
+            return (False,
+                    f"sim.gazebo_bridge not importable: {exc}. "
+                    f"Install it on the Linux partition.")
+        # 3. The `gz` binary is present on PATH.
+        import shutil
+        if shutil.which("gz") is None and shutil.which("gazebo") is None:
+            return (False,
+                    "Gazebo binaries not on PATH on the Linux side. "
+                    "Install gazebo (or gz) before running GazeboPlant.")
+        return (True, "gazebo reachable")
+
+    @classmethod
+    def is_available(cls) -> tuple[bool, str]:
+        """Public probe: ``(available, reason)``.
+
+        Callers should consult this before relying on
+        :meth:`step` or :meth:`reset`. If ``available`` is False,
+        both methods will raise ``NotImplementedError`` with a
+        message that includes ``reason``.
+        """
+        return cls._probe()
+
+    def __init__(self, dt: float = 0.005,
+                 airframe: Airframe | None = None):
+        # ``__init__`` is intentionally cheap: it does not start
+        # Gazebo, does not require the bridge to be installed, and
+        # does not raise on hosts without the simulator. The seam
+        # contract is that ``step`` returns a state dict; on a host
+        # without Gazebo, that step raises a clear error and the
+        # constructor is still safe to call (e.g. for type
+        # assertions, factory fall-throughs, conditional factory
+        # dispatch). The actual spawn happens on the Linux side.
+        self.dt = dt
+        self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
+        self._available, self._reason = self._probe()
 
     def step(self, u: dict) -> dict:
-        raise NotImplementedError("GazeboPlant: bring-up deferred (ADR-0006 D6)")
+        if not self._available:
+            raise NotImplementedError(
+                f"GazeboPlant.step: simulator unavailable ({self._reason}). "
+                f"See spec 4b in .agent_contracts/mbd_workflow/04b-gazebo-bringup.md."
+            )
+        # The actual bridge and physics tick live on the Linux side.
+        raise NotImplementedError(
+            "GazeboPlant.step: bring-up deferred (spec 4b). "
+            "Linux-side leg not yet implemented."
+        )
 
     def reset(self) -> None:
-        raise NotImplementedError("GazeboPlant: bring-up deferred (ADR-0006 D6)")
+        if not self._available:
+            raise NotImplementedError(
+                f"GazeboPlant.reset: simulator unavailable ({self._reason}). "
+                f"Pair with GazeboPlant.step at the same controller tick."
+            )
+        raise NotImplementedError(
+            "GazeboPlant.reset: bring-up deferred (spec 4b)."
+        )
 
 
 # ----------------------------------------------------------------------
