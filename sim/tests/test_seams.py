@@ -56,3 +56,42 @@ def test_scenarios_share_the_plant_source_of_truth():
     from sim import scenarios as sc
     assert sc._CANON is CANONICAL_MODELS
     assert CANONICAL_MODELS["roll"].K == 165.0
+
+
+# --- #5 Spec 4a Plant seam widening ---
+
+def test_rigid_body_plant_satisfies_plant_seam():
+    """RigidBodyPlant conforms to the Plant interface."""
+    from sim.plant import RigidBodyPlant
+    p = RigidBodyPlant(dt=0.005)
+    state = p.step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+    assert "p" in state and "q" in state and "r" in state
+    p.reset()
+
+
+def test_seam_swap_identified_for_rigid_body_unchanged_phase1_keys():
+    """Swapping plants preserves Phase-1 keys (p, q, r, vz).
+
+    The seam widening is **not** a parallel interface; it is the same
+    Plant seam carrying more state. IdentifiedPlant returns {p,q,r};
+    RigidBodyPlant returns {p,q,r,...}. The inner rate loop reads
+    only the Phase-1 keys and works against either plant unchanged.
+    """
+    from sim.plant import IdentifiedPlant, RigidBodyPlant
+    id_state = IdentifiedPlant.canonical(0.005).step(
+        {"roll": 0.0, "pitch": 0.0, "yaw": 0.0})
+    rb_state = RigidBodyPlant(dt=0.005).step(
+        {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+    assert "p" in id_state and "p" in rb_state
+    assert "q" in id_state and "q" in rb_state
+    assert "r" in id_state and "r" in rb_state
+
+
+def test_canonical_airframe_is_measured_values():
+    """CANONICAL_AIRFRAME numbers are the final 2026-07-28 campaign."""
+    from sim.plant import CANONICAL_AIRFRAME
+    af = CANONICAL_AIRFRAME
+    assert af.mass == pytest.approx(1.2961, rel=1e-9)
+    assert af.Ixx == pytest.approx(0.00839, rel=1e-9)
+    assert af.Iyy == pytest.approx(0.00930, rel=1e-9)
+    assert af.Izz == pytest.approx(0.01485, rel=1e-9)

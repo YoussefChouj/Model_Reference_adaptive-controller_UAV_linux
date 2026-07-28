@@ -11,6 +11,9 @@ Grouped (flat keys, prefixed) so metrics.json paints a global + detailed picture
   adapt_*  adaptation health (how hard, how long, did it hit a bound)
   robust_* stability / oscillation / derivative-noise proxies
   dist_*   disturbance response (only when a disturbance is present)
+  path_*   trajectory-tracking: cross-track, along-track, position RMSE,
+           control effort, saturation, attitude-rate aggressiveness
+           (spec 4a)
 
 Legacy top-level keys (rmse_track, max_abs_err, final_weight_norm, max_weight_norm,
 max_abs_rate, max_abs_xm, stable) are preserved for existing callers/tests.
@@ -144,6 +147,111 @@ def compute(log: dict, theta: np.ndarray, dt: float, *,
             m["dist_peak_dev"] = float(np.max(np.abs(e[post])))
             m["dist_recovery_time"] = _recovery_time(t, e, band, onset)
 
+    return m
+
+
+def compute_path(log: dict, *, dt: float,
+                 z_umax: float | None = None,
+                 attitude_rate_umax: float | None = None) -> dict:
+    """Trajectory-tracking metrics (spec 4a path_* group).
+
+    Computed against a trajectory-runner's log (see
+    ``sim.trajectory_runner.run_trajectory``). Required log keys:
+
+      t, x_target, y_target, z_target, x, y, z, cross_track_err,
+      along_track_err, roll_cmd, pitch_cmd, yaw_cmd, z_cmd, p, q, r
+
+    All keys are absolute scalar arrays of equal length. The metric
+    set covers the spec's user stories 15-18:
+      * path_rms_cross_track, path_max_cross_track      (15)
+      * path_rms_along_track, path_max_abs_along_track   (15)
+      * path_rms_position, path_max_abs_position         (16)
+      * path_ctrl_effort_rms, path_ctrl_effort_max       (16)
+      * path_sat_fraction_z, path_sat_fraction_att_rate  (17)
+      * path_att_rate_rms, path_att_rate_max             (18)
+
+    ``metrics.py`` stays **pure and log-only**: it does not import the
+    runner or the trajectories module, so trajectory runs cannot leak
+    into rate-loop metric calculation.
+    """
+    m: dict = {}
+    t = np.asarray(log["t"], float)
+    n = len(t)
+    if n == 0:
+        return m
+    ct = np.asarray(log["cross_track_err"], float)
+    at = np.asarray(log["along_track_err"], float)
+    pos_err = np.sqrt(
+        (np.asarray(log["x"], float) - np.asarray(log["x_target"], float)) ** 2
+        + (np.asarray(log["y"], float) - np.asarray(log["y_target"], float)) ** 2
+        + (np.asarray(log["z"], float) - np.asarray(log["z_target"], float)) ** 2
+    )
+    m["path_n_samples"] = int(n)
+    m["path_duration_s"] = float(t[-1] - t[0])
+    # --- cross-track / along-track ---
+    m["path_rms_cross_track"] = float(np.sqrt(np.mean(ct ** 2)))
+    m["path_max_cross_track"] = float(np.max(ct))
+    m["path_mean_cross_track"] = float(np.mean(ct))
+    m["path_rms_along_track"] = float(np.sqrt(np.mean(at ** 2)))
+    m["path_max_abs_along_track"] = float(np.max(np.abs(at)))
+    m["path_final_along_track"] = float(at[-1])
+    # --- position RMSE ---
+    m["path_rms_position"] = float(np.sqrt(np.mean(pos_err ** 2)))
+    m["path_max_abs_position"] = float(np.max(pos_err))
+    m["path_rms_xyz"] = {
+        "x": float(np.sqrt(np.mean(
+            (np.asarray(log["x"], float) - np.asarray(log["x_target"], float)) ** 2
+        ))),
+        "y": float(np.sqrt(np.mean(
+            (np.asarray(log["y"], float) - np.asarray(log["y_target"], float)) ** 2
+        ))),
+        "z": float(np.sqrt(np.mean(
+            (np.asarray(log["z"], float) - np.asarray(log["z_target"], float)) ** 2
+        ))),
+    }
+    # --- control effort ---
+    rc = np.asarray(log["roll_cmd"], float)
+    pc = np.asarray(log["pitch_cmd"], float)
+    yc = np.asarray(log["yaw_cmd"], float)
+    zc = np.asarray(log["z_cmd"], float)
+    effort = np.sqrt(rc ** 2 + pc ** 2 + yc ** 2)
+    m["path_ctrl_effort_rms"] = float(np.sqrt(np.mean(effort ** 2)))
+    m["path_ctrl_effort_max"] = float(np.max(effort))
+    m["path_ctrl_effort_per_axis_rms"] = {
+        "roll": float(np.sqrt(np.mean(rc ** 2))),
+        "pitch": float(np.sqrt(np.mean(pc ** 2))),
+        "yaw": float(np.sqrt(np.mean(yc ** 2))),
+    }
+    # --- saturation ---
+    if z_umax is not None and z_umax > 0:
+        m["path_sat_fraction_z"] = float(np.mean(np.abs(zc) >= z_umax))
+    if attitude_rate_umax is not None and attitude_rate_umax > 0:
+        rate_cmd = np.sqrt(
+            np.asarray(log["p"], float) ** 2
+            + np.asarray(log["q"], float) ** 2
+            + np.asarray(log["r"], float) ** 2
+        )
+        m["path_sat_fraction_att_rate"] = float(
+            np.mean(rate_cmd >= attitude_rate_umax))
+    # --- attitude-rate aggressiveness (proxy for path curvature hit) ---
+    pr = np.asarray(log["p"], float)
+    qr = np.asarray(log["q"], float)
+    rr = np.asarray(log["r"], float)
+    rate_rms = np.sqrt(pr ** 2 + qr ** 2 + rr ** 2)
+    m["path_att_rate_rms"] = float(np.sqrt(np.mean(rate_rms ** 2)))
+    m["path_att_rate_max"] = float(np.max(rate_rms))
+    m["path_att_rate_per_axis_rms"] = {
+        "roll": float(np.sqrt(np.mean(pr ** 2))),
+        "pitch": float(np.sqrt(np.mean(qr ** 2))),
+        "yaw": float(np.sqrt(np.mean(rr ** 2))),
+    }
+    # Path-coverage proxy: did the drone follow the trajectory end-to-end?
+    final_pos_err = float(np.sqrt(
+        (log["x"][-1] - log["x_target"][-1]) ** 2
+        + (log["y"][-1] - log["y_target"][-1]) ** 2
+        + (log["z"][-1] - log["z_target"][-1]) ** 2
+    ))
+    m["path_final_position_error"] = final_pos_err
     return m
 
 
