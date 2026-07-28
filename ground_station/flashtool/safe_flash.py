@@ -2,14 +2,37 @@
 
   python -m ground_station.flashtool gate     # read-only: is it safe to flash?
   python -m ground_station.flashtool build    # UV4 -b (no hardware)
-  python -m ground_station.flashtool flash     # gate -> UV4 -f -> verify   (asks to confirm)
-  python -m ground_station.flashtool all       # build -> gate -> flash -> verify
+  python -m ground_station.flashtool flash    # gate -> UV4 -f -> verify   (asks to confirm)
+  python -m ground_station.flashtool verify   # read-only EKF liveness check
+  python -m ground_station.flashtool all      # preflight -> build -> gate -> flash -> verify
 
-The gate reads the RUNNING firmware over the probe (read-only, via livewatch) and
-refuses unless ARM_Status==DisArmed and no motor bench test is active. Reflash halts
-and resets the core; motors are unpowered during it and boot disarmed. Over the
-WIRELESS probe a dropped link mid-write can corrupt flash, so `flash`/`all` require an
-explicit confirmation (--yes to bypass in trusted automation) and UV4 verifies after.
+The pipeline is built so the developer can run ``all`` repeatedly while the
+drone sits powered on the bench (props off) and no human is required to flip
+a power switch or click Build in uVision. The three guards that make that
+work, in order:
+
+* **Pre-flight interlocks** (``preflight.run_all``) — refuse if a uVision
+  GUI instance is alive, or if another process is already holding the
+  CMSIS-DAP interface.
+* **Probe-free build** (``_pMon_neutralised``) — UV4 still drives the
+  compile+link, but ``<pMon>`` in ``USER/JX_FLY.uvoptx`` is rewritten to
+  the simulator DLL for the duration of the build and restored byte-exact
+  afterwards. The CMSIS-DAP driver is never loaded, so a powered-on
+  flight controller cannot be halted by the build step.
+* **Build-identity guard** (``build_id.next_identity`` /
+  ``build_id.check_identity``) — every successful build embeds a
+  16-byte identity (magic + monotonic counter + epoch + source
+  fingerprint) into the firmware image itself; the safety gate reads it
+  back over the probe and refuses unless the local ``.axf`` matches the
+  firmware actually flashed. Closes the relink drift hazard that
+  previously made the gate's own readings untrustworthy.
+
+The gate reads the RUNNING firmware over the probe (read-only, via livewatch)
+and refuses unless ARM_Status==DisArmed and no motor bench test is active.
+Reflash halts and resets the core; motors are unpowered during it and boot
+disarmed. Over the WIRELESS probe a dropped link mid-write can corrupt
+flash, so ``flash`` / ``all`` require an explicit confirmation (``--yes`` to
+bypass in trusted automation) and UV4 verifies after.
 """
 from __future__ import annotations
 
@@ -21,10 +44,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import artifact_custody, build_id, preflight
+
 _ROOT = Path(__file__).resolve().parents[2]
 _UV4 = Path(r"C:\Keil_v5\UV4\UV4.exe")
 _PROJECT = _ROOT / "USER" / "JX_FLY.uvprojx"
+_OPTS = _ROOT / "USER" / "JX_FLY.uvoptx"
 _ELF = _ROOT / "OBJ" / "JX_FLY.axf"
+_OBJ = _ROOT / "OBJ"
 
 DISARMED = 0
 
@@ -48,7 +75,14 @@ class GateResult:
 
 
 class SafetyGate:
-    """Reads the running target and decides whether a flash may proceed."""
+    """Reads the running target and decides whether a flash may proceed.
+
+    The check has two halves. The first is the build-identity guard: the
+    local ``OBJ/JX_FLY.axf`` must describe the firmware actually flashed on
+    the target, or every other field below is reading garbage. The second
+    is the runtime-state check: ARM_Status must be DisArmed, no motor bench
+    test may be active. Both halves must pass; either alone refuses.
+    """
 
     VARS = ["DroneStatus.ARM_Status", "motor_test_active", "motor_test_id"]
 
@@ -56,14 +90,28 @@ class SafetyGate:
         self.elf = Path(elf)
 
     def check(self) -> GateResult:
+        # Build-identity guard first — refuse if the local ELF is stale.
+        identity = build_id.check_identity(self.elf)
+        if not identity.ok:
+            return GateResult(
+                ok=False,
+                values={"build_identity": "MISMATCH"},
+                reasons=identity.reasons,
+            )
         from ground_station.livewatch.reader import LiveReader
         with LiveReader(self.elf) as lr:
             vals = lr.sample(lr.plan(self.VARS))
-        reasons = []
+        vals["build_identity"] = identity.expected.short_label()
+        reasons: list[str] = []
         if vals["DroneStatus.ARM_Status"] != DISARMED:
-            reasons.append(f"ARM_Status={vals['DroneStatus.ARM_Status']} (expected DisArmed=0)")
+            reasons.append(
+                f"ARM_Status={vals['DroneStatus.ARM_Status']} (expected DisArmed=0)"
+            )
         if vals["motor_test_active"] != 0:
-            reasons.append(f"motor_test_active={vals['motor_test_active']} (a motor bench test is running)")
+            reasons.append(
+                f"motor_test_active={vals['motor_test_active']} "
+                f"(a motor bench test is running)"
+            )
         return GateResult(ok=not reasons, values=vals, reasons=reasons)
 
 
@@ -125,6 +173,38 @@ def _browse_info_disabled():
         _PROJECT.write_bytes(original)
 
 
+# Probe-free build (Approach 2 in the spec): rewrite <pMon> in uvoptx so UV4
+# never instantiates the CMSIS-DAP driver DLL. The <pMon> element selects the
+# monitor driver uVision uses to talk to the target; "BIN\\CMSIS_AGDI.dll"
+# is the CMSIS-DAP driver that opens the SWD probe during project load.
+# Pointing <pMon> at the simulator DLL ("SARMCM3.DLL") keeps UV4 happy
+# without ever claiming the probe. Byte-exact restore on exit so the user's
+# uVision GUI continues to work normally afterwards.
+_PMON_CMSIS_DAP = b"<pMon>BIN\\CMSIS_AGDI.dll</pMon>"
+_PMON_SIMULATOR = b"<pMon>SARMCM3.DLL</pMon>"
+
+
+@contextlib.contextmanager
+def _pMon_neutralised():
+    """Rewrite ``<pMon>`` in ``uvoptx`` to the simulator DLL for the build.
+
+    Same byte-exact restore pattern as ``_browse_info_disabled``. If the
+    element is already absent or already neutralised (e.g. the user's uVision
+    project never used a hardware monitor), this is a no-op — we still
+    restore the file on exit so a previously-untouched file comes back
+    byte-identical.
+    """
+    original = _OPTS.read_bytes()
+    if _PMON_CMSIS_DAP not in original:
+        yield  # nothing to neutralise
+        return
+    try:
+        _OPTS.write_bytes(original.replace(_PMON_CMSIS_DAP, _PMON_SIMULATOR, 1))
+        yield
+    finally:
+        _OPTS.write_bytes(original)
+
+
 # Files armcc failed to write this pass, so we can delete + rebuild only those.
 # Two shapes: object write ("couldn't write file '..\obj\x.o'") and browse-info
 # read/append ("cannot open source input file "..\obj\x.crf"").
@@ -161,10 +241,31 @@ def build(rebuild: bool = False, timeout: float = 600, max_passes: int = 20,
     so the next link creates it fresh, with a short settle delay for the scanner to
     release the previous output. Written outputs persist, so the set shrinks and the
     build converges. Returns (ok, summary). No hardware needed.
+
+    The build identity is stamped into the firmware image before UV4 runs (via a
+    transient ``OBJ/build_id.c`` + temporary ``<Group>`` in ``uvprojx``), and the
+    artifact custody snapshot is taken first so an abandoned build leaves the
+    working tree holding artifacts that match the firmware on the target.
     """
     import time
+
+    # Snapshot the flashed-matching triple before UV4 touches OBJ/. If this
+    # build completes without a subsequent flash, the snapshot is restored
+    # by the caller (the ``build`` CLI does it; ``all`` defers until the
+    # chain reaches the flash stage).
+    custody = artifact_custody.snapshot(_OBJ)
+
+    # Stamp the build identity: allocate the next counter+timestamp+fingerprint
+    # (incrementing the on-disk counter so the next build is correctly numbered),
+    # generate the C source, splice the file into uvprojx via a context manager
+    # that restores the project byte-exact on exit. The C file itself is removed
+    # by the transient-file context manager after the build.
+    identity = build_id.next_identity(_OBJ, root=_ROOT)
+
     axf = _ROOT / "OBJ" / "JX_FLY.axf"
-    with _browse_info_disabled():
+    with _browse_info_disabled(), _pMon_neutralised(), \
+            build_id.uvprojx_with_build_id(_PROJECT, _OBJ), \
+            build_id.transient_build_id_source(_OBJ, identity):
         last = ""
         for i in range(1, max_passes + 1):
             flag = "-r" if (rebuild and i == 1) else "-b"
@@ -226,46 +327,94 @@ def _confirm(auto_yes: bool) -> bool:
         return False
 
 
+def _preflight_or_exit() -> None:
+    """Run pre-flight interlocks and exit on failure with a unique code (4)."""
+    pf = preflight.run_all()
+    print(pf.report())
+    if not pf.ok:
+        sys.exit(4)
+
+
+def _gate_or_exit(elf: str | Path) -> GateResult:
+    """Run the safety gate (with build-identity check) and exit on failure."""
+    gate = SafetyGate(elf).check()
+    print(gate.report())
+    if not gate.ok:
+        sys.exit(2)
+    return gate
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="flashtool", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("cmd", choices=["gate", "build", "flash", "verify", "all"])
     p.add_argument("--rebuild", action="store_true", help="full rebuild (UV4 -r) instead of incremental")
     p.add_argument("--yes", action="store_true", help="skip the interactive flash confirmation")
+    p.add_argument("--skip-preflight", action="store_true",
+                   help="skip the UV4.exe / CMSIS-DAP holder checks (NOT recommended)")
     args = p.parse_args(argv)
 
+    # ``gate`` is purely a probe read with no build — no preflight snapshot
+    # mutation is possible, but a competing CMSIS-DAP holder would still
+    # make the read fail or return garbage, so we run preflight there too.
     if args.cmd == "gate":
-        print(SafetyGate().check().report())
+        if not args.skip_preflight:
+            _preflight_or_exit()
+        gate = SafetyGate().check()
+        print(gate.report())
+        if not gate.ok:
+            sys.exit(2)
         return
 
     if args.cmd == "verify":
+        if not args.skip_preflight:
+            _preflight_or_exit()
         # Read-only, motors-safe. Use after a manual uVision build+flash to confirm
-        # the EKF is live on the running target. (Headless `build` is unreliable on
-        # this machine — UV4 -b hits Invalid-argument write races — so building in
-        # the uVision GUI and verifying here is the supported path.)
+        # the EKF is live on the running target.
         print(verify_ekf())
         return
 
+    # ``build`` runs UV4, which is the path that previously halted the FC.
+    # Refuse immediately if a resident uVision GUI or another livewatch
+    # process is alive — building through them is what previously crashed
+    # the FC, and we now refuse rather than warn.
     if args.cmd in ("build", "all"):
+        if not args.skip_preflight:
+            _preflight_or_exit()
         ok, log = build(rebuild=args.rebuild)
         print(f"[build] {'OK' if ok else 'FAILED'} {log}")
         if not ok:
+            # Build failed — restore the snapshot so the working tree
+            # again describes the firmware actually on the target.
+            artifact_custody.restore(_OBJ)
             sys.exit(1)
         if args.cmd == "build":
+            # The user invoked ``build`` directly with no intent to flash.
+            # Honor the spec's "abandoned build leaves the flashed-matching
+            # triple in place" rule by restoring the snapshot.
+            artifact_custody.restore(_OBJ)
             return
 
     # flash / all: gate -> confirm -> flash -> verify
-    gate = SafetyGate().check()
-    print(gate.report())
-    if not gate.ok:
-        sys.exit(2)
+    gate = _gate_or_exit(_ELF)
     if not _confirm(args.yes):
         print("[flash] aborted (not confirmed)")
+        # Aborted by the operator — restore the snapshot so the working
+        # tree continues to describe the firmware on the target.
+        artifact_custody.restore(_OBJ)
         sys.exit(3)
     ok, log = flash()
     print(f"[flash] {'OK' if ok else 'FAILED'} {log}")
     if not ok:
+        # Flash failed — do NOT delete the snapshot. The on-disk artifacts
+        # no longer describe what's on the target, but neither does the
+        # failed flash. Restore the snapshot so livewatch stays trustworthy.
+        artifact_custody.restore(_OBJ)
         sys.exit(1)
+    # Successful flash — the on-disk artifacts now match what's on the
+    # target. Commit the custody cache (delete it) and run the post-flash
+    # verification.
+    artifact_custody.commit(_OBJ)
     print(verify_ekf())
 
 
