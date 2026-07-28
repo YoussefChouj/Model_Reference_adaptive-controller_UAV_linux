@@ -1,8 +1,10 @@
 """Canonical task runner. One command per operation, identical in PowerShell and Git Bash.
 
-    python tasks.py doctor       # check the environment before anything else
-    python tasks.py test         # full suite
-    python tasks.py test sim     # one lane
+  python tasks.py doctor       # check the environment before anything else
+  python tasks.py test         # full suite
+  python tasks.py test sim     # one lane
+  python tasks.py budget       # build-budget gate (flash / RAM / stack / warnings)
+  python tasks.py verify       # ELF-vs-flash check (needs the SWD probe)
 
 `make` is not installed on this machine (only `mingw32-make`), and the two shells disagree on
 syntax, so the runner is plain Python -- the one interpreter that is always present. Every
@@ -25,6 +27,7 @@ LANES = {
     "gui": "ground_station/gui/tests",
     "sim": "sim/tests",
     "flight": "flight_analysis/tests",
+    "sil": "sil_gate/tests",
 }
 
 # Import-time cost of the heavy scientific stack makes these worth knowing before you wait.
@@ -149,6 +152,11 @@ def task_graph(argv: list[str]) -> int:
     )
 
 
+def task_budget(argv: list[str]) -> int:
+    """Run the build-budget gate. Reads OBJ artifacts; never invokes the build."""
+    return py("-m", "ground_station.build_budget", *argv, check=False)
+
+
 TASKS = {
     "doctor": task_doctor,
     "test": task_test,
@@ -156,6 +164,7 @@ TASKS = {
     "install": task_install,
     "freeze": task_freeze,
     "graph": task_graph,
+    "budget": task_budget,
 }
 
 
