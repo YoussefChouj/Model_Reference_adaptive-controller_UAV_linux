@@ -1,0 +1,50 @@
+# Checked-in baseline. The gate compares current build figures against this
+# file. The gate NEVER writes this file — raising a budget is a deliberate,
+# reviewed edit here, committed with a reason in the commit message.
+#
+# Sources of figures here:
+#   * Sizes were read from the most recent emitted `Program Size` line in
+#     OBJ/JX_FLY.build_log.htm. That build's link step wrote the linker's
+#     totals before any post-build failure (the trailing "1 Error(s), 69
+#     Warning(s)" was a file-write race, not a code error). If a clean rebuild
+#     emits different numbers, edit this file deliberately.
+#   * Warning identities are listed in the exact `["#<code>-<sev>", "<text>"]`
+#     shape produced by Warning.identity(). One duplicate per included site
+#     is collapsed by the frozen-set comparison in the gate.
+#
+# Requirement IDs above the file name are the names spec 4a's requirements
+# table uses to refer to this gate as the verifier. See requirements.yaml.
+
+sizes:
+  code: 80908        # bytes (text + ro_data could fit in flash)
+  ro_data: 1492
+  rw_data: 2384
+  zi_data: 112736
+
+# Per-task HWM fail threshold (in % of allocation). Default 80 %; raise to
+# make the gate more permissive, lower to catch earlier. Edit deliberately.
+stack_threshold_pct: 80.0
+
+# Requirement IDs (spec 4a) this gate verifies. Edit deliberately.
+requirements:
+  - BUILD-FLASH-1
+  - BUILD-RAM-1
+  - BUILD-RAM-2
+  - BUILD-STACK-1
+  - BUILD-WARN-1
+
+note: >
+  Seeded from OBJ/JX_FLY.build_log.htm on 2026-07-28.
+  ARMCC V5.06 update 3, build target 'JX_FLY'.
+
+# Warning identities. Each entry is [#<code>-<sev>, <text>].
+# The "Implicit physical register R0" warnings (#1267-D) all collapse to one
+# identity because Warning.identity() drops the line number; the project
+# contains two of them in global_declare.h (lines 294 and 314) but they
+# produce one row in the frozen set.
+warning_identities:
+  - ["#1267-D", "Implicit physical register R0 should be defined as a variable"]
+  - ["#1-D", "last line of file ends without a newline"]
+  - ["#186-D", "pointless comparison of unsigned integer with zero"]
+  - ["#177-D", "function \"MRAC_InverseMixer\" was declared but never referenced"]
+  - ["#177-D", "function \"attitude_deg\" was declared but never referenced"]

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<Project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="project_projx.xsd">
+  <SchemaVersion>2.1</SchemaVersion>
+  <Header>### uVision Project</Header>
+  <Targets>
+    <Target>
+      <TargetName>JX_FLY</TargetName>
+      <TargetOption>
+        <TargetCommonOption>
+          <Device>STM32F407ZGTx</Device>
+          <Cpu>IRAM(0x20000000,0x00020000) IRAM2(0x10000000,0x00010000) IROM(0x08000000,0x00100000) CPUTYPE("Cortex-M4") FPU2 CLOCK(12000000) ELITTLE</Cpu>
+          <OnChipMemories>
+            <IRAM>
+              <Type>0</Type>
+              <StartAddress>0x20000000</StartAddress>
+              <Size>0x20000</Size>
+            </IRAM>
+            <IRAM2>
+              <Type>0</Type>
+              <StartAddress>0x10000000</StartAddress>
+              <Size>0x10000</Size>
+            </IRAM2>
+            <IROM>
+              <Type>1</Type>
+              <StartAddress>0x8000000</StartAddress>
+              <Size>0x100000</Size>
+            </IROM>
+          </OnChipMemories>
+        </TargetCommonOption>
+      </TargetOption>
+    </Target>
+  </Targets>
+</Project>

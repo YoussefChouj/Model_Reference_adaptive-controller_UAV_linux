@@ -1,0 +1,32 @@
+*** Using Compiler 'V5.06 update 3 (build 300)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
+Build target 'JX_FLY'
+compiling main.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+main.c: 2 warnings, 0 errors
+compiling rpm.c...
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\BSP\rpm.c(254): warning:  #1-D: last line of file ends without a newline
+  }
+..\BSP\rpm.c: 2 warnings, 0 errors
+compiling gyro_filter.c...
+..\API\gyro_filter.c(71): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (axis < 0 || axis >= GYRO_FILT_AXES) return;
+..\API\gyro_filter.c(85): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (!s_enabled || axis < 0 || axis >= GYRO_FILT_AXES) {
+..\API\gyro_filter.c: 2 warnings, 0 errors
+compiling mrac.c...
+..\API\mrac.c(37): warning:  #177-D: function "MRAC_InverseMixer" was declared but never referenced
+  static void MRAC_InverseMixer(float current_vbatt, float pwm1, float pwm2, float pwm3, float pwm4,
+..\API\mrac.c: 1 warnings, 0 errors
+compiling sysid.c...
+..\API\sysid.c(66): warning:  #177-D: function "attitude_deg" was declared but never referenced
+  static float attitude_deg(SysID_Axis_e a)
+..\API\sysid.c: 1 warnings, 0 errors
+linking...
+Program Size: Code=80908 RO-data=1492 RW-data=2384 ZI-data=112736
+"..\OBJ\JX_FLY.axf" - 0 Error(s), 8 Warning(s).
+Build Time Elapsed:  00:00:11

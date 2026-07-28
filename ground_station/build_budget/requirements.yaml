@@ -1,0 +1,13 @@
+# Requirement IDs verified by `python -m ground_station.build_budget`.
+# These IDs are referenced by spec 4a (`docs/requirements.md`); see that
+# spec for the full table. Each row below says which condition this gate
+# checks.
+#
+# ID                | Condition verified
+# ------------------|-------------------------------------------------------
+# BUILD-FLASH-1     | Code (text + RO) flash usage does not regress vs baseline
+# BUILD-RAM-1       | RW-data usage does not regress vs baseline
+# BUILD-RAM-2       | ZI-data usage does not regress vs baseline
+# BUILD-STACK-1     | Every task's HWM stays below stack_threshold_pct
+# BUILD-WARN-1      | No new warning identities appear; removed warnings do not
+#                   |   silently mask introduced ones

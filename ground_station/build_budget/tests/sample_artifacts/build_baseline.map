@@ -1,0 +1,17 @@
+Component: ARM Compiler 5.06 update 3 Tool: armlink
+
+==============================================================================
+
+Image Symbol Table
+
+    RESET                                    0x08000000   Section      392  startup.o(RESET)
+    main                                     0x08000188   Section        8  __main.o(!!!main)
+    Image$$RW_IRAM1$$ZI$$Limit               0x2001b388   Section       0  startup.o(.bss)
+    Image$$RW_IRAM1$$ZI$$Base                0x20000ca8   Section       0  startup.o(.bss)
+    Image$$RW_IRAM2$$ZI$$Limit               0x20000000   Section       0
+    Image$$CCMRAM$$Base                      0x10000000   Section       0
+    Image$$CCMRAM$$Limit                     0x10010000   Section       0
+    s_ekf                                    0x20000ca8   Data        572  send_data.o(.bss)
+    mrac_state                               0x20004b98   Data        720  stabilizertask.o(.bss)
+    imu_data                                 0x20004e58   Data         80  imu_update.o(.data)
+    system_monitor                           0x20000ec8   Data         24  global_declare.o(.bss)
