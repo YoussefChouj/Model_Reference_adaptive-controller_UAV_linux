@@ -28,6 +28,8 @@ LANES = {
     "sim": "sim/tests",
     "flight": "flight_analysis/tests",
     "sil": "sil_gate/tests",
+    "flashtool": "ground_station/flashtool/tests",
+    "budget": "ground_station/build_budget/tests",
 }
 
 # Import-time cost of the heavy scientific stack makes these worth knowing before you wait.
