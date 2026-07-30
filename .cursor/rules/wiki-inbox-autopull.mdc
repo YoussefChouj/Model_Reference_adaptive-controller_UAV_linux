@@ -1,0 +1,24 @@
+---
+description: Auto-pull grabbed papers from the OpenClaw server at session start and surface the pending-ingestion queue
+alwaysApply: true
+---
+
+# Grabbed-Paper Inbox (auto-pull)
+
+Once per session, before the first substantive task, run:
+
+```
+python scripts/pull_wiki_inbox.py
+```
+
+It syncs grabbed-paper notes + PDFs from the OpenClaw server's `wiki_inbox/`
+into `raw/papers/` and prints which papers are still awaiting wiki ingestion.
+
+- If papers are pending, tell the user and offer: **ingest now** (wiki INGEST
+  flow — comprehensive beginner-level digestion) or a **learning session**
+  (`grill-paper` skill in `~/.cursor/skills/`).
+- A `[+PDF]` tag means the full paper PDF sits next to the note — use it as
+  ground truth (open at the pages the briefing cites).
+- Never edit files in `raw/` — they are immutable sources.
+- If the server is unreachable the script degrades to a local-only report;
+  don't retry in a loop.

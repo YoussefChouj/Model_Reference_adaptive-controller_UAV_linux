@@ -40,8 +40,9 @@ build, you get plausible-looking garbage rather than an error** — a float is a
 whatever it points at. `verify` compares sampled flash bytes against the ELF and exits
 non-zero on mismatch.
 
-If it says `STALE ELF`: **stop**. Report nothing you read. Tell the operator to rebuild
-(uVision GUI — `UV4 -b` headless is a documented dead end) or reflash.
+If it says `STALE ELF`: **stop**. Report nothing you read. Rebuilding and reflashing is the
+`stream-log` skill's section 2 — headless `UV4` does work, but only with the target powered
+down, and the power sequencing there is not optional.
 
 ## Commands
 

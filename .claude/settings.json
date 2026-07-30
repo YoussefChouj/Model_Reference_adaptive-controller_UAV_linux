@@ -63,6 +63,12 @@
           {
             "type": "command",
             "command": "python .agent_scripts/knowledge_loop.py run"
+          },
+          {
+            "type": "command",
+            "command": "python scripts/pull_wiki_inbox.py",
+            "timeout": 90,
+            "statusMessage": "Pulling grabbed papers from OpenClaw wiki_inbox..."
           }
         ]
       }
