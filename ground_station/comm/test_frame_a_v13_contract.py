@@ -143,7 +143,14 @@ def test_rx_loop_stream_a_then_c_then_b():
     br._stop_event.set()
     t.join(timeout=1.0)
 
-    a, b = br.get_telemetry_snapshot()
+    # Read the decoder's output directly, not get_telemetry_snapshot(): this test is
+    # about framing, and the snapshot additionally applies a wall-clock staleness
+    # guard. The 0.5 s sleep above is itself longer than Frame A's staleness window,
+    # so going through the snapshot asserted on the guard rather than on the decode
+    # and failed for a reason that had nothing to do with desync.
+    with br._telemetry_lock:
+        a = dict(br._last_telemetry_a)
+        b = dict(br._last_telemetry_b)
     assert a, "Frame A must decode from the byte stream"
     assert a["status.of_hold"] == 1.0
     assert b, "Frame B must still decode after an interleaved Frame C (no desync)"

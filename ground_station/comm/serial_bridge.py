@@ -414,19 +414,32 @@ class SerialBridge:
         with self._state_lock:
             return self._last_sbus_lost
 
-    def get_telemetry_snapshot(self) -> Tuple[Dict[str, float], Dict[str, float]]:
+    def get_telemetry_snapshot(self) -> Tuple[Dict[str, Optional[float]], Dict[str, Optional[float]]]:
         """Latest decoded Frame A / Frame B variables (thread-safe, for GUI + logging).
 
-        If a frame type has not arrived in the last 0.5 s, its values are replaced
-        with None so the dashboard can display '--' instead of stale garbage
+        If a frame type has not arrived within its staleness window, its values are
+        replaced with None so the dashboard can display '--' instead of stale garbage
         (e.g., the 1e+33 / 1e+29 / 2.1e+9 values seen when Frame B decode silently
         fails due to a payload-length mismatch between v13 firmware and a v14-only bridge).
+
+        The window is PER FRAME because A and B do not run at the same rate. Measured
+        on the drone over 20 s, 2026-07-29 (UART5 at 101 % of its 11520 B/s cap):
+
+            Frame A  54.4 Hz   worst gap 0.22 s
+            Frame B  11.8 Hz   worst gap 0.42 s
+
+        A single 0.5 s window sat just above Frame B's worst gap, so ordinary jitter on
+        a saturated link intermittently nulled every B value -- blanking the PID/MRAC
+        panels and the XY position plots while the faster A/C panels kept updating.
+        Frame B's window is therefore sized off its own cadence (~18 missed frames),
+        which still catches a genuinely dead link within two seconds.
         """
         with self._telemetry_lock:
             now = time.monotonic()
-            STALE_S = 0.5  # mirrors Frame A update rate (~0.5 s between 20 Hz frames)
-            a_stale = (now - self._last_frame_a_t) > STALE_S
-            b_stale = (now - self._last_frame_b_t) > STALE_S
+            STALE_A_S = 0.5   # ~27 missed frames at the measured 54 Hz
+            STALE_B_S = 1.5   # ~18 missed frames at the measured 12 Hz
+            a_stale = (now - self._last_frame_a_t) > STALE_A_S
+            b_stale = (now - self._last_frame_b_t) > STALE_B_S
             a = {k: None if a_stale else float(v) for k, v in self._last_telemetry_a.items()}
             b = {k: None if b_stale else float(v) for k, v in self._last_telemetry_b.items()}
             return (a, b)

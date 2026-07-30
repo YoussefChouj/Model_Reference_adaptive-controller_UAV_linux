@@ -500,6 +500,13 @@ class Dashboard:
             return
         try:
             a, b = self.bridge.get_telemetry_snapshot()
+            # The bridge nulls a frame's values once that frame goes stale (>0.5 s). Drop
+            # those keys rather than carrying None into _telem: every consumer reads via
+            # `k in a` or `a.get(k, default)`, which behave correctly for a missing key but
+            # raise TypeError on a present-but-None one -- and one such raise aborts the
+            # rest of the render pass, freezing every panel drawn after it.
+            a = {k: v for k, v in a.items() if v is not None}
+            b = {k: v for k, v in b.items() if v is not None}
             self._telem["a"] = a
             self._telem["b"] = b
             self._telem["max_num_basis"] = int(self.bridge.get_last_max_num_basis())
