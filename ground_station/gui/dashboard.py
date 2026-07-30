@@ -329,6 +329,8 @@ class Dashboard:
         self._motor_test_allow_high: bool = False  # gate for CCR > 3000
         self._motor_test_hb_t: float = 0.0      # last heartbeat send time
         self._bench_csv_path: Optional[Path] = None  # manual-point log (lazily created)
+        self._bench_ccr_change_t: float = 0.0    # monotonic time of the last CCR change (settle_s)
+        self._bench_sweep: str = ""              # "up"/"down" — direction of that change (hysteresis)
 
         self._flight_logger = FlightLogger()
         self._log_lock = threading.Lock()       # serialize CSV writes across render + telemetry-rx threads
@@ -2254,18 +2256,12 @@ class Dashboard:
         dpg.add_separator()
         dpg.add_text("Manual thrust point (read the scale AFTER it settles, then Log point)",
                      color=(200, 200, 200, 255))
-        # cal_factor: rig has NO pivot (rigid cantilever, motor 14cm past scale edge),
-        # so there is no lever ratio - vertical force transmits ~1:1. cal_factor absorbs
-        # the off-center / corner-load error of THIS rig. Measure it: place a KNOWN mass
-        # at the motor mount point, read the scale, set cal_factor = known_g / reading_g.
-        # Leave at 1.0 if uncalibrated.  thrust_N = (grams - tare) * 0.00981 * cal_factor.
+        # thrust_N = (grams - tare) * 0.00981. No cal_factor: the dedicated thrust stand
+        # transmits the force 1:1, so there is no lever ratio or corner-load error to absorb.
         with dpg.group(horizontal=True):
             dpg.add_input_float(tag="bench_grams", label="scale (g)", default_value=0.0, width=160)
             dpg.add_input_float(tag="bench_tare_g", label="tare (g, no-throttle)",
                                 default_value=0.0, width=220)
-        with dpg.group(horizontal=True):
-            dpg.add_input_float(tag="bench_cal", label="cal_factor (known_g / reading_g)",
-                                default_value=1.0, width=300, format="%.5g")
         with dpg.group(horizontal=True):
             dpg.add_button(label="Log point", callback=lambda: self._bench_log_point())
             dpg.add_text("", tag="bench_log_status", color=(150, 200, 150, 255))
@@ -2297,23 +2293,38 @@ class Dashboard:
             ccr = 3000
         return ccr
 
+    def _bench_note_ccr_change(self, prev_ccr: int) -> None:
+        """Record WHEN the operating point last moved and in which direction.
+
+        CCR changes used to emit their own CSV row with grams=0, which put fake
+        zero-thrust points in the middle of the curve. The two things those rows
+        actually carried — settling time and sweep direction (hysteresis) — are
+        now columns on the next real logged point instead."""
+        if self._motor_test_ccr == prev_ccr:
+            return
+        self._bench_ccr_change_t = time.monotonic()
+        self._bench_sweep = "up" if self._motor_test_ccr > prev_ccr else "down"
+
     def _bench_slider_ccr(self, sender: Any, app_data: Any) -> None:
+        prev = self._motor_test_ccr
         self._motor_test_ccr = self._bench_clamp_ccr(app_data)
         try:
             dpg.set_value("bench_ccr", self._motor_test_ccr)
         except Exception:
             pass
+        self._bench_note_ccr_change(prev)
         if self._motor_test_active:
             self._send_cmd(0x16, 2, float(self._motor_test_ccr))
 
     def _bench_step_ccr(self, direction: int) -> None:
+        prev = self._motor_test_ccr
         self._motor_test_ccr = self._bench_clamp_ccr(
             self._motor_test_ccr + direction * self._motor_test_step)
         try:
             dpg.set_value("bench_ccr", self._motor_test_ccr)
         except Exception:
             pass
-        self._bench_write_row("STEP_UP" if direction > 0 else "STEP_DOWN", grams=0.0, tare=0.0)
+        self._bench_note_ccr_change(prev)
         if self._motor_test_active:
             self._send_cmd(0x16, 2, float(self._motor_test_ccr))
 
@@ -2343,7 +2354,9 @@ class Dashboard:
         self._send_cmd(0x16, 0, 1.0)
         self._motor_test_active = True
         self._motor_test_hb_t = time.monotonic()
-        self._bench_write_row("START", grams=0.0, tare=0.0)
+        # The motor only starts spinning now, so settling starts here regardless of
+        # how long ago the CCR slider was last touched.
+        self._bench_ccr_change_t = self._motor_test_hb_t
 
     def _bench_stop(self) -> None:
         self._send_cmd(0x16, 0, 0.0)
@@ -2352,7 +2365,6 @@ class Dashboard:
             dpg.set_value("bench_run", False)
         except Exception:
             pass
-        self._bench_write_row("STOP", grams=0.0, tare=0.0)
 
     def _bench_tick(self, now: float) -> None:
         # Poll the RUN checkbox every frame and reconcile against actual run state. This is
@@ -2434,11 +2446,15 @@ class Dashboard:
             d = self.repo_root / "logs" / "bench"
             d.mkdir(parents=True, exist_ok=True)
             self._bench_csv_path = d / f"thrust_{time.strftime('%Y%m%d_%H%M%S')}.csv"
-            # ADR-0010: append rpm1..4, rpm (max of channels), t_est_N (= k * (omega_meas)^2).
-            # Existing column order is preserved; new columns come AFTER the existing ones.
-            header = ("iso_time,monotonic,type,motor_id,ccr_cmd,ccr_echo,vbat,grams,tare_g,"
-                      "cal_factor,thrust_N,omega_est,thrust_formula_N,prop_d_in,prop_pitch_in,k,a,b,"
-                      "rpm1,rpm2,rpm3,rpm4,rpm,t_est_N\n")
+            # One row per operator-logged point — nothing else. Everything a fit needs and
+            # nothing it can recompute: the prop-model priors (k, a, b, D, pitch) drive the
+            # on-screen T_est only, and repeating them on every row said nothing about the
+            # measurement. Only one motor spins on the bench, so rpm1..4 collapse to one
+            # column (the live channel), left EMPTY when there is no tacho on the stand —
+            # back-fill it from a flight log by CCR. ADR-0010's t_est_N = k*(rpm*2pi/60)^2
+            # is then a one-line offline computation, not 6 constant columns per row.
+            header = ("iso_time,motor_id,ccr,ccr_echo,vbat,grams,tare_g,thrust_N,"
+                      "sweep,settle_s,rpm\n")
             with self._log_lock:
                 self._bench_csv_path.write_text(header, encoding="utf-8")
         return self._bench_csv_path
@@ -2454,45 +2470,35 @@ class Dashboard:
 
     def _bench_log_point(self) -> None:
         grams, tare = self._bench_read_floats("bench_grams", "bench_tare_g")
-        self._bench_write_row("POINT", grams=grams, tare=tare)
+        self._bench_write_row(grams=grams, tare=tare)
         try:
             dpg.set_value("bench_log_status",
                           f"logged: CCR {self._motor_test_ccr} -> {(grams - tare):.1f} g net")
         except Exception:
             pass
 
-    def _bench_write_row(self, kind: str, *, grams: float, tare: float) -> None:
+    def _bench_write_row(self, *, grams: float, tare: float) -> None:
         bench = self._telem.get("bench") or {}
         ccr_echo = bench.get("bench.ccr")
         vbat = bench.get("bench.vbat")
-        d, pitch, k, a, b, cal = self._bench_read_floats(
-            "bench_prop_d", "bench_prop_pitch", "bench_k", "bench_a", "bench_b", "bench_cal")
-        if cal == 0.0:
-            cal = 1.0
-        thrust_N = (grams - tare) * 0.00981 * cal
-        omega_est = a * self._motor_test_ccr + b
-        thrust_formula = k * omega_est * omega_est
-        # ADR-0010: per-channel measured RPM (0 if no sensor / stopped), and max for the
-        # thrust-from-RPM column. t_est_N uses the measured ω so logged points record
-        # the model-vs-scale error at the actual rotational speed.
-        rpm1 = int(bench.get("bench.rpm1") or 0)
-        rpm2 = int(bench.get("bench.rpm2") or 0)
-        rpm3 = int(bench.get("bench.rpm3") or 0)
-        rpm4 = int(bench.get("bench.rpm4") or 0)
-        rpm_max = int(bench.get("bench.rpm") or max(rpm1, rpm2, rpm3, rpm4))
-        if rpm_max > 0 and k > 0.0:
-            omega_meas = rpm_max * 2.0 * math.pi / 60.0
-            t_est_N = k * omega_meas * omega_meas
-        else:
-            t_est_N = 0.0
+        thrust_N = (grams - tare) * 0.00981
+        # ADR-0010: only the plugged-in channel reads non-zero, so log that one number.
+        # The IR sensor lives on the drone frame, so a motor on the thrust stand has no
+        # tacho at all: write the field EMPTY, not 0, so "not measured" stays distinct
+        # from a real zero and the column can be back-filled from flight logs later.
+        rpm = int(bench.get("bench.rpm") or max(
+            int(bench.get("bench.rpm1") or 0), int(bench.get("bench.rpm2") or 0),
+            int(bench.get("bench.rpm3") or 0), int(bench.get("bench.rpm4") or 0)))
+        # How long this operating point has been held. A point read before the thrust
+        # settles is the main way to poison the curve, so it is recorded, not assumed.
+        settle_s = (time.monotonic() - self._bench_ccr_change_t) if self._bench_ccr_change_t else 0.0
         row = (
-            f"{time.strftime('%Y-%m-%dT%H:%M:%S')},{time.monotonic():.3f},{kind},"
+            f"{time.strftime('%Y-%m-%dT%H:%M:%S')},"
             f"{self._motor_test_id},{self._motor_test_ccr},"
             f"{int(ccr_echo) if ccr_echo is not None else ''},"
             f"{('%.3f' % vbat) if vbat is not None else ''},"
-            f"{grams:.3f},{tare:.3f},{cal:.5g},{thrust_N:.5f},{omega_est:.5f},{thrust_formula:.6g},"
-            f"{d:.4g},{pitch:.4g},{k:.6g},{a:.6g},{b:.6g},"
-            f"{rpm1},{rpm2},{rpm3},{rpm4},{rpm_max},{t_est_N:.6g}\n"
+            f"{grams:.3f},{tare:.3f},{thrust_N:.5f},"
+            f"{self._bench_sweep},{settle_s:.1f},{rpm if rpm > 0 else ''}\n"
         )
         try:
             # Resolve/create the CSV path OUTSIDE the lock. _bench_csv() takes _log_lock

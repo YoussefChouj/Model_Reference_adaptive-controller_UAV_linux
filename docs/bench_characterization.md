@@ -79,16 +79,22 @@ keeps prop-wash off the scale pan (blowing down corrupts the reading with airflo
     the no-firmware fallback.) Use **fixed CCR steps** (e.g. 100 counts over 2000→4000), not
     percentage — even coverage of the nonlinear `T ∝ CCR²` curve gives a cleaner fit.
 *   At each step, let the reading settle, then **Log point** → one (CCR, thrust, voltage) row
-    in `logs/bench/thrust_<ts>.csv`. ~20 points = your curve. Sweep **up and down** (hysteresis).
+    in `ground_station/logs/bench/thrust_<ts>.csv`. ~20 points = your curve. Sweep **up and down**
+    (hysteresis) — each row records the `sweep` direction and `settle_s`, the seconds that
+    operating point was held before you read the scale. Only **Log point** writes a row;
+    start/stop and CCR steps do not. `thrust_N = (grams − tare) * 0.00981`.
 *   **RPM (ADR-0010):** TCRT5000 reflective module plugged into a spare TIM2 3-pin header
     (use PB3/PB10/PB11 — avoid the PA5 header until its rail voltage is verified ≤3.3 V or a
     10k series resistor is added), sensor looking **up at the blade roots from below**, one
     reflective mark on each blade underside at the same radius. Tune the module trimpot so a
     bare blade reads LOW and only tape reads HIGH (verify by hand-spinning, watching the module
     LED, before powering the motor). Frame 0x04 then streams live RPM and each Log-point row
-    gains `rpm` and the `T_est = k·ω²` estimate from measured ω → model-vs-scale error per point.
-*   Thrust in grams × 0.00981 = newtons (the dashboard computes `thrust_N` and the
-    `T = k·ω²` estimate for you if you fill the propeller `k, a, b` fields).
+    fills its `rpm` column. **The sensor is mounted on the drone frame**, so a motor on the
+    thrust stand has no tacho: `rpm` is written **empty** (not 0 — "not measured" must stay
+    distinct from a real zero) and is back-filled by CCR from a flight log later.
+*   Thrust in grams × 0.00981 = newtons — the dashboard computes `thrust_N` for you. The
+    propeller `k, a, b` fields drive the on-screen `T_est = k·ω²` readout **only**; they are
+    priors, not measurements, so they are no longer copied into every CSV row.
 
 **Battery-voltage caveat (important):** thrust at a given command **drops as the pack**  
 **discharges**. So either (a) do the whole sweep **fast on a freshly-charged pack and note the**  
