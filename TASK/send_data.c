@@ -15,6 +15,7 @@
 #include "calib.h"       /* CalTrim_t, CalHot_t */
 #include "ekf.h"         /* Ekf9_t, ADR-0011 9-state EKF */
 #include "usart5.h"      /* UART5 extended-prefix subscribe hook (uart5_address_subscription_cmd) */
+#include "subscribe.h"   /* Subscribe_StreamTick / Subscribe_StreamOwnsUsart3 */
 
 /* Body-frame gyroscope rates (rad/s) — needed for Frame C body-rate telemetry.
  * Declared as extern in bmi088_driver.h. */
@@ -315,9 +316,92 @@ void send_to_linux(void)    //����4
                                         //����DMA���� 		
 
 }
+/* --- USART3 throughput test mode -- TEMPORARY, set back to 0 when done ------
+ * Why this exists: the normal 16-byte VOFA+ attitude frame is content-limited to
+ * ~1.3 kB/s, i.e. 11% of the 115200 wire, so no host-side measurement can ever
+ * reveal what the 24RF radio actually carries. Measured 2026-07-27: at zero
+ * offered load the downlink is 1284 B/s at 100% frame integrity, which says
+ * nothing about capacity.
+ *
+ * Frame size is bounded by the DMA-busy guard below, NOT by the wire: a frame
+ * must finish clocking out inside ONE Send_Task tick or the next tick skips it
+ * and the rate halves. Measured 2026-07-27 with 112 B (9.72 ms vs a 10 ms
+ * tick, only 0.28 ms of margin): it alternated, giving 48.3 Hz / 5413 B/s at
+ * 0.14% air loss -- clean, but only 47% of the wire, and that 47% was our own
+ * cadence artifact rather than the radio's limit.
+ *
+ * 23 floats = 96 B = 8.33 ms leaves 1.67 ms of margin, which should hold a true
+ * 100 Hz = 9600 B/s = 83% of the 11520 B/s wire cap. If the radio delivers that
+ * as cleanly as it delivered 5413 B/s, the radio is not the constraint at all
+ * and the 115200 UART is the true ceiling.
+ *
+ * float[0] is a frame sequence counter so the host can count dropped frames
+ * exactly rather than inferring loss from byte totals. Still JustFloat-framed
+ * (N floats + 00 00 80 7F tail) and still strictly TX-only -- no command
+ * dispatch is added on USART3.
+ *
+ * Affects only what is written to the USART3 radio, which carries no control
+ * function: no s_ekf writes, no PID state, no arming/motor effect. UART5
+ * telemetry and the EKF step are untouched. */
+#define USART3_THROUGHPUT_TEST   1
+#define USART3_TEST_FLOATS       63
+
+#if USART3_THROUGHPUT_TEST
+#define USART3_TX_LEN            (USART3_TEST_FLOATS * 4 + 4)   /* 96 */
+#else
+#define USART3_TX_LEN            16
+#endif
+
 void usart3_send(void)
 {
-	UCHAR8 str_USART[16];
+	/* static, NOT a local: DMA1_Stream3 keeps reading this buffer asynchronously
+	 * after this function returns. As a stack local, the frame was reused by
+	 * later calls while the ~16.7 ms transfer was still in flight, so the radio
+	 * transmitted partly-corrupted floats. */
+	static UCHAR8 str_USART[USART3_TX_LEN];
+
+	/* A 0x09 subscribe stream routed to USART3 owns DMA1_Stream3. Both this
+	 * function and Subscribe_StreamTick() arm that stream from their own
+	 * buffers, so they must never both run in a cycle -- the second to arm
+	 * would retarget M0AR mid-transfer. The subscription wins: it is the
+	 * variable set the operator explicitly asked for, whereas this frame is a
+	 * fixed attitude triple (or the throughput-test pattern). */
+	if (Subscribe_StreamOwnsUsart3() != 0U) return;
+
+	/* Non-blocking guard, replaces a busy-wait that sat here at the bottom.
+	 * A 16 B frame takes 16 * 10 / 9600 = 16.7 ms, but Send_Task cycles every
+	 * 10 ms, so waiting for the previous transfer capped the ENTIRE send loop
+	 * (telemetry + EKF predict) at ~60 Hz instead of 100 Hz. Dropping this
+	 * frame is the right trade: it also guarantees we never overwrite the
+	 * buffer while the previous DMA transfer is still reading out of it. */
+	if(DMA_GetCurrDataCounter(DMA1_Stream3)) return;
+
+#if USART3_THROUGHPUT_TEST
+	{
+		static FP32 seq = 0.0f;   /* exact in float to 2^24 frames = 46 h at 100 Hz */
+		FP32 v;
+		int  i;
+
+		seq += 1.0f;
+		for(i = 0; i < USART3_TEST_FLOATS; i++)
+		{
+			if     (i == 0) v = seq;            /* host counts gaps in this */
+			else if(i == 1) v = imu_data.rol;   /* keep some real signal so the */
+			else if(i == 2) v = imu_data.pit;   /* frame is still plausible to eyeball */
+			else if(i == 3) v = imu_data.yaw;
+			else            v = (FP32)i;        /* fixed pattern: any corruption shows */
+
+			str_USART[i * 4 + 0] = BYTE0(v);
+			str_USART[i * 4 + 1] = BYTE1(v);
+			str_USART[i * 4 + 2] = BYTE2(v);
+			str_USART[i * 4 + 3] = BYTE3(v);
+		}
+		str_USART[USART3_TX_LEN - 4] = 0x00;
+		str_USART[USART3_TX_LEN - 3] = 0x00;
+		str_USART[USART3_TX_LEN - 2] = 0x80;
+		str_USART[USART3_TX_LEN - 1] = 0x7f;
+	}
+#else
 	float angles[3] ;
 	angles[0] = imu_data.rol;
 	angles[1] = imu_data.pit;
@@ -344,14 +428,15 @@ void usart3_send(void)
 	str_USART[13] = 0x00;
 	str_USART[14] = 0x80;
 	str_USART[15] = 0x7f;
+#endif
 	
 	
-  while(DMA_GetCurrDataCounter(DMA1_Stream3));		   //��֮ǰ�ķ���
+  /* busy-wait removed; non-blocking guard now at top of function */		   //��֮ǰ�ķ���
   DMA_ClearITPendingBit(DMA1_Stream3, DMA_IT_TCIF3); //����DMA_Mode_Normal,����û��ʹ������ж�ҲҪ�������������ֻ��һ��
     
   DMA_Cmd(DMA1_Stream3, DISABLE);				             //���õ�ǰ����ֵǰ�Ƚ���DMA
   DMA1_Stream3->M0AR = (uint32_t)&str_USART;  //���õ�ǰ�������ݻ���ַ:Memory0 tARget
-  DMA1_Stream3->NDTR =16;     //���õ�ǰ���������ݵ�����:Number of Data units to be TRansferred
+  DMA1_Stream3->NDTR = USART3_TX_LEN;   //���õ�ǰ���������ݵ�����:Number of Data units to be TRansferred
   DMA_Cmd(DMA1_Stream3, ENABLE);		
                                         //����DMA���� 
                                         //����DMA���� 		
@@ -1019,6 +1104,14 @@ void Send_Groundstation_Telemetry_UART4(void)
     DMA1_Stream7->M0AR = (uint32_t)&Buf_Telemetry_UART4;
     DMA1_Stream7->NDTR = len;
     DMA_Cmd(DMA1_Stream7, ENABLE);
+
+    /* Streaming subscription (CMD 0x21). Ticked BEFORE the request handler so
+     * a subscription accepted this cycle starts emitting on the next one,
+     * rather than firing a data frame on the heels of its own schema reply.
+     * No-op when no stream is active, so the default cadence is unchanged.
+     * When the stream is routed to USART3 this touches DMA1_Stream3 only and
+     * never waits on the UART5 telemetry burst above. */
+    Subscribe_StreamTick();
 
     /* ADR-0011 follow-up (uart5_address_subscription_cmd): if a UART5
      * subscribe request has been staged by the IRQ-side parser (BSP/usart5.c),

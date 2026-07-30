@@ -1,4 +1,8 @@
-serial_port: AUTO
+# PINNED, do not set back to AUTO. The real 0xAA 0xBB telemetry is on UART5 =
+# the CMSIS-DAP dongle VCP (SER=ATK_20190528, "USB Serial Device", COM6 here).
+# AUTO returns the first port emitting ANY bytes, and COM3 (USART3 / 24RF) now
+# streams VOFA JustFloat, so AUTO picks COM3 and the dashboard decodes nothing.
+serial_port: COM6
 baud_rate: 115200
 # --- COM-port resolution (ADR-0007) --------------------------------------
 # serial_port = AUTO  → enumerate all CH340/CP210x/FTDI ports, pick first that streams
@@ -10,7 +14,14 @@ com_scan: COM3 COM4 COM5 COM6 COM7 COM8
 com_probe_timeout_s: 1.5
 com_match_hints: USB-SERIAL CH340 Silicon Labs CP210x FTDI
 # Manual livewatch UART5 endpoint. This path never auto-discovers or takes over
-# the serial_bridge COM port; the operator must select the long-range receiver.
+# the serial_bridge COM port.
+#
+# UART5 is wired to the WIRELESS CMSIS-DAP probe, not to the long-range radio.
+# Select that dongle's virtual COM port: VID:PID=04D8:00DF, SER=ATK_20190528,
+# description "USB Serial Device" (COM6 on this machine).
+# Do NOT point this at the CH340 port (COM7) — that is USART3, the long-range
+# module, which runs at 9600 baud and only emits a VOFA JustFloat attitude frame.
+# See wiki/concepts/uart-peripheral-map.md.
 livewatch_uart5_port: COM6
 livewatch_uart5_baud: 115200
 vofa_host: 127.0.0.1

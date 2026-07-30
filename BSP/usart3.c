@@ -2,11 +2,22 @@
 
 #define USART3_RXDMA_LEN           22
 #define USART3_RXMB_LEN            11
+
+/* USART3_BAUD now lives in usart3.h -- API/subscribe.c needs it to size the
+ * stream link-budget guard. */
 __IO UCHAR8 UA3RxDMAbuf[USART3_RXDMA_LEN] = {0};
      UCHAR8 UA3RxMailbox[USART3_RXMB_LEN] = {0};
 USART_RX_TypeDef USART3_Rcr = {USART3,DMA1_Stream1,UA3RxMailbox,UA3RxDMAbuf,USART3_RXMB_LEN,USART3_RXDMA_LEN,0,0,0};
 
  UCHAR8 Custom_DataBuf[68] = {0};
+
+/* Long-range-module RX instrumentation. Non-static so livewatch can resolve them
+ * by name over SWD. Read-only observation: nothing in the control path consumes
+ * these yet, and no command parser is wired to USART3 (see wiki
+ * concepts/uart-peripheral-map.md). Watch UA3RxFrameCnt while the ground station
+ * transmits to determine empirically whether the module is bidirectional. */
+volatile uint32_t UA3RxFrameCnt = 0U;   /* IDLE events that yielded >0 bytes */
+volatile uint16_t UA3RxLastLen  = 0U;   /* byte count of the most recent burst */
  
 void USART3_Configuration(void)
 {
@@ -16,55 +27,55 @@ void USART3_Configuration(void)
     NVIC_InitTypeDef  nvic;
 	  DMA_InitTypeDef   DMA_InitStructure;
 
-    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC | RCC_AHB1Periph_DMA1,ENABLE);//Ê¹ÄÜPA¶Ë¿ÚÊ±ÖÓ
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART3,ENABLE);//Ê¹ÄÜUSART2Ê±ÖÓ
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC | RCC_AHB1Periph_DMA1,ENABLE);//Ê¹ï¿½ï¿½PAï¿½Ë¿ï¿½Ê±ï¿½ï¿½
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART3,ENABLE);//Ê¹ï¿½ï¿½USART2Ê±ï¿½ï¿½
 	
 
     GPIO_PinAFConfig(GPIOC,GPIO_PinSource10,GPIO_AF_USART3);
     GPIO_PinAFConfig(GPIOC,GPIO_PinSource11,GPIO_AF_USART3); 
 
 	  gpio.GPIO_Pin = GPIO_Pin_10 | GPIO_Pin_11;
-	  gpio.GPIO_Mode = GPIO_Mode_AF;//¸´ÓÃÄ£Ê½
-    gpio.GPIO_OType = GPIO_OType_PP;//ÍÆÍìÊä³ö
-    gpio.GPIO_Speed = GPIO_Speed_100MHz;//IO¿ÚËÙ¶ÈÎª100MHz
+	  gpio.GPIO_Mode = GPIO_Mode_AF;//ï¿½ï¿½ï¿½ï¿½Ä£Ê½
+    gpio.GPIO_OType = GPIO_OType_PP;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    gpio.GPIO_Speed = GPIO_Speed_100MHz;//IOï¿½ï¿½ï¿½Ù¶ï¿½Îª100MHz
     gpio.GPIO_PuPd = GPIO_PuPd_NOPULL;
-  	GPIO_Init(GPIOC,&gpio);//¸ù¾ÝÉè¶¨²ÎÊý³õÊ¼»¯GPIOA
+  	GPIO_Init(GPIOC,&gpio);//ï¿½ï¿½ï¿½ï¿½ï¿½è¶¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½GPIOA
 
-	/*USART2½ÓÊÕ¿ÕÏÐÖÐ¶Ï*/
+	/*USART2ï¿½ï¿½ï¿½Õ¿ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½*/
     nvic.NVIC_IRQChannel = USART3_IRQn;
-    nvic.NVIC_IRQChannelPreemptionPriority = 0;//ÇÀÕ¼ÓÅÏÈ¼¶
-    nvic.NVIC_IRQChannelSubPriority = 1;//×ÓÓÅÏÈ¼¶
-    nvic.NVIC_IRQChannelCmd = ENABLE;//IRQÍ¨µÀÊ¹ÄÜ 
-    NVIC_Init(&nvic);//¸ù¾ÝÖ¸¶¨µÄ²ÎÊý³õÊ¼»¯VIC¼Ä´æÆ÷
+    nvic.NVIC_IRQChannelPreemptionPriority = 0;//ï¿½ï¿½Õ¼ï¿½ï¿½ï¿½È¼ï¿½
+    nvic.NVIC_IRQChannelSubPriority = 1;//ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
+    nvic.NVIC_IRQChannelCmd = ENABLE;//IRQÍ¨ï¿½ï¿½Ê¹ï¿½ï¿½ 
+    NVIC_Init(&nvic);//ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½VICï¿½Ä´ï¿½ï¿½ï¿½
 	
-	/*DMA·¢ËÍÍê³ÉÖÐ¶Ï*/
+	/*DMAï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½*/
 	  nvic.NVIC_IRQChannel = DMA1_Stream3_IRQn;
-    nvic.NVIC_IRQChannelPreemptionPriority = 0;//ÇÀÕ¼ÓÅÏÈ¼¶
-    nvic.NVIC_IRQChannelSubPriority = 7;//×ÓÓÅÏÈ¼¶
-    nvic.NVIC_IRQChannelCmd = ENABLE;//IRQÍ¨µÀÊ¹ÄÜ 
-    NVIC_Init(&nvic);//¸ù¾ÝÖ¸¶¨µÄ²ÎÊý³õÊ¼»¯VIC¼Ä´æÆ÷
+    nvic.NVIC_IRQChannelPreemptionPriority = 0;//ï¿½ï¿½Õ¼ï¿½ï¿½ï¿½È¼ï¿½
+    nvic.NVIC_IRQChannelSubPriority = 7;//ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½
+    nvic.NVIC_IRQChannelCmd = ENABLE;//IRQÍ¨ï¿½ï¿½Ê¹ï¿½ï¿½ 
+    NVIC_Init(&nvic);//ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½VICï¿½Ä´ï¿½ï¿½ï¿½
     
 		USART_DeInit(USART3);
-    usart3.USART_BaudRate = 9600;//²¨ÌØÂÊ
-    usart3.USART_WordLength = USART_WordLength_8b;//×Ö³¤Îª8Î»Êý¾Ý¸ñÊ½
-    usart3.USART_StopBits = USART_StopBits_1;//Ò»¸öÍ£Ö¹Î»
-    usart3.USART_Parity = USART_Parity_No;//ÎÞÆæÅ¼Ð£ÑéÎ»
-    usart3.USART_Mode = USART_Mode_Tx|USART_Mode_Rx;//ÊÕ·¢Ä£Ê½
-    usart3.USART_HardwareFlowControl = USART_HardwareFlowControl_None;//ÎÞÓ²¼þÊý¾ÝÁ÷¿ØÖÆ
-    USART_Init(USART3,&usart3);//³õÊ¼»¯´®¿Ú
+    usart3.USART_BaudRate = USART3_BAUD;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    usart3.USART_WordLength = USART_WordLength_8b;//ï¿½Ö³ï¿½Îª8Î»ï¿½ï¿½ï¿½Ý¸ï¿½Ê½
+    usart3.USART_StopBits = USART_StopBits_1;//Ò»ï¿½ï¿½Í£Ö¹Î»
+    usart3.USART_Parity = USART_Parity_No;//ï¿½ï¿½ï¿½ï¿½Å¼Ð£ï¿½ï¿½Î»
+    usart3.USART_Mode = USART_Mode_Tx|USART_Mode_Rx;//ï¿½Õ·ï¿½Ä£Ê½
+    usart3.USART_HardwareFlowControl = USART_HardwareFlowControl_None;//ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    USART_Init(USART3,&usart3);//ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-    USART_ITConfig(USART3,USART_IT_IDLE,ENABLE);//Ê¹ÄÜ´®¿Ú¿ÕÏÐÖÐ¶Ï
+    USART_ITConfig(USART3,USART_IT_IDLE,ENABLE);//Ê¹ï¿½Ü´ï¿½ï¿½Ú¿ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½
 	  USART_DMACmd(USART3,USART_DMAReq_Rx,ENABLE);
 	  USART_DMACmd(USART3,USART_DMAReq_Tx,ENABLE);
 	
-    USART_Cmd(USART3,ENABLE);//Ê¹ÄÜ´®¿Ú
+    USART_Cmd(USART3,ENABLE);//Ê¹ï¿½Ü´ï¿½ï¿½ï¿½
 	//Rx
 	  DMA_DeInit(DMA1_Stream1);
-    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;//ÍâÉèµØÖ·
-    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);//ÄÚ´æµØÖ·
+    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;//ï¿½ï¿½ï¿½ï¿½ï¿½Ö·
+    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);//ï¿½Ú´ï¿½ï¿½Ö·
     DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
-    DMA_InitStructure.DMA_DIR                = DMA_DIR_PeripheralToMemory;//DMA´«ÊäÎªµ¥Ïò
-    DMA_InitStructure.DMA_BufferSize         = USART3_RXDMA_LEN;//ÉèÖÃDMAÔÚ´«ÊäÇøµÄ³¤¶È
+    DMA_InitStructure.DMA_DIR                = DMA_DIR_PeripheralToMemory;//DMAï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½
+    DMA_InitStructure.DMA_BufferSize         = USART3_RXDMA_LEN;//ï¿½ï¿½ï¿½ï¿½DMAï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä³ï¿½ï¿½ï¿½
     DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
     DMA_InitStructure.DMA_MemoryInc          = DMA_MemoryInc_Enable;
     DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
@@ -75,16 +86,22 @@ void USART3_Configuration(void)
     DMA_InitStructure.DMA_FIFOThreshold      = DMA_FIFOThreshold_Full;
     DMA_InitStructure.DMA_MemoryBurst        = DMA_MemoryBurst_Single;
     DMA_InitStructure.DMA_PeripheralBurst    = DMA_PeripheralBurst_Single;
+    /* Overrides the Memory0BaseAddr = NULL set above. The RX stream had no
+     * destination address AND was never enabled, so UA3RxDMAbuf was always
+     * empty and every byte the long-range module sent was lost. Mirrors the
+     * working UART5 RX setup (BSP/usart5.c:84,100). */
+    DMA_InitStructure.DMA_Memory0BaseAddr    = (uint32_t)UA3RxDMAbuf;
     DMA_Init(DMA1_Stream1,&DMA_InitStructure);
-	
+    DMA_Cmd(DMA1_Stream1,ENABLE);
+
 	//Tx
 
 	  DMA_DeInit(DMA1_Stream3);
-    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;               //ÍâÉèµØÖ·
+    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;               //ï¿½ï¿½ï¿½ï¿½ï¿½Ö·
     DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);
     DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
-    DMA_InitStructure.DMA_DIR                = DMA_DIR_MemoryToPeripheral;  //DMA´«ÊäÎªµ¥Ïò
-    DMA_InitStructure.DMA_BufferSize         = NULL;            //ÉèÖÃDMAÔÚ´«ÊäÇøµÄ³¤¶È
+    DMA_InitStructure.DMA_DIR                = DMA_DIR_MemoryToPeripheral;  //DMAï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½
+    DMA_InitStructure.DMA_BufferSize         = NULL;            //ï¿½ï¿½ï¿½ï¿½DMAï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä³ï¿½ï¿½ï¿½
     DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
     DMA_InitStructure.DMA_MemoryInc          = DMA_MemoryInc_Enable;
     DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
@@ -97,7 +114,7 @@ void USART3_Configuration(void)
     DMA_InitStructure.DMA_PeripheralBurst    = DMA_PeripheralBurst_Single;
     DMA_Init(DMA1_Stream3,&DMA_InitStructure);
 
-    DMA_ITConfig(DMA1_Stream3,DMA_IT_TC,ENABLE);//·¢ËÍÖÐ¶ÏÊ¹ÄÜ
+    DMA_ITConfig(DMA1_Stream3,DMA_IT_TC,ENABLE);//ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½Ê¹ï¿½ï¿½
 		
     DMA_Cmd(DMA1_Stream3,DISABLE);
 }
@@ -105,11 +122,11 @@ void USART3_Configuration(void)
 
 //	//Rx
 //	  DMA_DeInit(DMA1_Stream1);
-//    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;//ÍâÉèµØÖ·
-//    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);//ÄÚ´æµØÖ·
+//    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;//ï¿½ï¿½ï¿½ï¿½ï¿½Ö·
+//    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);//ï¿½Ú´ï¿½ï¿½Ö·
 //    DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
-//    DMA_InitStructure.DMA_DIR                = DMA_DIR_PeripheralToMemory;//DMA´«ÊäÎªµ¥Ïò
-//    DMA_InitStructure.DMA_BufferSize         = NULL;//ÉèÖÃDMAÔÚ´«ÊäÇøµÄ³¤¶È
+//    DMA_InitStructure.DMA_DIR                = DMA_DIR_PeripheralToMemory;//DMAï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½
+//    DMA_InitStructure.DMA_BufferSize         = NULL;//ï¿½ï¿½ï¿½ï¿½DMAï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä³ï¿½ï¿½ï¿½
 //    DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
 //    DMA_InitStructure.DMA_MemoryInc          = DMA_MemoryInc_Enable;
 //    DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
@@ -125,11 +142,11 @@ void USART3_Configuration(void)
 //	//Tx
 //		DMA_InitTypeDef		dma;
 //	  DMA_DeInit(DMA1_Stream3);
-//    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;               //ÍâÉèµØÖ·
+//    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;               //ï¿½ï¿½ï¿½ï¿½ï¿½Ö·
 //    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);
 //    DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
-//    DMA_InitStructure.DMA_DIR                = DMA_DIR_MemoryToPeripheral;  //DMA´«ÊäÎªµ¥Ïò
-//    DMA_InitStructure.DMA_BufferSize         = NULL;            //ÉèÖÃDMAÔÚ´«ÊäÇøµÄ³¤¶È
+//    DMA_InitStructure.DMA_DIR                = DMA_DIR_MemoryToPeripheral;  //DMAï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½
+//    DMA_InitStructure.DMA_BufferSize         = NULL;            //ï¿½ï¿½ï¿½ï¿½DMAï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä³ï¿½ï¿½ï¿½
 //    DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
 //    DMA_InitStructure.DMA_MemoryInc          = DMA_MemoryInc_Enable;
 //    DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
@@ -146,5 +163,43 @@ void USART3_Configuration(void)
 //		DMA_Init(DMA1_Stream3, &dma);
 //		//DMA_ITConfig(DMA1_Stream1,DMA_IT_TC,ENABLE);
 //    DMA_Cmd(DMA1_Stream3,DISABLE);
-//		//DMA_Cmd(DMA1_Stream1,ENABLE);//ÏÈ½ûÓÃ£¬ÓÃ²»µ½
+//		//DMA_Cmd(DMA1_Stream1,ENABLE);//ï¿½È½ï¿½ï¿½Ã£ï¿½ï¿½Ã²ï¿½ï¿½ï¿½
 
+
+
+/* ---- 0x09 subscribe data stream (API/subscribe.c) -----------------------
+ * Shares DMA1_Stream3 with usart3_send(). Only one of them may drive the
+ * stream at a time; Subscribe_StreamOwnsUsart3() is what stands usart3_send()
+ * down while a subscription is running.
+ *
+ * Deliberately skip-if-busy rather than wait-if-busy. The busy-wait this file
+ * used to contain is exactly what pinned Send_Task to 60 Hz (16 B at 9600 baud
+ * = 16.7 ms of blocking per cycle); at a 1 kB frame the same pattern would
+ * block for ~89 ms at 115200 and stall the whole telemetry task. A skipped
+ * frame costs one sequence number, which the host can see and count. */
+uint8_t Usart3_Stream_Busy(void)
+{
+    return (DMA_GetCurrDataCounter(DMA1_Stream3) != 0U) ? 1U : 0U;
+}
+
+uint8_t Usart3_Stream_TxSend(const uint8_t* buf, uint16_t len)
+{
+    if ((buf == 0) || (len == 0U))
+    {
+        return 0U;
+    }
+    if (DMA_GetCurrDataCounter(DMA1_Stream3) != 0U)
+    {
+        return 0U;                    /* previous frame still draining */
+    }
+    DMA_Cmd(DMA1_Stream3, DISABLE);
+    while (DMA_GetCmdStatus(DMA1_Stream3) == ENABLE);
+    /* Clear HTIF3/FEIF3 as well as TCIF3. The legacy path clears only TCIF3,
+     * which leaves the other flags latched in LISR forever. */
+    DMA_ClearFlag(DMA1_Stream3, DMA_FLAG_TCIF3 | DMA_FLAG_HTIF3 | DMA_FLAG_TEIF3
+                              | DMA_FLAG_DMEIF3 | DMA_FLAG_FEIF3);
+    DMA1_Stream3->M0AR = (uint32_t)buf;
+    DMA1_Stream3->NDTR = len;
+    DMA_Cmd(DMA1_Stream3, ENABLE);
+    return 1U;
+}

@@ -118,7 +118,27 @@ void USART3_IRQHandler(void)
 	{
 		Clear_IT = USART3->SR;
 		Clear_IT = USART3->DR;//先读SR后读DR清楚中断标志位
-		
+
+		/* Drain the RX DMA ring into UA3RxMailbox. Previously this handler cleared
+		 * the IDLE flag and discarded the byte, so the long-range module's RX line
+		 * was dead in firmware even though the pin and peripheral were configured
+		 * for it. Instrumentation only -- NO command dispatch is wired here yet,
+		 * deliberately: USART3 is a radio link and adding a 0xCC 0xDD parser would
+		 * create a command-injection path. Mirrors UART5_IRQHandler below. */
+		/* USART_Receive is defined further down this file (no header prototype),
+		 * so it needs forward-declaring here. */
+		extern USHORT16 USART_Receive(USART_RX_TypeDef* USARTx);
+		extern USART_RX_TypeDef USART3_Rcr;
+		extern volatile uint32_t UA3RxFrameCnt;
+		extern volatile uint16_t UA3RxLastLen;
+		{
+			uint16_t rx_len = USART_Receive(&USART3_Rcr);
+			if(rx_len > 0)
+			{
+				UA3RxLastLen = rx_len;
+				UA3RxFrameCnt++;
+			}
+		}
 	}
 }
 /***********************************************************************************

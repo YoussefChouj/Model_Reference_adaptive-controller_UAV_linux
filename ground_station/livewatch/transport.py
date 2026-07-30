@@ -44,6 +44,70 @@ if TYPE_CHECKING:
     from .reader import Plan
 
 
+# Subscription data frames: 0x09 + slot, one per slot. They use a CRC16-CCITT
+# trailer where the control-plane frames use a single XOR byte.
+STREAM_DATA_FRAMES = frozenset(range(0x09, 0x0D))
+
+
+def crc16_ccitt(data: bytes) -> int:
+    """XModem parameters: poly 0x1021, init 0x0000, no reflection, no final XOR.
+
+    Same as Frame C's checksum and ``Crc16Ccitt`` in ``API/subscribe.c``.
+    """
+    crc = 0
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return crc
+
+
+def pop_frame(rx: bytearray) -> tuple[int, int, bytes] | None:
+    """Pop one complete ``0xAA 0xBB`` frame off ``rx``, consuming its bytes.
+
+    Returns ``(frame_type, byte5, payload)`` or ``None`` when no whole frame is
+    buffered yet. ``byte5`` is the envelope's sixth byte, whose meaning is
+    per-frame: tuple count for 0x07, range count for 0x08, sequence number for
+    0x09. Frames whose CRC fails are dropped and the scan continues, so a
+    corrupted frame costs one frame rather than resynchronising the stream.
+
+    Module-level (not a method) because the 0x21 streaming path in
+    ``stream.py`` decodes the same envelope from a different serial port.
+    """
+    while True:
+        sync = rx.find(b"\xAA\xBB")
+        if sync < 0:
+            if len(rx) > 1:
+                del rx[:-1]
+            return None
+        if sync:
+            del rx[:sync]
+        if len(rx) < 6:
+            return None
+        frame_type = rx[2]
+        length = (rx[3] << 8) | rx[4]
+        crc16_framed = frame_type == 0x06 or frame_type in STREAM_DATA_FRAMES
+        total = 6 + length + (2 if crc16_framed else 1)
+        if len(rx) < total:
+            return None
+        raw = bytes(rx[:total])
+        del rx[:total]
+        if frame_type == 0x06:
+            continue  # Frame C is decoded by serial_bridge, not here
+        if crc16_framed:
+            # Subscription data frames carry CRC16-CCITT: they ARE the recorded
+            # dataset, and an XOR checksum cannot see a byte transposition.
+            if crc16_ccitt(raw[2:-2]) != int.from_bytes(raw[-2:], "big"):
+                continue
+            return frame_type, raw[5], raw[6:-2]
+        crc = 0
+        for byte in raw[2:-1]:
+            crc ^= byte
+        if crc != raw[-1]:
+            continue
+        return frame_type, raw[5], raw[6:-1]
+
+
 class LiveTransportError(RuntimeError):
     """A transport could not establish or complete a livewatch read."""
 
@@ -273,32 +337,7 @@ class Uart5LongRange(LiveTransport):
         raise LiveTransportError(f"uart5-read: no reply on {purpose}")
 
     def _pop_frame(self) -> tuple[int, int, bytes] | None:
-        while True:
-            sync = self._rx.find(b"\xAA\xBB")
-            if sync < 0:
-                if len(self._rx) > 1:
-                    del self._rx[:-1]
-                return None
-            if sync:
-                del self._rx[:sync]
-            if len(self._rx) < 6:
-                return None
-            frame_type = self._rx[2]
-            length = (self._rx[3] << 8) | self._rx[4]
-            trailer = 2 if frame_type == 0x06 else 1
-            total = 6 + length + trailer
-            if len(self._rx) < total:
-                return None
-            raw = bytes(self._rx[:total])
-            del self._rx[:total]
-            if trailer != 1:
-                continue
-            crc = 0
-            for byte in raw[2:-1]:
-                crc ^= byte
-            if crc != raw[-1]:
-                continue
-            return frame_type, raw[5], raw[6:-1]
+        return pop_frame(self._rx)
 
     @staticmethod
     def _decode_tuples(payload: bytes, count: int) -> dict[tuple[int, int], bytes]:

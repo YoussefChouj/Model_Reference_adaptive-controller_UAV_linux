@@ -87,3 +87,16 @@ manifests:
     hz: 5
     vars:
       - group:health
+
+  pendulum:
+    doc: "Bifilar/compound pendulum inertia test. Gyro triad for the period, attitude
+      to catch sway and rock contaminating the torsional mode. Drone hangs on lines,
+      disarmed, no tether."
+    hz: 50
+    vars:
+      - Gyro_X_Real
+      - Gyro_Y_Real
+      - Gyro_Z_Real
+      - imu_data.rol
+      - imu_data.pit
+      - imu_data.yaw

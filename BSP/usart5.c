@@ -1,9 +1,10 @@
 #include "usart5.h"
+#include "subscribe.h"   /* SUBSCRIBE_CMD / SUBSCRIBE_STREAM_CMD payload shapes */
 
 /**
  * @module  usart5.c
  * @subsystem  comm
- * @depends  usart5.h
+ * @depends  usart5.h, subscribe.h
  * @owns  UART5 DMA setup and UART5 ground-station command ingress
  * @caution  command frame parsing must stay byte-compatible with host serializer and UART4 ingress path
  */
@@ -180,12 +181,31 @@ void Handle_UART5_GroundStation_Command(void)
 			//   +6 .. +6+LEN-1  payload tuples (each 6 B)
 			//   +6+LEN         CRC8 XOR
 			// Minimum frame is 7 B (zero tuples: 6 header + 0 payload + 1 CRC).
+			uint8_t  sub_cmd = UA5RxMailbox[offset + 2U];
 			uint16_t len_hi = UA5RxMailbox[offset + 3U];
 			uint16_t len_lo = UA5RxMailbox[offset + 4U];
 			uint16_t payload_len = (uint16_t)((len_hi << 8) | len_lo);
+			uint8_t  len_ok;
 			// Reject malformed frames early: total in mailbox must cover header + payload + 1 CRC.
-			// Payload must be a multiple of 6 (4-byte address + 2-byte size per tuple).
-			if ((payload_len % 6U) != 0U ||
+			// Two commands share the 0xCC 0xDE prefix and differ in payload shape:
+			//   0x20 one-shot read   payload = N * 6   (address LE32 + size LE16)
+			//   0x21 stream subscribe payload = 2 + N * 8 (divider, transport, then
+			//                                             address LE32 + size LE16 + count LE16)
+			// Anything else is not a frame we own; skip a byte and resync.
+			if (sub_cmd == SUBSCRIBE_STREAM_CMD)
+			{
+				// 0x21 payload = 3 config bytes (divider, transport, slot) + N * 8.
+				len_ok = ((payload_len >= 3U) && (((payload_len - 3U) % 8U) == 0U)) ? 1U : 0U;
+			}
+			else if (sub_cmd == SUBSCRIBE_CMD)
+			{
+				len_ok = ((payload_len % 6U) == 0U) ? 1U : 0U;
+			}
+			else
+			{
+				len_ok = 0U;
+			}
+			if ((len_ok == 0U) ||
 			    payload_len > (USART5_SUBSCRIBE_RX_LEN - 7U))
 			{
 				offset += 1U;
