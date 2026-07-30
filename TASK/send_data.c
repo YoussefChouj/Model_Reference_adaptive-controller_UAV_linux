@@ -395,6 +395,25 @@ void Send_Groundstation_Telemetry_UART4(void)
      * clobber the framing. Stays 0 for single-frame buffers (B / ID / bench / OF). */
     uint8_t frame_self_crc = 0;
 
+    /* Wait for the PREVIOUS UART5 transfer to drain BEFORE touching the buffer.
+     *
+     * DMA1_Stream7 reads Buf_Telemetry_UART4 asynchronously, so every write below
+     * lands in memory the hardware may still be transmitting. The drain-wait used to
+     * sit next to the DMA re-arm at the bottom of this function, ~580 lines after the
+     * first write here -- which is far too late to protect the buffer.
+     *
+     * Frame A (48 B) and the A+C burst (102 B) drain in 4-9 ms, inside the ~18 ms task
+     * period, so they were never hurt. Frame B is 305 B = 26.5 ms at 115200: still in
+     * flight when the next tick arrives. That tick rebuilt the buffer underneath it, so
+     * the DMA transmitted Frame B's head followed by the NEW frame's bytes, then sent
+     * that new frame again in full. Measured on the wire 2026-07-29: 33 of 34 Frame B
+     * were 407 bytes instead of 305 -- exactly 305 + 102 -- and 33/34 failed CRC, which
+     * is why the PID/position panels showed zeros and occasional absurd floats.
+     *
+     * Waiting here costs nothing when the previous frame has already drained (the common
+     * case) and simply paces this task to the link when it has not. */
+    while (DMA_GetCurrDataCounter(DMA1_Stream7));
+
     Buf_Telemetry_UART4[0] = 0xAA;
     Buf_Telemetry_UART4[1] = 0xBB;
 
