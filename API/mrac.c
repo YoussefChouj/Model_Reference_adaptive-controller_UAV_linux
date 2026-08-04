@@ -361,7 +361,10 @@ void MRAC_Init(void)
     mrac_config_pitch.ref_model_bw = 44.0f;  // SysID 2026-06-18: closed-loop -3dB BW ~44 rad/s (plant
                                              // K~185, lag pole ~2.6Hz, delay ~12ms; rel-degree 2). Use 2nd-order ref.
     mrac_config_pitch.ref_model_zeta = 0.8f; // 2nd-order model damping
-    mrac_config_pitch.omega_u = 30.0f; // ~5Hz LPF for performance recovery
+    mrac_config_pitch.omega_u = 4.0f; // perf-recovery LPF on u_ad. Set from the identified lag
+                                      // pole: docs/sysid_results.md pitch p = 16-18 rad/s, so
+                                      // p/4 ~ 4.0. Was 30 rad/s, which sits ABOVE the plant's own
+                                      // corner and is therefore inert as a robustness device.
     mrac_config_pitch.u_max = 6.73863f; // U_MAX_PITCH
     mrac_config_pitch.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_PR;
     mrac_config_pitch.sigma_lf = 0.8f;
@@ -377,7 +380,9 @@ void MRAC_Init(void)
     mrac_config_roll.ref_model_bw = 44.0f;  // SysID 2026-06-18: closed-loop -3dB BW ~44.1 rad/s, repeatable
                                             // <0.3% (multisine x7 + chirp; K~165, pole ~3.2Hz, delay ~15ms; rel-deg 2). 2nd-order ref.
     mrac_config_roll.ref_model_zeta = 0.8f;
-    mrac_config_roll.omega_u = 30.0f;
+    mrac_config_roll.omega_u = 5.0f; // p/4 from docs/sysid_results.md roll p = 19.8 rad/s
+                                     // (7 runs, <0.3% spread). Phase lag of pole+delay at this
+                                     // cutoff is -18.5 deg; at the old 30 rad/s it was -82 deg.
     mrac_config_roll.u_max = 6.73863f; // U_MAX_ROLL
     mrac_config_roll.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_PR;
     mrac_config_roll.sigma_lf = 0.8f;
@@ -395,7 +400,11 @@ void MRAC_Init(void)
                                             // (per-axis type, see ADR-0005). 30 rad/s unvalidated; needs a yaw
                                             // closed-loop BW measurement (yaw is the slow axis) before injection.
     mrac_config_yaw.ref_model_zeta = 0.8f;
-    mrac_config_yaw.omega_u = 20.0f; // Slower LPF for yaw
+    mrac_config_yaw.omega_u = 4.0f; // Yaw's "no lag pole" (docs/sysid_results.md) only means no
+                                    // pole below the 2.2 Hz coherent band; the same motors/ESCs/
+                                    // gyro filter that give roll p = 19.8 rad/s act here too, and
+                                    // yaw authority K ~ 37 is ~5x weaker. So bound it no higher
+                                    // than roll's. Was 20 rad/s, copied from roll's old number.
     mrac_config_yaw.u_max = 2.027f; // U_MAX_YAW
     mrac_config_yaw.mrac_to_mixer = DEFAULT_MRAC_TO_MIXER_YAW;
     mrac_config_yaw.sigma_lf = 1.0f;
