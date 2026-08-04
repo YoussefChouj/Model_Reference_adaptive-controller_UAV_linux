@@ -343,11 +343,136 @@ void send_to_linux(void)    //����4
  * Affects only what is written to the USART3 radio, which carries no control
  * function: no s_ekf writes, no PID state, no arming/motor effect. UART5
  * telemetry and the EKF step are untouched. */
+/* --- 2026-07-31, NEW BLE RADIO: the binding constraint moved off the UART -------
+ * The 24RF pair above is retired. The replacement BLE module runs 921600 on both
+ * ends (BSP/usart3.h), so the wire now carries 92160 B/s and the DMA-busy reasoning
+ * above no longer bites: 63 floats = 256 B clocks out in 2.8 ms, well inside the
+ * 10 ms tick.
+ *
+ * But the AIR link does not keep up. Measured 2026-07-31 with 63 floats at 100 Hz
+ * (25600 B/s offered): only ~4700 B/s arrives, and framing never survives. The bytes
+ * that do arrive are BIT-PERFECT -- the full 59-float ramp was recovered verbatim,
+ * 92.5% of received words were ramp values, 256 distinct byte values -- so this is
+ * NOT corruption. It is overflow: three consecutive captures at the same settings
+ * gave a complete 59-float run, then zero, then two tails, which is what a module
+ * dropping whatever it cannot carry looks like. The seller's "45 KB/s" air figure is
+ * not what this pair delivers; ~4.7 kB/s is.
+ *
+ * CAPACITY IS NOT YET MEASURED, and neither number above is a measurement of it:
+ * 36 B frames delivered 2888 B/s at 0.000% loss, but that is all the source OFFERED,
+ * so it is only a lower bound; the ~4700 B/s came from deep overflow, where a module
+ * discarding partial frames delivers LESS than it can carry, so that understates it.
+ * The truth is somewhere in 2.9..20.5 kB/s and only intermediate loads separate them.
+ *
+ * Hence the LADDER: rather than one reflash per data point, the frame size steps
+ * automatically through the rungs below, holding each for USART3_TEST_STEP_FRAMES so
+ * the host sees a long clean stretch at every offered rate. One flash yields the whole
+ * degradation curve. The top rung offers ~72 kB/s -- 1.6x the seller's 45 KB/s claim --
+ * so the curve brackets that figure from ABOVE instead of assuming it.
+ *
+ * FIRST SWEEP DONE 2026-07-31 -- the coarse ladder {8,16,24,32,48,64,96,128,160,192,
+ * 224} spanning 2.9..72 kB/s answered the headline question: the seller's 45 KB/s air
+ * figure is fiction for this pair. Measured, at the 80.2 Hz cadence:
+ *      8 floats  2887 B/s offered -> 2887 delivered, 0.00% loss, 100% intact
+ *     16 floats  5454 offered     -> 4227 delivered, 17.87% loss, 94.3% intact
+ *     24 floats  8020 offered     -> 2059 delivered, 59.24% loss
+ *     32 floats 10586 offered     ->  235 delivered, 80.57% loss
+ *     >=64 floats                 -> nothing survives at all
+ * Note the SHAPE: past 16 floats, offering more DELIVERS LESS -- congestion collapse,
+ * the module burning airtime on fragments. Capacity is ~4.2 kB/s, ~9% of the claim.
+ * The limit is the module's BLE connection parameters (interval / packets per event),
+ * which its Windows tool cannot change -- it exposes only baud, TX power and pairing.
+ *
+ * SECOND SWEEP pinned the knee: 12 floats = 52 B at 80.2 Hz = 4170 B/s, 0.00% loss over
+ * 960 frames. 14 floats -> 7.85%, 16 -> 14.71%, 20 -> 42.38%.
+ *
+ * THIRD SWEEP (this one) -- BYTE-rate limited or PACKET-rate limited?
+ * Every rung so far ran at the same 80.2 Hz and varied only frame size, so the two are
+ * still confounded. This matters for real use: telemetry does NOT need to be real time,
+ * so if the cap is bytes/s we can trade cadence for width and log far more variables
+ * at once (variables ~ capacity / rate):
+ *     80.2 Hz ->  52 B ->  12 floats      10 Hz -> 416 B -> 103 floats
+ *     20   Hz -> 208 B ->  51 floats       5 Hz -> 832 B -> 207 floats
+ * That trade only holds if a big slow frame survives as well as a small fast one.
+ *
+ * So this ladder is ISO-BYTE-RATE: frame size and cadence move inversely, holding the
+ * offered rate at the known-good 4170 B/s. A divider of N means "emit on every Nth
+ * Send_Task tick".
+ *     floats div    Hz     frame B   offered B/s
+ *        12   1   80.2        52        4170     <- known good, the control
+ *        25   2   40.1       104        4170
+ *        51   4   20.05      208        4170
+ *       103   8   10.03      416        4173
+ *       207  16    5.01      832        4170
+ * Then the same three big frames at DOUBLE the rate, to see whether a lower packet rate
+ * buys headroom above 4170 (it would, if the cap is packets per connection event):
+ *        51   2   40.1       208        8341
+ *       103   4   20.05      416        8341
+ *       207   8   10.03      832        8345
+ *
+ * Reading it:
+ *   all five iso-rate rungs clean            -> BYTE-limited; trade cadence for width freely
+ *   big ones fail while 12/1 stays clean     -> per-frame size limit (BLE fragmentation)
+ *   the doubled-rate rungs also come through -> PACKET-limited; big+slow beats small+fast
+ *
+ * The DMA-busy guard is not binding: at 913043 baud even the 832 B frame clocks out in
+ * 9.11 ms against the 12.47 ms tick. It would only bite past ~1100 B, where transfers
+ * straddle the tick and halve the rate -- which would look like radio loss and be a
+ * measurement artifact.
+ *
+ * float[1]=floats and float[2]=divider label each rung, because two rungs share the same
+ * frame size and only the cadence differs. Loss must be read from consecutive float[0]
+ * deltas WITHIN one contiguous rung, never max-min and never across rungs.
+ *
+ * FOURTH SWEEP (this one) -- where is the new byte ceiling?
+ * `AT+AINTVL=20` sent to the dongle (seller's command, button held, USB power cycle)
+ * KILLED the per-frame size limit: the iso-rate ladder above went from 0.81/9.09/25.86/
+ * 22.96/34.29 % loss to 0.00 % on all five rungs, 832 B frames included. Frame size no
+ * longer matters, so cadence can be traded for width -- 207 floats at 5 Hz is lossless.
+ *
+ * What did NOT move is the byte ceiling: 8341 B/s still collapses (37.84/62.31/89.47 %).
+ * So the cap is now a clean BYTE RATE somewhere in 4170..8341, and the only two rates
+ * ever offered were those endpoints. This ladder fills the gap by holding cadence at a
+ * constant 20.05 Hz (divider 4) and stepping frame size, so offered rate is the ONLY
+ * variable:
+ *     floats  frame B   offered B/s        floats  frame B   offered B/s
+ *        51     208        4170               77     312        6256
+ *        58     236        4732               83     336        6737
+ *        64     260        5213               90     364        7300
+ *        70     284        5694              103     416        8341
+ *
+ * All dividers are 4 here, so float[2] is constant and float[1] alone labels the rung --
+ * every frame size in the ladder is distinct. At 913043 baud the largest frame (416 B)
+ * clocks out in 4.56 ms against a 12.47 ms tick, so the DMA guard cannot bind.
+ *
+ * Result: clean to 6256 B/s (312 B @ 20.05 Hz, 0.00%), 6.12% at 6737, collapse above.
+ *
+ * FIFTH SWEEP (this one) -- push to the wire limit and see where it actually dies.
+ * Target asked for: ~90 kB/s. Two hard walls sit below that, so this ladder is really a
+ * measurement of how far short the radio falls and where:
+ *   1. THE UART. At 913043 baud 8N1 = 10 bits/byte, the wire carries 91304 B/s at 100%
+ *      utilisation. 90 kB/s (92160 B/s) is ABOVE that -- unreachable at this baud no
+ *      matter how good the radio is. The top rung below sits at 98.7% of the wire.
+ *   2. THE TICK. Send_Task runs at 80.2 Hz (12.47 ms). A 1124 B frame clocks out in
+ *      12.31 ms -- 160 us of margin. If a transfer straddles the tick the DMA guard
+ *      skips the next emission and the cadence HALVES. That is a measurement artifact,
+ *      not radio loss, so the host must measure actual Hz from arrival times rather
+ *      than assume 80.2/divider.
+ * All dividers are 1 (every tick), so only frame size varies:
+ *     floats  frame B   offered B/s        floats  frame B   offered B/s
+ *        18      76        6095              120     484       38817
+ *        30     124        9945              170     684       54857
+ *        50     204       16361              220     884       70897
+ *        80     324       25985              280    1124       90145
+ */
 #define USART3_THROUGHPUT_TEST   1
-#define USART3_TEST_FLOATS       63
+#define USART3_TEST_FLOAT_LADDER { 18, 30, 50, 80, 120, 170, 220, 280 }
+#define USART3_TEST_DIV_LADDER   {  1,  1,  1,  1,   1,   1,   1,   1 }
+#define USART3_TEST_MAX_FLOATS   280
+#define USART3_TEST_STEP_TICKS   560    /* ~7 s per rung at 80.2 Hz, regardless of divider */
 
 #if USART3_THROUGHPUT_TEST
-#define USART3_TX_LEN            (USART3_TEST_FLOATS * 4 + 4)   /* 96 */
+#define USART3_TX_LEN            (USART3_TEST_MAX_FLOATS * 4 + 4)   /* 900 */
 #else
 #define USART3_TX_LEN            16
 #endif
@@ -359,6 +484,11 @@ void usart3_send(void)
 	 * later calls while the ~16.7 ms transfer was still in flight, so the radio
 	 * transmitted partly-corrupted floats. */
 	static UCHAR8 str_USART[USART3_TX_LEN];
+
+	/* The throughput ladder varies the frame length at runtime, so the DMA transfer
+	 * count can no longer be the compile-time USART3_TX_LEN -- that is now only the
+	 * buffer's maximum size, not the length of any particular frame. */
+	USHORT16 tx_len = USART3_TX_LEN;
 
 	/* A 0x09 subscribe stream routed to USART3 owns DMA1_Stream3. Both this
 	 * function and Subscribe_StreamTick() arm that stream from their own
@@ -378,28 +508,56 @@ void usart3_send(void)
 
 #if USART3_THROUGHPUT_TEST
 	{
-		static FP32 seq = 0.0f;   /* exact in float to 2^24 frames = 46 h at 100 Hz */
+		static const USHORT16 f_ladder[] = USART3_TEST_FLOAT_LADDER;
+		static const UCHAR8   d_ladder[] = USART3_TEST_DIV_LADDER;
+		static FP32     seq   = 0.0f; /* exact in float to 2^24 frames = 46 h at 100 Hz */
+		static UCHAR8   rung  = 0;    /* index into the two ladders */
+		static USHORT16 ticks = 0;    /* Send_Task ticks spent at this rung */
+		static UCHAR8   phase = 0;    /* tick counter within the divider */
+		USHORT16 nfloats;
+		UCHAR8   divider;
 		FP32 v;
 		int  i;
 
-		seq += 1.0f;
-		for(i = 0; i < USART3_TEST_FLOATS; i++)
+		/* Rung advances on TICKS, not on frames emitted: a divider of 16 emits 16x
+		 * fewer frames, so a frame-based hold would leave the slow rungs running 16x
+		 * longer and skew the capture. */
+		if(++ticks >= USART3_TEST_STEP_TICKS)
 		{
-			if     (i == 0) v = seq;            /* host counts gaps in this */
-			else if(i == 1) v = imu_data.rol;   /* keep some real signal so the */
-			else if(i == 2) v = imu_data.pit;   /* frame is still plausible to eyeball */
-			else if(i == 3) v = imu_data.yaw;
-			else            v = (FP32)i;        /* fixed pattern: any corruption shows */
+			ticks = 0;
+			phase = 0;
+			rung++;
+			if(rung >= (UCHAR8)(sizeof(d_ladder) / sizeof(d_ladder[0]))) rung = 0;
+		}
+
+		nfloats = f_ladder[rung];
+		divider = d_ladder[rung];
+
+		/* Emit on every Nth tick. Returning here leaves the previous frame's buffer
+		 * untouched, which is safe: the DMA finished it long ago (worst case 9.11 ms
+		 * against a 12.47 ms tick) and we are not re-arming the stream. */
+		if(++phase < divider) return;
+		phase = 0;
+
+		tx_len = (USHORT16)(nfloats * 4U + 4U);
+
+		seq += 1.0f;
+		for(i = 0; i < (int)nfloats; i++)
+		{
+			if     (i == 0) v = seq;              /* host counts gaps in this */
+			else if(i == 1) v = (FP32)nfloats;    /* labels the rung: size ... */
+			else if(i == 2) v = (FP32)divider;    /* ... and cadence, since sizes repeat */
+			else            v = (FP32)i;          /* fixed pattern: any corruption shows */
 
 			str_USART[i * 4 + 0] = BYTE0(v);
 			str_USART[i * 4 + 1] = BYTE1(v);
 			str_USART[i * 4 + 2] = BYTE2(v);
 			str_USART[i * 4 + 3] = BYTE3(v);
 		}
-		str_USART[USART3_TX_LEN - 4] = 0x00;
-		str_USART[USART3_TX_LEN - 3] = 0x00;
-		str_USART[USART3_TX_LEN - 2] = 0x80;
-		str_USART[USART3_TX_LEN - 1] = 0x7f;
+		str_USART[tx_len - 4] = 0x00;
+		str_USART[tx_len - 3] = 0x00;
+		str_USART[tx_len - 2] = 0x80;
+		str_USART[tx_len - 1] = 0x7f;
 	}
 #else
 	float angles[3] ;
@@ -436,7 +594,7 @@ void usart3_send(void)
     
   DMA_Cmd(DMA1_Stream3, DISABLE);				             //���õ�ǰ����ֵǰ�Ƚ���DMA
   DMA1_Stream3->M0AR = (uint32_t)&str_USART;  //���õ�ǰ�������ݻ���ַ:Memory0 tARget
-  DMA1_Stream3->NDTR = USART3_TX_LEN;   //���õ�ǰ���������ݵ�����:Number of Data units to be TRansferred
+  DMA1_Stream3->NDTR = tx_len;  //���õ�ǰ���������ݵ�����:Number of Data units to be TRansferred
   DMA_Cmd(DMA1_Stream3, ENABLE);		
                                         //����DMA���� 
                                         //����DMA���� 		
