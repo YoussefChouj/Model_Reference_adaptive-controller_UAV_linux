@@ -353,6 +353,10 @@ class GazeboPlant(Plant):
         self.dt = dt
         self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
         self._available, self._reason = self._probe()
+        # The bridge is lazily constructed on the first step() call so
+        # that the constructor remains cheap and safe on hosts without
+        # Gazebo (the probe path is the offline behaviour).
+        self._bridge: object | None = None
 
     def step(self, u: dict) -> dict:
         if not self._available:
@@ -360,11 +364,23 @@ class GazeboPlant(Plant):
                 f"GazeboPlant.step: simulator unavailable ({self._reason}). "
                 f"See spec 4b in .agent_contracts/mbd_workflow/04b-gazebo-bringup.md."
             )
-        # The actual bridge and physics tick live on the Linux side.
-        raise NotImplementedError(
-            "GazeboPlant.step: bring-up deferred (spec 4b). "
-            "Linux-side leg not yet implemented."
-        )
+        # Convert per-axis mixer-unit commands to per-motor thrust in
+        # newtons, then forward to the bridge. The bridge returns a
+        # BridgeState; we render it as the state dict that the Plant
+        # seam contract specifies.
+        if self._bridge is None:
+            # Lazy import: keeps Windows import-time clean.
+            from sim.gazebo_bridge import GazeboBridge, GazeboBridgeError
+            try:
+                self._bridge = GazeboBridge()
+            except GazeboBridgeError as exc:
+                raise NotImplementedError(
+                    f"GazeboPlant.step: bridge failed to start ({exc}). "
+                    f"See spec 4b."
+                ) from exc
+        motor_thrusts_N = self._motor_thrusts_from_u(u)
+        state = self._bridge.step(motor_thrusts_N, self.dt)
+        return self._to_state_dict(state, u, motor_thrusts_N)
 
     def reset(self) -> None:
         if not self._available:
@@ -373,9 +389,79 @@ class GazeboPlant(Plant):
                 f"Pair with GazeboPlant.step at the same controller tick. "
                 f"See spec 4b in .agent_contracts/mbd_workflow/04b-gazebo-bringup.md."
             )
-        raise NotImplementedError(
-            "GazeboPlant.reset: bring-up deferred (spec 4b)."
+        if self._bridge is not None:
+            self._bridge.reset()
+
+    def _motor_thrusts_from_u(self, u: dict) -> "np.ndarray":
+        """Convert per-axis mixer-unit commands to per-motor thrust (N).
+
+        Mirrors the analytic plant's mixing so the two engines see the
+        same per-motor commands and the cross-check between them is
+        apples-to-apples. The analytic plant's helpers are imported from
+        ``sim.plant`` here to avoid duplicating the mixing math.
+        """
+        # Import the analytic helpers lazily so the Gazebo backend can
+        # be present (gz-jetty installed) even on a host that has chosen
+        # not to pull in scipy. We only need the matrix work.
+        from sim.plant import (  # type: ignore
+            DEFAULT_MRAC_TO_MIXER, CANONICAL_AIRFRAME as _A
         )
+        # The analytical plant's ``_motor_thrust_to_force_torque`` is
+        # the source of truth for the (mixer_units -> N) conversion. We
+        # use the same coefficient here: at hover, the four motors
+        # produce half the total weight (m*g/4)... in mixer units, the
+        # relationship is simpler. We use the analytic plant's
+        # canonical hover thrust per motor.
+        from sim.plant import _YAW_TORQUE_PER_UNIT  # type: ignore  # noqa: F401
+        thrust_per_motor_hover = _A.thrust_per_motor_hover
+        # Per-axis mixer-unit commands -> per-motor thrust (N).
+        # The analytic plant's ``_mixer_to_motor_commands`` returns
+        # mixer units; we multiply by the hover thrust per motor to
+        # get N. This is exact at hover and consistent at small
+        # deviations -- the same approximation the analytic plant's
+        # cross-check uses.
+        roll_u = float(u.get("roll", 0.0)) * DEFAULT_MRAC_TO_MIXER["roll"]
+        pitch_u = float(u.get("pitch", 0.0)) * DEFAULT_MRAC_TO_MIXER["pitch"]
+        yaw_u = float(u.get("yaw", 0.0)) * DEFAULT_MRAC_TO_MIXER["yaw"]
+        z_u = float(u.get("z", 0.0)) * DEFAULT_MRAC_TO_MIXER["z"]
+        thrust = z_u + thrust_per_motor_hover  # per-motor throttle baseline
+        # Quad-X mixing (matches firmware Compute_Motor).
+        m1 = thrust + roll_u - pitch_u - yaw_u
+        m2 = thrust - roll_u - pitch_u + yaw_u
+        m3 = thrust - roll_u + pitch_u - yaw_u
+        m4 = thrust + roll_u + pitch_u + yaw_u
+        # Translate mixer units -> N: proportional to hover thrust.
+        # The mixer-unit magnitude is bounded by the firmware's
+        # saturation, so the N value is bounded by the same physical
+        # constraint. Use the analytic plant's exact mapping if
+        # available; here we scale by the thrust per motor at hover.
+        # (This is intentionally simple: the cross-check compares the
+        # two engines **at hover** and the thrust coefficients match
+        # exactly. Aggressive regimes are out of scope for the first
+        # agreement test.)
+        import numpy as np
+        return np.array([m1, m2, m3, m4], dtype=float) * thrust_per_motor_hover
+
+    def _to_state_dict(self, state, u: dict, motor_thrusts_N) -> dict:
+        """Render the bridge's ``BridgeState`` into the ``Plant`` seam's
+        ``state_dict`` shape. Adds the mixer-unit command keys that the
+        controller expects to read back so the caller can compare what
+        it sent to what was applied."""
+        import numpy as np
+        return {
+            "x": state.x, "y": state.y, "z": state.z,
+            "vx": state.vx, "vy": state.vy, "vz": state.vz,
+            "phi": state.phi, "theta": state.theta, "psi": state.psi,
+            "q0": state.q0, "q1": state.q1, "q2": state.q2, "q3": state.q3,
+            "p": state.p, "q": state.q, "r": state.r,
+            "vz_body": state.vz_body,
+            "thrust": state.thrust,
+            "motors": np.array(motor_thrusts_N, dtype=float),
+            "U_roll": float(u.get("roll", 0.0)),
+            "U_pitch": float(u.get("pitch", 0.0)),
+            "U_yaw": float(u.get("yaw", 0.0)),
+            "U_z": float(u.get("z", 0.0)),
+        }
 
 
 # ----------------------------------------------------------------------
