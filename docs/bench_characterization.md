@@ -83,6 +83,20 @@ keeps prop-wash off the scale pan (blowing down corrupts the reading with airflo
     (hysteresis) — each row records the `sweep` direction and `settle_s`, the seconds that
     operating point was held before you read the scale. Only **Log point** writes a row;
     start/stop and CCR steps do not. `thrust_N = (grams − tare) * 0.00981`.
+*   Set **`prop`** and **`motor tag`** before each block. `motor_id` is the ESC channel, not
+    the identity of the motor bolted to the stand, and a CSV mixing a CW and a CCW block with
+    no `prop` column cannot be separated afterwards.
+*   **The measure loop** is `GO` → wait for the scale to settle → `Log point` (auto-IDLEs)
+    → `CCR +` → `GO`. The slider is the **target** (the sweep point); what the motor is
+    actually given is the target *or* idle. IDLE therefore never loses your place, and the
+    `± CCR` buttons pre-set the next point while the motor is still cooling.
+*   **Thermal guard (on by default).** Dwell above CCR 3700 is budgeted (20 s); spending it
+    drops the motor to **idle**, not stop, and starts a 45 s rest. During a rest the
+    commanded CCR is pinned to idle, `GO` is refused, and STOP does not cancel it — but the
+    target is untouched, so one `GO` afterwards puts you back on the point. `RUN` also comes
+    up at idle rather than at whatever the slider was left showing. This exists because a
+    2026-07-29 sweep held one motor near full power for ~50 minutes (40 points at
+    CCR ≥ 3800) and burned it out.
 *   **RPM (ADR-0010):** TCRT5000 reflective module plugged into a spare TIM2 3-pin header
     (use PB3/PB10/PB11 — avoid the PA5 header until its rail voltage is verified ≤3.3 V or a
     10k series resistor is added), sensor looking **up at the blade roots from below**, one

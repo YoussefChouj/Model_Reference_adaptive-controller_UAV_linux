@@ -331,6 +331,14 @@ class Dashboard:
         self._bench_csv_path: Optional[Path] = None  # manual-point log (lazily created)
         self._bench_ccr_change_t: float = 0.0    # monotonic time of the last CCR change (settle_s)
         self._bench_sweep: str = ""              # "up"/"down" — direction of that change (hysteresis)
+        # Thermal guard. A 2026-07-29 sweep held one motor near full power for ~50 min
+        # (40 points at CCR>=3800, ~6 s apart) and burned it out. Dwell above BENCH_HOT_CCR
+        # is budgeted; spending the budget drops the motor to idle and starts a rest.
+        self._bench_hot_s: float = 0.0           # accumulated seconds above the hot threshold
+        self._bench_rest_until: float = 0.0      # monotonic deadline; 0 = not resting
+        self._bench_guard_t: float = 0.0         # last guard tick (for dt)
+        self._bench_idling: bool = False         # holding idle, sweep target preserved
+        self._bench_target: int = 2000           # the sweep point (slider), NOT what is commanded
 
         self._flight_logger = FlightLogger()
         self._log_lock = threading.Lock()       # serialize CSV writes across render + telemetry-rx threads
@@ -2228,7 +2236,32 @@ class Dashboard:
             dpg.add_checkbox(tag="bench_run", label="RUN motor  (untick = STOP)",
                              default_value=False)
             dpg.add_button(label="STOP", tag="bench_stop_btn", callback=lambda: self._bench_stop())
+            # IDLE keeps the motor turning just above the measured thrust onset (CCR0=2033,
+            # so 2150 makes ~20 g) — the prop still moves air over the motor, which STOP
+            # does not. It does NOT move the slider: the target survives, so GO returns to
+            # it in one click. Measure loop is GO -> settle -> Log point -> IDLE -> CCR+.
+            dpg.add_button(label="IDLE", tag="bench_idle_btn",
+                           callback=lambda: self._bench_go_idle("manual"))
+            dpg.add_button(label="GO (to target)", tag="bench_go_btn",
+                           callback=lambda: self._bench_resume())
+        dpg.add_checkbox(tag="bench_autoidle", label="auto-IDLE after Log point",
+                         default_value=True)
         dpg.add_text("test: OFF", tag="bench_status", color=(150, 150, 150, 255))
+        dpg.add_separator()
+        dpg.add_text("Thermal guard (a motor was lost to sustained high-CCR dwell on 2026-07-29)",
+                     color=(220, 140, 60, 255))
+        with dpg.group(horizontal=True):
+            dpg.add_checkbox(tag="bench_guard_on", label="enabled", default_value=True)
+            dpg.add_input_int(tag="bench_idle_ccr", label="idle CCR", default_value=2150,
+                              min_value=2000, max_value=2400, step=10, width=140)
+            dpg.add_input_int(tag="bench_hot_ccr", label="hot above CCR", default_value=3700,
+                              min_value=2500, max_value=4000, step=50, width=150)
+        with dpg.group(horizontal=True):
+            dpg.add_input_int(tag="bench_hot_max_s", label="max s hot", default_value=20,
+                              min_value=3, max_value=120, step=5, width=140)
+            dpg.add_input_int(tag="bench_rest_s", label="rest s", default_value=45,
+                              min_value=5, max_value=600, step=15, width=140)
+        dpg.add_text("guard: idle", tag="bench_guard_status", color=(150, 150, 150, 255))
         dpg.add_text("link: --   vbat: --   ccr(echo): --   motor(echo): --   fw_active: --",
                      tag="bench_telem", color=(180, 180, 180, 255))
         # ADR-0010: live RPM readout (one per sensor channel + highlighted max).
@@ -2262,6 +2295,13 @@ class Dashboard:
             dpg.add_input_float(tag="bench_grams", label="scale (g)", default_value=0.0, width=160)
             dpg.add_input_float(tag="bench_tare_g", label="tare (g, no-throttle)",
                                 default_value=0.0, width=220)
+        # What is physically on the stand. Without these, a CSV that mixes a CW and a CCW
+        # block is unanalysable after the fact -- and motor_id is the ESC channel, not the
+        # identity of the motor bolted on (the 2026-07-29 unit burned out and was replaced).
+        with dpg.group(horizontal=True):
+            dpg.add_input_text(tag="bench_prop", label="prop", default_value="9045CW", width=200)
+            dpg.add_input_text(tag="bench_motor_tag", label="motor tag", default_value="",
+                               hint="e.g. M4-b", width=200)
         with dpg.group(horizontal=True):
             dpg.add_button(label="Log point", callback=lambda: self._bench_log_point())
             dpg.add_text("", tag="bench_log_status", color=(150, 200, 150, 255))
@@ -2283,6 +2323,20 @@ class Dashboard:
     def _bench_allow_high_toggle(self, sender: Any, app_data: Any) -> None:
         self._motor_test_allow_high = bool(app_data)
 
+    def _bench_guard_cfg(self) -> Dict[str, int]:
+        """Guard settings, read live from the widgets (same source-of-truth rule as the
+        CCR slider). Falls back to the defaults if the tab has not been built yet."""
+        out = {"on": 1, "idle": 2150, "hot": 3700, "max_s": 20, "rest_s": 45}
+        try:
+            out["on"] = 1 if dpg.get_value("bench_guard_on") else 0
+            out["idle"] = int(dpg.get_value("bench_idle_ccr"))
+            out["hot"] = int(dpg.get_value("bench_hot_ccr"))
+            out["max_s"] = int(dpg.get_value("bench_hot_max_s"))
+            out["rest_s"] = int(dpg.get_value("bench_rest_s"))
+        except Exception:
+            pass
+        return out
+
     def _bench_clamp_ccr(self, ccr: Any) -> int:
         try:
             ccr = int(round(float(ccr)))
@@ -2292,6 +2346,18 @@ class Dashboard:
         if ccr > 3000 and not self._motor_test_allow_high:
             ccr = 3000
         return ccr
+
+    # --- target vs commanded -------------------------------------------------------
+    # The slider holds the TARGET: the sweep point being worked towards. What the motor
+    # is actually given is the target OR idle, depending on _bench_idling. Keeping these
+    # separate is what makes idling free: dropping to idle between points no longer
+    # destroys your place in the sweep, and the +/- buttons can pre-set the next point
+    # while the motor is still cooling.
+    def _bench_target_ccr(self) -> int:
+        try:
+            return self._bench_clamp_ccr(dpg.get_value("bench_ccr"))
+        except Exception:
+            return self._bench_target
 
     def _bench_note_ccr_change(self, prev_ccr: int) -> None:
         """Record WHEN the operating point last moved and in which direction.
@@ -2305,37 +2371,127 @@ class Dashboard:
         self._bench_ccr_change_t = time.monotonic()
         self._bench_sweep = "up" if self._motor_test_ccr > prev_ccr else "down"
 
-    def _bench_slider_ccr(self, sender: Any, app_data: Any) -> None:
-        prev = self._motor_test_ccr
-        self._motor_test_ccr = self._bench_clamp_ccr(app_data)
+    def _bench_set_target(self, ccr: Any) -> None:
+        """Move the sweep point. Legal while idling — that is the point of it."""
+        self._bench_target = self._bench_clamp_ccr(ccr)
         try:
-            dpg.set_value("bench_ccr", self._motor_test_ccr)
+            dpg.set_value("bench_ccr", self._bench_target)
         except Exception:
             pass
-        self._bench_note_ccr_change(prev)
-        if self._motor_test_active:
-            self._send_cmd(0x16, 2, float(self._motor_test_ccr))
+        if not self._bench_idling:
+            prev = self._motor_test_ccr
+            self._motor_test_ccr = self._bench_target
+            self._bench_note_ccr_change(prev)
+            if self._motor_test_active:
+                self._send_cmd(0x16, 2, float(self._motor_test_ccr))
+
+    def _bench_slider_ccr(self, sender: Any, app_data: Any) -> None:
+        self._bench_set_target(app_data)
 
     def _bench_step_ccr(self, direction: int) -> None:
+        self._bench_set_target(self._bench_target_ccr() + direction*self._motor_test_step)
+
+    def _bench_go_idle(self, reason: str) -> None:
+        """Hold the motor at idle WITHOUT losing the sweep point.
+
+        The slider is left alone: it still shows the target you were working towards, so
+        GO returns to it in one click and +/- pre-sets the next point while cooling."""
+        self._bench_idling = True
         prev = self._motor_test_ccr
-        self._motor_test_ccr = self._bench_clamp_ccr(
-            self._motor_test_ccr + direction * self._motor_test_step)
-        try:
-            dpg.set_value("bench_ccr", self._motor_test_ccr)
-        except Exception:
-            pass
+        self._motor_test_ccr = self._bench_clamp_ccr(self._bench_guard_cfg()["idle"])
         self._bench_note_ccr_change(prev)
         if self._motor_test_active:
             self._send_cmd(0x16, 2, float(self._motor_test_ccr))
+        self._bench_say(f"idle CCR {self._motor_test_ccr} ({reason}) — target held at "
+                        f"{self._bench_target_ccr()}, press GO")
 
-    def _bench_current_ccr(self) -> int:
-        """Slider widget is the single source of truth for commanded CCR.
-        Read it live (clamped) so the attribute can never desync from what the
-        operator sees — this is the value pushed to the firmware every heartbeat."""
+    def _bench_resume(self) -> None:
+        """Leave idle and go back to the target — the other half of the measure loop."""
+        if self._bench_rest_until:
+            left = self._bench_rest_until - time.monotonic()
+            self._bench_say(f"REFUSED: thermal rest, {left:.0f} s left")
+            return
+        self._bench_idling = False
+        prev = self._motor_test_ccr
+        self._motor_test_ccr = self._bench_target_ccr()
+        # Settling starts now: the motor only begins moving to the target at this moment,
+        # so settle_s on the next logged point must count from here, not from the +/- click.
+        self._bench_ccr_change_t = time.monotonic()
+        if self._motor_test_ccr != prev:
+            self._bench_sweep = "up" if self._motor_test_ccr > prev else "down"
+        if self._motor_test_active:
+            self._send_cmd(0x16, 2, float(self._motor_test_ccr))
+        self._bench_say(f"running at CCR {self._motor_test_ccr}")
+
+    def _bench_say(self, msg: str) -> None:
         try:
-            self._motor_test_ccr = self._bench_clamp_ccr(dpg.get_value("bench_ccr"))
+            dpg.set_value("bench_log_status", msg)
         except Exception:
             pass
+
+    def _bench_guard_tick(self, now: float) -> None:
+        """Budget the time spent above the hot threshold; spend it and the motor goes to
+        idle for a rest. Runs off wall-clock dt, so a slow render loop cannot under-count."""
+        dt_s = (now - self._bench_guard_t) if self._bench_guard_t else 0.0
+        self._bench_guard_t = now
+        cfg = self._bench_guard_cfg()
+        if not cfg["on"]:
+            self._bench_hot_s = 0.0
+            self._bench_rest_until = 0.0
+            self._bench_set_guard_text("guard: OFF", (200, 140, 60, 255))
+            return
+        if self._bench_rest_until:
+            left = self._bench_rest_until - now
+            if left <= 0.0:
+                self._bench_rest_until = 0.0
+                self._bench_hot_s = 0.0
+                # Stay idling. The motor must not leap back to the target on its own just
+                # because a timer expired — returning to power is always an operator action.
+                self._bench_set_guard_text("guard: rested — press GO to resume",
+                                           (90, 200, 90, 255))
+            else:
+                self._bench_set_guard_text(
+                    f"guard: RESTING {left:4.0f} s   (CCR pinned to {cfg['idle']})",
+                    (220, 120, 60, 255))
+            return
+        hot = self._motor_test_active and self._motor_test_ccr >= cfg["hot"]
+        if hot:
+            self._bench_hot_s += max(0.0, min(dt_s, 1.0))   # ignore huge dt after a stall
+            if self._bench_hot_s >= cfg["max_s"]:
+                self._bench_go_idle(f"thermal guard: {cfg['max_s']} s above CCR {cfg['hot']}")
+                self._bench_rest_until = now + cfg["rest_s"]
+                self._bench_set_guard_text(
+                    f"guard: BUDGET SPENT — resting {cfg['rest_s']} s", (220, 80, 80, 255))
+                return
+        elif self._bench_hot_s > 0.0:
+            # Below the threshold the motor is shedding heat; give the budget back at half
+            # the rate it was spent, so short excursions do not accumulate forever.
+            self._bench_hot_s = max(0.0, self._bench_hot_s - 0.5*dt_s)
+        if self._motor_test_active:
+            self._bench_set_guard_text(
+                f"guard: hot budget {self._bench_hot_s:4.1f} / {cfg['max_s']} s"
+                + ("   [HOT]" if hot else ""),
+                (220, 160, 60, 255) if hot else (150, 150, 150, 255))
+        else:
+            self._bench_set_guard_text("guard: idle", (150, 150, 150, 255))
+
+    def _bench_set_guard_text(self, msg: str, col: Any) -> None:
+        try:
+            dpg.set_value("bench_guard_status", msg)
+            dpg.configure_item("bench_guard_status", color=col)
+        except Exception:
+            pass
+
+    def _bench_current_ccr(self) -> int:
+        """What the firmware is actually told, re-derived every heartbeat.
+
+        Idle wins over the target, and a thermal rest wins over everything short of STOP —
+        deriving it here rather than storing it means no code path can leave the motor at a
+        stale operating point, and a rest cannot be escaped by nudging the slider."""
+        if self._bench_rest_until or self._bench_idling:
+            self._motor_test_ccr = self._bench_clamp_ccr(self._bench_guard_cfg()["idle"])
+        else:
+            self._motor_test_ccr = self._bench_target_ccr()
         return self._motor_test_ccr
 
     def _bench_start(self) -> None:
@@ -2349,6 +2505,9 @@ class Dashboard:
             except Exception:
                 pass
             return
+        # Always come up at idle, never straight to whatever the slider was left at. RUN
+        # is not a request for full power; GO is.
+        self._bench_idling = True
         self._send_cmd(0x16, 1, float(self._motor_test_id))
         self._send_cmd(0x16, 2, float(self._bench_current_ccr()))
         self._send_cmd(0x16, 0, 1.0)
@@ -2365,6 +2524,10 @@ class Dashboard:
             dpg.set_value("bench_run", False)
         except Exception:
             pass
+        # A stopped motor cools faster than an idling one, so the hot budget still decays
+        # (in _bench_guard_tick), but an in-progress rest is NOT cancelled by stopping —
+        # otherwise stop/start would be a way to skip the cooldown.
+        self._bench_hot_s = 0.0 if not self._bench_rest_until else self._bench_hot_s
 
     def _bench_tick(self, now: float) -> None:
         # Poll the RUN checkbox every frame and reconcile against actual run state. This is
@@ -2377,6 +2540,10 @@ class Dashboard:
             self._bench_start()            # arm-refusal inside may bounce the checkbox off
         elif not want_run and self._motor_test_active:
             self._bench_stop()
+
+        # Before the heartbeat: the guard may pull the operating point down to idle, and
+        # the heartbeat below must then push THAT value, not the one the operator set.
+        self._bench_guard_tick(now)
 
         if self._motor_test_active and (now - self._motor_test_hb_t) >= 0.15:
             self._motor_test_hb_t = now
@@ -2434,9 +2601,21 @@ class Dashboard:
                 dpg.set_value("bench_t_est", "T_est = k·(ω_meas)² : -- N")
                 dpg.configure_item("bench_t_est", color=(180, 180, 180, 255))
             st = "ON" if self._motor_test_active else "OFF"
-            col = (90, 200, 90, 255) if self._motor_test_active else (150, 150, 150, 255)
+            if not self._motor_test_active:
+                col = (150, 150, 150, 255)
+                mode = ""
+            elif self._bench_rest_until:
+                col = (220, 120, 60, 255)
+                mode = "  [RESTING]"
+            elif self._bench_idling:
+                col = (120, 180, 220, 255)
+                mode = "  [IDLE — press GO]"
+            else:
+                col = (90, 200, 90, 255)
+                mode = "  [running]"
             dpg.set_value("bench_status",
-                          f"test: {st}   (cmd CCR {self._motor_test_ccr}, M{self._motor_test_id})")
+                          f"test: {st}   commanded CCR {self._motor_test_ccr}   "
+                          f"target {self._bench_target_ccr()}   M{self._motor_test_id}{mode}")
             dpg.configure_item("bench_status", color=col)
         except Exception:
             pass
@@ -2453,11 +2632,18 @@ class Dashboard:
             # column (the live channel), left EMPTY when there is no tacho on the stand —
             # back-fill it from a flight log by CCR. ADR-0010's t_est_N = k*(rpm*2pi/60)^2
             # is then a one-line offline computation, not 6 constant columns per row.
-            header = ("iso_time,motor_id,ccr,ccr_echo,vbat,grams,tare_g,thrust_N,"
-                      "sweep,settle_s,rpm\n")
+            header = ("iso_time,motor_id,motor_tag,prop,ccr,ccr_echo,vbat,grams,tare_g,"
+                      "thrust_N,sweep,settle_s,rpm\n")
             with self._log_lock:
                 self._bench_csv_path.write_text(header, encoding="utf-8")
         return self._bench_csv_path
+
+    def _bench_text(self, tag: str) -> str:
+        """Operator-typed CSV field. Commas and newlines would break the row, so they go."""
+        try:
+            return str(dpg.get_value(tag)).replace(",", ";").replace("\n", " ").strip()
+        except Exception:
+            return ""
 
     def _bench_read_floats(self, *tags: str) -> List[float]:
         out: List[float] = []
@@ -2470,12 +2656,19 @@ class Dashboard:
 
     def _bench_log_point(self) -> None:
         grams, tare = self._bench_read_floats("bench_grams", "bench_tare_g")
+        logged_ccr = self._motor_test_ccr
         self._bench_write_row(grams=grams, tare=tare)
+        auto = True
         try:
-            dpg.set_value("bench_log_status",
-                          f"logged: CCR {self._motor_test_ccr} -> {(grams - tare):.1f} g net")
+            auto = bool(dpg.get_value("bench_autoidle"))
         except Exception:
             pass
+        if auto and not self._bench_idling:
+            # Drop to idle the instant the point is captured: the reading is already taken,
+            # so every further second at the operating point is heat for nothing.
+            self._bench_go_idle("auto after Log point")
+        self._bench_say(f"logged: CCR {logged_ccr} -> {(grams - tare):.1f} g net"
+                        + ("  |  idling, set next target then GO" if auto else ""))
 
     def _bench_write_row(self, *, grams: float, tare: float) -> None:
         bench = self._telem.get("bench") or {}
@@ -2494,7 +2687,8 @@ class Dashboard:
         settle_s = (time.monotonic() - self._bench_ccr_change_t) if self._bench_ccr_change_t else 0.0
         row = (
             f"{time.strftime('%Y-%m-%dT%H:%M:%S')},"
-            f"{self._motor_test_id},{self._motor_test_ccr},"
+            f"{self._motor_test_id},{self._bench_text('bench_motor_tag')},"
+            f"{self._bench_text('bench_prop')},{self._motor_test_ccr},"
             f"{int(ccr_echo) if ccr_echo is not None else ''},"
             f"{('%.3f' % vbat) if vbat is not None else ''},"
             f"{grams:.3f},{tare:.3f},{thrust_N:.5f},"
