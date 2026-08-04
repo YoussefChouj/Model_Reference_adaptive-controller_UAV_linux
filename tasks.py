@@ -83,7 +83,8 @@ def task_doctor(argv: list[str]) -> int:
         if os.name == "nt":
             print("        create it: py -3.13 -m venv .venv")
         else:
-            print("        create it: python3.13 -m venv .venv")
+            # Use 3.12, NOT 3.13: gz-jetty bindings are .cpython-312 ABI-locked.
+            print("        create it: python3.12 -m venv .venv")
         return 1
     out = subprocess.check_output(
         [str(VENV_PY), "-c", "import sys; print(sys.version.split()[0])"], text=True

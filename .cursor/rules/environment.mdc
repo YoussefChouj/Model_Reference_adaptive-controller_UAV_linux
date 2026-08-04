@@ -44,26 +44,37 @@ probe is reported as a note, since it blocks `verify` only.
 
 ## Python — always use the venv interpreter explicitly
 
-Target is **Python 3.12+ (3.13 preferred)**. `scipy==1.18.0` in `requirements.txt` will not
-install on 3.11. There is no `python` symlink on most distros by default; either install
-`python-is-python3` or fix the hook commands in `.cursor/hooks.json` / `.claude/settings.json`.
-Until then, use `python3` explicitly when creating the venv.
+Target is **Python 3.12**. The venv is `python3.12 -m venv .venv` because the `gz-jetty`
+Python bindings (`python3-gz-math9`, `python3-gz-transport15`, `python3-gz-sim10`,
+`python3-sdformat16`) are compiled `.cpython-312-x86_64-linux-gnu.so` modules and ABI-locked
+to 3.12. A 3.13 venv will install `requirements.txt` cleanly but `import gz.math` will fail
+with `ModuleNotFoundError`. Do not "upgrade" the venv to 3.13 without first checking every
+gz binding the code touches.
 
-```bash
-python3.13 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+The venv is created with `include-system-site-packages = true` so the binary gz bindings
+from `/usr/lib/python3/dist-packages/` are visible. Imported names are unversioned:
+`from gz.transport import Node` (not `gz.transport15`), `from gz.math import Vector3d`,
+`import sdformat`. Verified round-trip with the measured airframe values:
+
+```python
+from gz.math import MassMatrix3d, Vector3d
+mm = MassMatrix3d(1.2961, Vector3d(0.00839, 0.00930, 0.01485), Vector3d(0.0, 0.0, 0.0))
+assert mm.mass() == 1.2961
+assert mm.principal_moments() == (0.00839, 0.00930, 0.01485)
 ```
 
-There are at least two Pythons on PATH, and one of them is the venv that *should* be activated
-but isn't guaranteed to be:
+There is no `python` symlink on most distros by default; either install `python-is-python3`
+or use `python3` / `python3.12` explicitly. The venv *should* be auto-activated but isn't
+guaranteed to be:
 
 ```text
-.venv/bin/python             <- has every dependency (auto-activated, but not guaranteed)
-/usr/bin/python3             <- system, no deps
+.venv/bin/python            <- has every dependency + gz bindings via system-site-packages
+/usr/bin/python3.12         <- system, has gz bindings but no project deps
+/usr/bin/python3            <- system launcher, points to 3.12 on this box
 ```
 
 If you run bare `python` (or `python3`) in a shell where the venv did not activate, you land on
-the **system interpreter with no dependencies**, get `ModuleNotFoundError`, and "fix" it by
+the **system 3.12 with no project deps**, get `ModuleNotFoundError`, and "fix" it by
 installing into the wrong interpreter. That is the reinstall loop. Avoid it by always writing
 the full path:
 
@@ -143,6 +154,32 @@ Bash is the only shell here. No PowerShell, no CMD. Stick to POSIX syntax.
   `FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller` has one — that is a Windows-only
   fact and not relevant here.) Still: quote paths in case anything gets moved or symlinked.
 
+## Gazebo (spec 4b)
+
+`gz-jetty` is installed via the OSRF apt repo. The `gz` CLI and all six numbered packages
+(`gz-math 9`, `gz-transport 15`, `gz-sim 10`, `sdformat 16`, etc.) are on PATH and in
+`/usr/lib/python3/dist-packages/`. The box is Jetty LTS (EOL May 2031) — the same version
+the Gazebo team is actively building agent-facing tooling against.
+
+```bash
+gz sim --version                # 10.5.0 (or whatever the installed Jetty is)
+gz sim -s -r                    # headless server run, default empty world
+gz topic -l                     # list live topics
+gz plugin --help                # plugin management
+```
+
+The Zenoh middleware is the default since Ionic. For control loops (`gz sim` with a system
+plugin or external bridge), the low-latency Zenoh config that gives sub-ms `wait_before_drop`
+is set by the Gazebo transport defaults — no extra config needed unless you start seeing
+message loss under load, in which case override per the
+[Zenoh config tuning guide](https://gazebosim.org/api/transport/15/zenohconfig.html).
+
+The `sim/plant.py` `GazeboPlant` bridge must use `gz-transport` Python bindings directly,
+not ROS 2. The bridge is a separate optional module (`import sim.gazebo_bridge`) so that
+`import sim.plant` on Windows never fails because Gazebo is not installed — see
+`.cursor/rules/environment.mdc` and `sim/plant.py` `GazeboPlant._available()` for the
+graceful-failure path.
+
 ## When a command fails
 
 Diagnose before escalating. The failures that account for most of it on this box:
@@ -151,6 +188,11 @@ Diagnose before escalating. The failures that account for most of it on this box
 2. `core.pager` not yet set on a fresh clone — `git log` hangs.
 3. Trying to use a Windows-only tool (`schtasks`, `keilkilll.bat`, `OBJ/JX_FLY.axf`, `pyocd`
    against a probe that is not here).
+4. `import gz.math` fails inside the venv — the venv was created with `python3.13` instead
+   of `python3.12`. The gz bindings are `.cpython-312-x86_64-linux-gnu.so` and won't load
+   on 3.13. Recreate: `rm -rf .venv && python3.12 -m venv .venv && .venv/bin/python -m pip
+   install -r requirements.txt` and ensure `pyvenv.cfg` has `include-system-site-packages
+   = true`.
 
 None of these are reasons to stop the task or ask the operator for help — fix and retry.
 See `.cursor/rules/hardware-safety.mdc` for the (short) list of things that genuinely require
