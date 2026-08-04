@@ -1,7 +1,15 @@
 # Which fixed frames does the wave-1 table cover, and does it own GS_PROTO_VERSION?
 
 Type: grilling
-Status: open
+Status: closed — out of scope (destination redrawn 2026-07-31)
+
+> **Out of scope.** There is no field table to scope: the fixed frames are being retired in
+> favour of the flexible subscription family, so a table covering three-of-six or six-of-six
+> is moot. The two live drifts this ticket catalogued are real bugs today and were split out
+> as [Repair the two live drifts now](14-repair-live-drifts.md) rather than waiting on any
+> migration. `GS_PROTO_VERSION` ownership does not survive in this form — a schema-on-the-wire
+> family has no host-side layout constant to keep in sync — but whether a version byte
+> survives the migration at all is now fog on the redrawn map.
 
 ## Question
 

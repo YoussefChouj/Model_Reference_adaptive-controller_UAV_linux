@@ -1,7 +1,14 @@
 # How does generated frame-table code enter the Keil build?
 
 Type: grilling
-Status: open
+Status: closed — out of scope (destination redrawn 2026-07-31)
+
+> **Out of scope.** No code is generated, so nothing needs to reach ARMCC. The precedent this
+> ticket leaned on — `ground_station/livewatch/log_frames.md` as a source of truth that needs
+> **no rebuild** to change — turns out to be the shape the redrawn map adopts wholesale: a
+> manifest of symbol names, resolved on the host, never compiled. The two hard constraints
+> restated here (`SUBSCRIBE_ADDR_SRAM_LO/HI` undefined in `JX_FLY.uvprojx`; never invoke UV4
+> without `<pMon>` neutralisation) still hold and were carried onto the new map's Notes.
 
 ## Question
 

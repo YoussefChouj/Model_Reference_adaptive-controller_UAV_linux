@@ -2,7 +2,14 @@
 
 Type: grilling
 Status: open
-Blocked by: 04
+
+> **Unblocked and made urgent, 2026-07-31.** The ticket that blocked this one was answered by
+> the redrawn destination: subscription becomes the only telemetry family. That removes the
+> dependency and raises the stakes — the false-sync hazard below is latent only because
+> `0x07`/`0x08`/`0x09`–`0x0C`/`0x7F` appear rarely. Once they are the *only* traffic, an
+> unskipped payload is the normal case, not the exception. Read the two bullets below about
+> "whether that reader also serves the flexible frames" as settled: it serves them, because
+> there is nothing else to serve.
 
 ## Question
 

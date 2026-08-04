@@ -2,6 +2,19 @@
 
 Type: task
 Status: open
+Blocked by: 10
+
+> **Repurposed, 2026-07-31 — do NOT set the flag to 0 yet.** The replacement radio arrives
+> today and this test path is the instrument for characterising it: it already emits a
+> 256-byte JustFloat pattern on USART3 with a frame counter, which is exactly what a goodput
+> and loss measurement needs. Retiring it before it has been used would mean rebuilding the
+> same harness a week later.
+>
+> Revised order: [Characterise the new radio's real goodput](10-characterise-new-radio-goodput.md)
+> uses this path, **then** this ticket retires it. Everything below about the stale 23-float
+> comment, the 256 B @ 115200 = 22.2 ms versus a 10 ms tick arithmetic, and the flash-custody
+> rules still stands — and the arithmetic must be **redone at the new baud** before it is
+> written off, since 256 B at 921600 is 2.8 ms and comfortably inside the tick.
 
 ## Question
 

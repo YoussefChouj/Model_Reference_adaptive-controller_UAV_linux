@@ -1,7 +1,19 @@
 # Does the flexible-telemetry path adopt the Frame envelope module in wave 1?
 
 Type: grilling
-Status: open
+Status: closed — answered by the redrawn destination (2026-07-31)
+
+> **Answered, not resolved on the route.** The question was whether the flexible path adopts a
+> Frame envelope module built for the fixed frames. With the fixed frames retiring, there is no
+> such module and no second family to share it with — subscription becomes the only family, so
+> its four open-coded envelope sites (`API/subscribe.c:240, 296, 566, 613`) are the only ones
+> left. Deduplicating those four is a genuine but much smaller deepening, and it now sits in the
+> redrawn map's fog rather than as a live ticket.
+>
+> The sequencing constraint this ticket identified **survives and was promoted**: protocol v2 is
+> flashed but has never been exercised against the running firmware, so it must be verified
+> before anything is refactored on top of it, or a failure cannot distinguish a v2 bug from a
+> migration bug. That is now [Verify protocol v2 on hardware](11-verify-protocol-v2-on-hardware.md).
 
 ## Question
 
