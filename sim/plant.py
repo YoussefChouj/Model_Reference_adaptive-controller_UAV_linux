@@ -370,7 +370,8 @@ class GazeboPlant(Plant):
         if not self._available:
             raise NotImplementedError(
                 f"GazeboPlant.reset: simulator unavailable ({self._reason}). "
-                f"Pair with GazeboPlant.step at the same controller tick."
+                f"Pair with GazeboPlant.step at the same controller tick. "
+                f"See spec 4b in .agent_contracts/mbd_workflow/04b-gazebo-bringup.md."
             )
         raise NotImplementedError(
             "GazeboPlant.reset: bring-up deferred (spec 4b)."

@@ -1,26 +1,48 @@
-"""Canonical task runner. One command per operation, identical in PowerShell and Git Bash.
+"""Canonical task runner. Uses the platform's venv layout (Scripts/python.exe on Windows,
+bin/python on Linux/macOS), so the same script runs in any shell.
 
   python tasks.py doctor       # check the environment before anything else
   python tasks.py test         # full suite
   python tasks.py test sim     # one lane
   python tasks.py budget       # build-budget gate (flash / RAM / stack / warnings)
-  python tasks.py verify       # ELF-vs-flash check (needs the SWD probe)
+  python tasks.py verify       # ELF-vs-flash check (needs the SWD probe, Windows box only)
 
-`make` is not installed on this machine (only `mingw32-make`), and the two shells disagree on
-syntax, so the runner is plain Python -- the one interpreter that is always present. Every
-subprocess is launched with VENV_PY, never a bare `python`, so a task cannot land on the wrong
-interpreter no matter which shell or activation state it was started from.
+The runner is plain Python so it works without shell-specific syntax. Every subprocess is
+launched with VENV_PY, never a bare `python`, so a task cannot land on the wrong interpreter
+no matter which shell or activation state it was started from. `verify` and the probe are
+only used on the Windows box — on Linux, `doctor` reports the probe as absent, which is
+expected.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
-VENV_PY = ROOT / ".venv" / "Scripts" / "python.exe"
+
+def _venv_py() -> Path:
+    """Resolve the venv interpreter for the current platform.
+
+    Windows: .venv/Scripts/python.exe
+    Linux/macOS: .venv/bin/python
+    """
+    if os.name == "nt":
+        return ROOT / ".venv" / "Scripts" / "python.exe"
+    return ROOT / ".venv" / "bin" / "python"
+
+def _probe_path() -> Path | None:
+    """Path to a venv-shipped probe binary, if present on this OS, else None."""
+    if os.name == "nt":
+        p = ROOT / ".venv" / "Scripts" / "pyocd.exe"
+    else:
+        p = ROOT / ".venv" / "bin" / "pyocd"
+    return p if p.exists() else None
+
+VENV_PY = _venv_py()
 
 LANES = {
     "livewatch": "ground_station/livewatch/tests",
@@ -58,7 +80,10 @@ def task_doctor(argv: list[str]) -> int:
     print("== interpreter ==")
     if not VENV_PY.exists():
         print(f"  FAIL  no venv at {VENV_PY}")
-        print("        create it: py -3.13 -m venv .venv")
+        if os.name == "nt":
+            print("        create it: py -3.13 -m venv .venv")
+        else:
+            print("        create it: python3.13 -m venv .venv")
         return 1
     out = subprocess.check_output(
         [str(VENV_PY), "-c", "import sys; print(sys.version.split()[0])"], text=True
@@ -96,7 +121,8 @@ def task_doctor(argv: list[str]) -> int:
         print("        git config core.pager cat   (or always use `git --no-pager`)")
 
     print("== probe ==")
-    if shutil.which("pyocd") or (ROOT / ".venv" / "Scripts" / "pyocd.exe").exists():
+    probe = _probe_path()
+    if shutil.which("pyocd") or probe:
         rc = subprocess.call(
             [str(VENV_PY), "-m", "pyocd", "list"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -107,6 +133,9 @@ def task_doctor(argv: list[str]) -> int:
             # Not a failure: the probe is optional for everything except `verify`.
             print("  note  no probe enumerated (unplugged, or uVision holds the session)")
             print("        this blocks `verify` only -- tests and code work are unaffected")
+    else:
+        print("  note  no pyocd in PATH and no venv-shipped probe -- expected on the")
+        print("        Linux analysis box; livewatch probe reads live on the Windows box")
     print()
     print("READY" if ok else "ISSUES ABOVE -- fix before starting")
     return 0 if ok else 1
