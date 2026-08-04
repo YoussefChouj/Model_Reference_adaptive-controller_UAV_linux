@@ -10,6 +10,7 @@
 ### Control & Estimation
 - [Control Loop Timing](concepts/control-loop-timing.md) — dt/period coupling across IMU, control, and paths
 - [MRAC Control Law](concepts/mrac-control-law.md) — Adaptive law structure, projection, and telemetry exposure
+- [Parameter Drift and Bursting](concepts/parameter-drift-and-bursting.md) — Why `Theta` slides invisibly during hover and detonates 3× on the next maneuver; Narendra normalization; 2 open defects in `mrac.c` (2026-08-02)
 - [Coordinate Conventions](concepts/coordinate-conventions.md) — Sign conventions for motors, sticks, world frame, body frame
 - [Adaptive Control Simulations](concepts/adaptive-control-simulations.md) — User-validated simulation notebook map and reuse workflow
 - [Adaptive Simulation Theory-to-Code Deep Dive](concepts/adaptive-simulation-theory-to-code-deep-dive.md) — Equations, implementation pipeline, and debugging/tuning logic
@@ -34,6 +35,11 @@
 - [Motion Planning Methods (Taxonomy)](concepts/motion-planning-methods.md) — Beginner map: sampling-based / reactive / learning-based planners + MPC, and where the thesis sits
 - [Conformal Prediction](concepts/conformal-prediction.md) — Calibrated uncertainty bounds for any predictor (stub)
 - [Sim-to-Real Gap](concepts/sim-to-real-gap.md) — Why sim-trained policies degrade on hardware; mitigations and the MRAC synergy (stub)
+- [L1 Adaptive Control](concepts/l1-adaptive-control.md) — MRAC + a low-pass on the estimate; decouples adaptation speed from robustness. Honest side-by-side against this firmware's MRAC
+- [Matched vs Unmatched Uncertainty](concepts/matched-unmatched-uncertainty.md) — Why a quadrotor's rate loop can only ever cancel 4 of 6 disturbance components, and lateral drift is structurally an outer-loop problem
+- [INDI Control](concepts/indi-control.md) — Incremental Nonlinear Dynamic Inversion: measured `ω̇` replaces the model. The method that beats adaptive control on racing (stub)
+- [Attention Mechanism (read as gain scheduling)](concepts/attention-mechanism.md) — Attention == Takagi-Sugeno/LPV interpolation; convex-hull safety bound, temperature, `1/√d_k`, time-blindness, M4 cost table, and the structural mapping onto `Theta`/`Phi` (2026-08-02)
+- [Adaptive Basis & Weight-Convergence Prior Art](concepts/adaptive-basis-prior-art.md) — Concurrent learning, composite adaptation, MMAC, GP-MRAC: what's already published vs what's still an original contribution (2026-08-02)
 
 ### Workflow & Recipes
 - [Tuning Workflow](concepts/tuning-workflow.md) — Step-by-step PID/MRAC tuning via dashboard and VOFA
@@ -91,8 +97,10 @@
 - [Adaptive Control Tutorial 2 Notebook](sources/adaptive-control-tutorial-2-notebook.md) — Integral/PID/DF-MRAC/set-theoretic/LF-learning with equations, tuning table, and error bound gotcha (2026-06-20)
 - [Roll-Pitch-Yaw PID-MRAC Notebook](sources/pid-mrac-notebook.md) — 20-cell hardware bridge: LQR/pole-placement PID design, cascaded + inner-MRAC, DShot mixer, sequential LQR firmware gains, stability margins (2026-06-20)
 - [Motion Planning in Dynamic Environments Survey](sources/motion-planning-dynamic-environments-survey.md) — 138-work survey 2015–2025; planning taxonomy, jargon decoder, thesis positioning (1 source, 2026-07-09)
+- [L1-NMPC: Adaptive Nonlinear MPC for Quadrotors](sources/l1-nmpc-adaptive-nonlinear-mpc-quadrotors.md) — UZH RPG, RA-L 2021. The published analogue of this firmware's architecture; C(s) decoupling, matched/unmatched split, hardware payload results (1 source + PDF, 2026-07-31)
 
 ## Literature (Grabbed Papers — deep briefings from the Discord digest)
 
 - [MRAC for Gust Load Alleviation](literature/arxiv-2603.18584.md) — HIGH relevance: Γ=γQ adaptation-rate tuning, Lyapunov P-matrix design condition, gain-scheduling (2026-07-03)
 - [Motion Planning in Dynamic Environments Survey](literature/openalex-W7163597202.md) — MEDIUM relevance: raw page-cited briefing; wiki-integrated at the source page above (2026-07-09)
+- [L1-NMPC (arXiv 2109.04210)](literature/arxiv-2109.04210.md) — HIGH relevance: page-cited briefing from the full PDF; Eq. 11–13 adaptation law, Table I/II/III numbers, authors' own "use INDI instead" caveat (2026-07-31)

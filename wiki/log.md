@@ -80,3 +80,23 @@
 - Created: concepts/sim-to-real-gap.md (stub — thesis-central; digital twin + MRAC synergy)
 - Updated: index.md (new "Research & Thesis Background" concept section; new "Literature" section — also indexed previously-orphaned literature/arxiv-2603.18584.md)
 - Convention note: first ingest using the comprehensive beginner-level digestion convention (jargon glossary + prerequisite primer + concept stubs per grabbed paper)
+
+## [2026-07-31] ingest | L1-NMPC: Adaptive Nonlinear MPC for Quadrotors (grabbed via Discord digest)
+- Fetched the missing PDF from arXiv into raw/papers/ (the grab note had no PDF); 8 pp, read in full
+- Created: literature/arxiv-2109.04210.md (page-cited briefing from the full text, not the DeepSeek summary)
+- Created: sources/l1-nmpc-adaptive-nonlinear-mpc-quadrotors.md (beginner source page: mental model, thesis-slot table, four extractable ideas, jargon decoder, prerequisites, what it does NOT give)
+- Created: concepts/l1-adaptive-control.md (architecture + honest MRAC-vs-L1 table)
+- Created: concepts/matched-unmatched-uncertainty.md (why the rate loop can only cancel 4 of 6 components)
+- Created: concepts/indi-control.md (stub — the method that beat L1 on racing)
+- Updated: index.md (3 concepts, 1 source, 1 literature entry)
+- Note: this arXiv ID was grabbed 4× under 4 different titles in #control-laws
+
+## [2026-08-02] ingest | Attention mechanism → MRAC (Socratic teaching session, no raw source)
+- Source is the session itself, not a file in raw/ — every number was measured live during the session
+- Created: concepts/attention-mechanism.md (attention == Takagi-Sugeno/LPV interpolation; convex-hull bound measured to the exact limit; softmax shift-invariance/common-mode rejection; temperature sweep; `1/√d_k` drunkard's-walk derivation with measured table; `Q=K=V` identity-map trap; `W_Q≠W_K` asymmetry vs one-way relevance; permutation blindness to 8.9e-17 on climb-vs-dive; STM32F407 cost table — small block feasible, Transformer not)
+- Created: concepts/parameter-drift-and-bursting.md (hover null-space drift in this firmware's own numbers; gradient perpendicular to the solution line; 3× burst when `u_nom` swings 0.4→0.9; Narendra normalization 530×→1.86×; 2 open defects)
+- Created: concepts/adaptive-basis-prior-art.md (concurrent learning / composite adaptation / MMAC / GP-MRAC, with GP centre-selection mechanism; motion-primitive libraries flagged out of scope)
+- Updated: index.md (3 concepts across Control & Estimation and Research & Thesis Background)
+- FIRMWARE DEFECTS FOUND, NOT FIXED: `API/mrac.c:73` comment claims `x*tanh(x)` is bounded — it tends to `|x|`; `API/mrac.c:294` uses raw `Phi` so the `u_ad` output path is unbounded in rate (only the projection clamp bounds it)
+- CORRECTION recorded in-page: an earlier session claim that the bounded-regressor hypothesis was violated was WRONG — `mrac.c:220` `denom = 1+|Phi|²` supplies it
+- OWED: the drift simulation was not run (tool outage); design is recorded in the page
