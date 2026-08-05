@@ -213,35 +213,81 @@ def _make_bridge_with_fake_node():
         "EntityWrench": _FakeEntityWrench,
     })
     bridge = GazeboBridge.__new__(GazeboBridge)
+    bridge.model_name = "jx_fly"
     node = _FakeNode()
     bridge._gz = {
         "Node": lambda: node,
         "entity": fake_entity_pb2,
         "entity_wrench": fake_entity_wrench_pb2,
     }
-    bridge._wrench_pub = node.advertise(GazeboBridge.TOPIC_WRENCH, _FakeEntityWrench)
+    bridge._wrench_pub = node.advertise(
+        GazeboBridge.TOPIC_WRENCH_PERSISTENT, _FakeEntityWrench
+    )
     return bridge
 
 
-def test_send_motor_thrust_publishes_one_message_per_motor():
-    """``send_motor_thrust`` publishes four EntityWrench messages -- one
-    per motor link -- carrying the same force and the sign-corrected
-    reaction torque that matches the X-frame mixer convention. The
-    ``entity.type`` field carries the canonical ``Entity.Type.LINK``
-    value (3) from ``gz.msgs.entity_pb2``."""
+def test_send_motor_thrust_publishes_combined_wrench():
+    """``send_motor_thrust`` publishes ONE ``EntityWrench`` carrying the
+    sum of per-motor forces on the lumped body link plus the X-frame
+    roll/pitch moments encoded in the wrench's torque field.
+
+    The implementation changed in 4c (2026-08-05): the URDF lumps all
+    motor visuals into the single ``jx_fly_body`` link, so there is no
+    separate ``motor_<i>`` link to target. We combine the four motor
+    forces into a single upward force at the body centre of mass and
+    encode the roll/pitch moment directly in the wrench's torque
+    field (``tau_x = sum(y_i * F_i)``, ``tau_y = -sum(x_i * F_i)``).
+    The yaw reaction torque is also summed per motor with the X-frame
+    sign convention. ``entity.type`` carries the canonical
+    ``Entity.Type.LINK`` value (3) from ``gz.msgs.entity_pb2``.
+    """
     bridge = _make_bridge_with_fake_node()
-    bridge.send_motor_thrust([3.18, 3.20, 3.18, 3.20])
-    messages = bridge._wrench_pub.messages
-    assert len(messages) == 4
-    for index, msg in enumerate(messages):
-        assert msg.entity.name == f"jx_fly::motor_{index + 1}"
-        assert msg.entity.type == 3, "Entity.Type.LINK must be 3 (canonical)"
-        thrust = 3.18 if index % 2 == 0 else 3.20
-        assert msg.wrench.force.z == pytest.approx(thrust, abs=1e-6)
-        expected_sign = -1.0 if index in (1, 2) else 1.0
-        assert msg.wrench.torque.z == pytest.approx(
-            expected_sign * thrust * 0.0134, abs=1e-6
-        )
+    # All four motors equal -> no net roll/pitch torque.
+    bridge.send_motor_thrust([3.18, 3.18, 3.18, 3.18])
+    msgs = bridge._wrench_pub.messages
+    assert len(msgs) == 1
+    msg = msgs[0]
+    assert msg.entity.name == "jx_fly::jx_fly_body"
+    assert msg.entity.type == 3
+    # Net upward force is the sum of all four motor thrusts.
+    assert msg.wrench.force.z == pytest.approx(3.18 * 4, abs=1e-6)
+    # X-frame layout is symmetric about (0,0), so balanced thrust
+    # produces no roll or pitch torque.
+    assert msg.wrench.torque.x == pytest.approx(0.0, abs=1e-6)
+    assert msg.wrench.torque.y == pytest.approx(0.0, abs=1e-6)
+    # CW motors (indices 1, 2) contribute negative yaw reaction; CCW
+    # motors (0, 3) positive. With equal thrust and reaction = 0.0134,
+    # the pairs cancel: (CCW - CW) * 3.18 * 0.0134 * 2 = 0.
+    assert msg.wrench.torque.z == pytest.approx(0.0, abs=1e-6)
+
+
+def test_send_motor_thrust_roll_produces_torque_x():
+    """Asymmetric front-vs-rear thrust (+y side faster) yields a
+    positive roll torque about body +x (right side lifts)."""
+    bridge = _make_bridge_with_fake_node()
+    # Differential [+d, +d, -d, -d]: right-side motors (M1, M2) faster.
+    d = 0.5
+    base = 3.0
+    bridge.send_motor_thrust([base + d, base + d, base - d, base - d])
+    msg = bridge._wrench_pub.messages[0]
+    # Roll torque = sum(y_i * F_i); y_i = [+0.2, +0.2, -0.2, -0.2].
+    expected_tau_x = 0.8 * d
+    assert msg.wrench.torque.x == pytest.approx(expected_tau_x, abs=1e-6)
+    assert msg.wrench.torque.y == pytest.approx(0.0, abs=1e-6)
+
+
+def test_send_motor_thrust_pitch_produces_torque_y():
+    """Asymmetric front-vs-rear thrust (+x side faster) yields a
+    positive pitch torque about body +y (front lifts)."""
+    bridge = _make_bridge_with_fake_node()
+    d = 0.5
+    base = 3.0
+    bridge.send_motor_thrust([base + d, base - d, base - d, base + d])
+    msg = bridge._wrench_pub.messages[0]
+    # Pitch torque = -sum(x_i * F_i); x_i = [+0.2, -0.2, -0.2, +0.2].
+    expected_tau_y = -0.8 * d
+    assert msg.wrench.torque.y == pytest.approx(expected_tau_y, abs=1e-6)
+    assert msg.wrench.torque.x == pytest.approx(0.0, abs=1e-6)
 
 
 def test_send_motor_thrust_rejects_wrong_shape():
@@ -258,7 +304,16 @@ def test_send_motor_command_still_compatible():
 
 
 def test_send_motor_command_delegates_to_thrust():
-    """``send_motor_command`` should route through the new transport path."""
+    """``send_motor_command`` should route through the new transport path.
+
+    Spec 4c (2026-08-05) collapses the four per-motor EntityWrench
+    messages into one combined message (the URDF lumps all motor
+    visuals into a single body link), so the call publishes exactly
+    one message now.
+    """
     bridge = _make_bridge_with_fake_node()
     bridge.send_motor_command([3.0, 3.1, 3.0, 3.1])
-    assert len(bridge._wrench_pub.messages) == 4
+    assert len(bridge._wrench_pub.messages) == 1
+    msg = bridge._wrench_pub.messages[0]
+    assert msg.entity.name == "jx_fly::jx_fly_body"
+    assert msg.wrench.force.z == pytest.approx(12.2, abs=1e-6)

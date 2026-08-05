@@ -59,14 +59,22 @@ def _assert_imu_injected(sdf_text: str, source: str) -> None:
     raising ``URDFConversionError`` is the only safe behaviour, because
     a sim world without an IMU is the failure mode that crashes the
     bridge at runtime.
+
+    ``gz sdf -p`` formats attribute values with single quotes while the
+    Python fallback uses double quotes. Either is acceptable; what
+    matters is that the canonical name and topic are present.
     """
-    if '<sensor name="jx_fly_imu"' not in sdf_text:
+    sensor_double = '<sensor name="jx_fly_imu"'
+    sensor_single = "<sensor name='jx_fly_imu'"
+    if sensor_double not in sdf_text and sensor_single not in sdf_text:
         raise URDFConversionError(
             f"{source}: IMU sensor was not injected into the converted "
             "SDF (missing <sensor name=\"jx_fly_imu\"/>). Refusing to "
             "load a sim world without the canonical IMU."
         )
-    if '<topic>/world/jx_fly/imu</topic>' not in sdf_text:
+    topic_double = '<topic>/world/jx_fly/imu</topic>'
+    topic_single = "<topic>/world/jx_fly/imu</topic>"
+    if topic_double not in sdf_text and topic_single not in sdf_text:
         raise URDFConversionError(
             f"{source}: IMU sensor was injected but lacks the "
             "canonical /world/jx_fly/imu topic. The bridge subscribes "
@@ -120,18 +128,34 @@ def convert_urdf_to_sdf(
     return output
 
 
+def _body_open_tag(quote: str = '"') -> str:
+    """The body-link open tag in the requested quote style.
+
+    ``gz sdf -p`` emits single quotes; the Python fallback emits double
+    quotes. Both forms must match for the IMU injection to land.
+    """
+    return f"<link name={quote}jx_fly_body{quote}>"
+
+
 def _inject_imu(source_sdf: Path, target_sdf: Path) -> None:
     """Inject the IMU sensor block into the body link of the converted SDF.
 
     The substitution matches the canonical body link name produced by
-    ``sim.urdf.airframe_to_urdf``. Any non-match is left untouched so
-    the structural assertion in ``convert_urdf_to_sdf`` can fail fast
-    instead of silently producing a sim world without an IMU.
+    ``sim.urdf.airframe_to_urdf``. ``gz sdf -p`` formats attribute values
+    with single quotes while the Python fallback uses double quotes; both
+    forms are tried, and the matching one receives the IMU block in the
+    matching quote style so the resulting SDF is consistent. A non-match
+    leaves the file untouched so the structural assertion in
+    ``convert_urdf_to_sdf`` fails fast instead of silently producing a
+    sim world without an IMU.
     """
     text = source_sdf.read_text(encoding="utf-8")
-    body_open = '<link name="jx_fly_body">'
-    if body_open in text:
-        text = text.replace(body_open, body_open + IMU_XML_TEMPLATE, 1)
+    for quote in ('"', "'"):
+        body_open = _body_open_tag(quote)
+        if body_open in text:
+            template = IMU_XML_TEMPLATE.replace('"', quote) if quote == "'" else IMU_XML_TEMPLATE
+            text = text.replace(body_open, body_open + template, 1)
+            break
     target_sdf.write_text(text, encoding="utf-8")
 
 
@@ -166,7 +190,7 @@ def _python_urdf_to_sdf(urdf_path: Path) -> str:
 def _python_urdf_to_sdf_with_imu(urdf_path: Path) -> str:
     """Python-only URDF→SDF translation with the IMU sensor attached."""
     base = _python_urdf_to_sdf(urdf_path)
-    body_open = '<link name="jx_fly_body">'
+    body_open = _body_open_tag('"')
     if body_open in base:
         base = base.replace(body_open, body_open + IMU_XML_TEMPLATE, 1)
     return base

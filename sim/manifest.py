@@ -56,6 +56,7 @@ def write_manifest(
     sim_time_s: float,
     exit_reason: str,
     machine: Any,
+    spawn_z: float | None = None,
 ) -> dict:
     """Write ``manifest.json`` and plain-text receipt sidecars."""
     directory = Path(outdir)
@@ -75,12 +76,14 @@ def write_manifest(
         "platform": platform_module.platform(),
         "cpu_count": os.cpu_count(),
         "gz_version": _capture_gz_version(),
+        "spawn_z": float(spawn_z) if spawn_z is not None else None,
     }
     (directory / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (directory / "git_sha.txt").write_text(str(git_sha) + "\n", encoding="utf-8")
     (directory / "urdf_sha.txt").write_text(str(urdf_sha) + "\n", encoding="utf-8")
+    (directory / "sim_sha.txt").write_text(str(sim_sha) + "\n", encoding="utf-8")
     (directory / "seed.txt").write_text(str(seed) + "\n", encoding="utf-8")
     return manifest
 

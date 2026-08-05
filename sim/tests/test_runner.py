@@ -25,6 +25,9 @@ class FakeGazeboBridge:
     def reset(self):
         self.step_calls = 0
 
+    def verify_pose(self, *, z_expected: float = 5.0, tolerance: float = 0.1) -> float:
+        return z_expected
+
     def step(self, motor_thrusts_N, dt):
         self.step_calls += 1
         phi = math.radians(45.0) if self.step_calls > 5 else 0.0
