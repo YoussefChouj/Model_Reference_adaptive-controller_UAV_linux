@@ -15,10 +15,20 @@ DT = 0.005  # 200 Hz, matches MRAC_DT (ADR-0006 D1)
 
 
 def test_gazebo_plant_is_a_plant_and_is_unimplemented():
+    """GazeboPlant is a Plant. On a host without gz, step raises with a
+    message that names the spec. On a Linux box with gz-jetty installed,
+    the probe returns available=True and step() takes the bridge path
+    (lazily starting the gz sim). The unavailable-path message is
+    exercised by the matching tests in test_seams.py."""
     p = GazeboPlant()
     assert isinstance(p, Plant)
-    with pytest.raises(NotImplementedError):
-        p.step({"roll": 0.0})
+    avail, _ = GazeboPlant.is_available()
+    if not avail:
+        with pytest.raises(NotImplementedError):
+            p.step({"roll": 0.0})
+    # On a host with gz available, step() takes the bridge path; the
+    # bridge-startup is tested separately by the spec 4b integration
+    # tests on the Linux partition.
 
 
 def test_step_returns_only_configured_axis_rates():

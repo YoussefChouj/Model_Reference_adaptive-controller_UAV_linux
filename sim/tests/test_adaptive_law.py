@@ -8,8 +8,9 @@ module takes the tracking error e, the scalar gain P, and the regressor Phi, and
 runs the Lyapunov gradient law with projection / sigma- & e-modification /
 deadzone / hard-freeze / tanh-saturation / L1 leakage / performance-recovery LPF.
 
-Firmware quirk pinned here: What_lower_limit is never set in MRAC_Init, so the
-effective lower bound is 0 — weights live in [0, What_limit]. We replicate that.
+Firmware quirk: slots 1-5 are never explicitly set (defaults 0). Slot 0 is
+unlocked to -What_limit[0] for pitch/roll/yaw only (mrac.c:353-355); z has
+no bias unlock (all slots 0).
 """
 import math
 
@@ -128,7 +129,18 @@ def test_for_axis_matches_firmware_init_gains():
     assert list(pr.gamma) == [1.5, 0.2, 0.05, 0.05, 0.1, 0.1]
     assert list(pr.What_limit) == [0.15, 0.05, 0.02, 0.05, 0.20, 0.15]
     assert pr.e_freeze == 1.2 and pr.e_sat == 0.5
+    # slot 0 unlocked to -What_limit[0]; slots 1-5 stay at 0 (firmware: mrac.c:354)
+    ll = np.asarray(pr.What_lower_limit)
+    assert ll[0] == pytest.approx(-0.15)
+    assert np.all(ll[1:] == 0.0)
+
     yaw = AxisAdaptiveConfig.for_axis("yaw")
     assert list(yaw.gamma) == [1.0, 0.1, 0.05, 0.05, 0.1, 0.1]
     assert yaw.What_limit[0] == pytest.approx(0.15 * 0.6)
-    assert np.all(np.asarray(pr.What_lower_limit) == 0.0)  # firmware never sets it
+    ll_yaw = np.asarray(yaw.What_lower_limit)
+    assert ll_yaw[0] == pytest.approx(-0.15 * 0.6)
+    assert np.all(ll_yaw[1:] == 0.0)
+
+    # z has NO bias unlock — all slots at 0 (firmware: mrac.c:353-355 only pitch/roll/yaw)
+    z = AxisAdaptiveConfig.for_axis("z")
+    assert np.all(np.asarray(z.What_lower_limit) == 0.0)

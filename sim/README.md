@@ -66,15 +66,20 @@ Each run writes `sim/runs/<timestamp>_<scenario>/` (gitignored, ADR-0006 D7):
 Programmatic use: `from sim.run import run; res = run(scenarios.step("roll"), injection=True)`.
 Reproduce the as-flown power-on default (passthrough): `run(sc, ref_model_type=0)`.
 
-## Phase-1 findings (faithful firmware behaviour, not bugs)
+## Phase-1 findings (firmware behaviour confirmed by spec 00 + 00b)
 
-Validating the closed loop surfaced two firmware settings that dominate what the
-adaptation actually does — worth knowing before tuning:
-
-* **`What_lower_limit = 0`** (never set in `MRAC_Init`) — weights live in
-  `[0, What_limit]`, so MRAC cannot produce a *negative* `u_ad`. Disturbances that
-  need negative control (e.g. a positive-rate bias) are left to the PID; the
-  weights stay pinned near zero. Replicated for parity; revisit on firmware.
+* **`What_lower_limit[0] = -What_limit[0]` for pitch/roll/yaw; 0.0 for all other slots/axes.**
+  Slot 0 was unlocked in `MRAC_Init` (mrac.c:353-355) to let the bias weight cancel a
+  standing torque imbalance. Slots 1-5 stay at 0 on every axis. The old README said
+  "never set in MRAC_Init" — stale for slot 0 on pitch/roll/yaw, correct for the rest.
+  The drift existed because `sim/adaptive_law.py`'s comment and `for_axis()` default were
+  never updated after the firmware fix landed.
+  Measured before/after on `disturbance_rejection` (0.08 Nm bias, r=0): with slot 0
+  locked at 0, θ₀ stays at 0 and the PID bears the full disturbance. With slot 0 unlocked
+  to -What_limit[0], θ₀ converges to ≈ −0.002 (roll/pitch) or −0.004 (yaw), and RMSE
+  improves ~2-3%. The improvement is real but modest — `e_deadzone = 0.05` is the
+  dominant adaptation suppressor (adaptation halts ~0.2 s after disturbance onset).
+  Slots 1-5 remain locked; unlocking them is Sweep A's open research question.
 * **`e_deadzone = 0.05` rad/s + a well-tuned baseline** — with the identified plant
   the inner PID already reaches ≈ the reference bandwidth (44 rad/s), so the error
   falls into the deadzone within ~0.2 s and adaptation halts. MRAC's footprint is

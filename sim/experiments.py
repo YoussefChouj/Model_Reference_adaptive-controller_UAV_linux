@@ -1,22 +1,30 @@
-"""Experiment sweep: lift the two firmware settings that suppress adaptation.
+"""Experiment sweep: two firmware settings that suppress adaptation.
 
-Phase-1 validation found MRAC barely engages because of two faithful firmware
-choices (see sim/README.md):
-  1. What_lower_limit = 0  -> weights live in [0, What_limit], MRAC can't make a
-     negative u_ad.
-  2. e_deadzone = 0.05     -> a well-tuned baseline pushes |e| into the deadzone
-     in ~0.2s and adaptation halts.
+Phase-1 validation surfaced two firmware choices that constrain how much MRAC can learn
+(see sim/README.md):
+  1. What_lower_limit slot 0 = -What_limit[0] for pitch/roll/yaw (mrac.c:353-355);
+     slots 1-5 = 0.0 on ALL axes.  The sim now has the correct parity.
+  2. e_deadzone = 0.05 -> a well-tuned baseline pushes |e| into the deadzone
+     in ~0.2s and adaptation halts for the rest of the run.
 
-The user previously set What_lower_limit = 0 to stop runaway oscillations *back
-when the reference model was poorly identified*. Now that the ref model is well
-identified (bw=44, zeta=0.8), this re-tests:
-  * symmetric lower limit  (What_lower_limit = -What_limit)
-  * deadzone disabled
-  * both
+prior-00b established that correcting the bias unlock (item 1) gives a ~2-3% improvement
+in disturbance-rejection RMSE but does not dominate — e_deadzone is still the primary
+suppressor (a null result on the hypothesis that bias unlock alone is sufficient).
 
-across the two scenarios that actually need negative / sustained adaptation:
-disturbance rejection (positive-rate bias needs negative u_ad) and an inertia
-(gain) offset. Each variant writes its own sim/runs/ folder for inspection.
+The sweep therefore tests two open questions:
+  * Symmetric lower limit (What_lower_limit = -What_limit for ALL slots) vs the
+    corrected firmware parity (slot 0 unlocked, slots 1-5 at 0).  This is Sweep A.
+  * Deadzone disabled vs enabled (same corrected parity baseline).
+  * Both combined.
+
+Sweep A's research question (unlock slots 1-5) remains OPEN — it requires evidence
+plus a flight-safety argument, not a default change.
+
+across the two scenarios that exercise different MRAC failure modes:
+  * disturbance rejection (positive-rate bias needs negative u_ad) -> tests slot 0
+  * inertia offset (gain mismatch) -> tests whether MRAC can track parametric change
+
+Each variant writes its own sim/runs/ folder for inspection.
 
 Run:  python -m sim.experiments
 """

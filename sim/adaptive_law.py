@@ -12,8 +12,10 @@ Swapping the adaptive law (sigma-mod / e-mod / DF-MRAC / NN ...) is meant to be 
 one-file change here (ADR-0006), so the variants are toggled by AdaptiveFlags /
 config exactly like mrac_flags / mrac_config_* in firmware.
 
-Firmware quirk replicated for parity: What_lower_limit is never set in MRAC_Init,
-so the effective lower bound is 0 (weights live in [0, What_limit]).
+Firmware quirk replicated for parity: What_lower_limit is never explicitly set for
+slots 1-5, so those slots default to 0 (weights clipped at 0). Slot 0 is unlocked
+to -What_limit[0] for pitch/roll/yaw to match the asymmetric fix in mrac.c:353-355;
+z keeps slot 0 at 0 to match firmware (z has no bias unlock).
 """
 from __future__ import annotations
 
@@ -68,21 +70,29 @@ class AxisAdaptiveConfig:
     @classmethod
     def for_axis(cls, axis: str) -> "AxisAdaptiveConfig":
         if axis in ("pitch", "roll"):
+            lower = [-cls._PR_WLIM[0]] + [0.0] * (NUM_BASIS - 1)  # slot 0 only (mrac.c:354)
             return cls(gamma=list(cls._PR_GAMMA), What_limit=list(cls._PR_WLIM),
-                       What_tol=list(cls._PR_WTOL), sigma=0.01, sigma_lf=0.8,
-                       gam_f=16.0, omega_u=30.0, e_deadzone=0.05, e_freeze=1.2,
-                       e_sat=0.5, k_e=0.05)
+                       What_tol=list(cls._PR_WTOL), What_lower_limit=lower,
+                       sigma=0.01, sigma_lf=0.8, gam_f=16.0, omega_u=30.0,
+                       e_deadzone=0.05, e_freeze=1.2, e_sat=0.5, k_e=0.05)
         if axis == "yaw":
+            pr_wlim = cls._PR_WLIM
+            lower = [-pr_wlim[0] * 0.6] + [0.0] * (NUM_BASIS - 1)  # slot 0 only (mrac.c:355)
             return cls(gamma=[1.0, 0.1, 0.05, 0.05, 0.1, 0.1],
-                       What_limit=[v * 0.6 for v in cls._PR_WLIM],
-                       What_tol=[v * 0.6 for v in cls._PR_WTOL], sigma=0.01,
-                       sigma_lf=1.0, gam_f=16.0, omega_u=20.0, e_deadzone=0.05,
-                       e_freeze=1.0, e_sat=0.7, k_e=0.05)
+                       What_limit=[v * 0.6 for v in pr_wlim],
+                       What_tol=[v * 0.6 for v in cls._PR_WTOL],
+                       What_lower_limit=lower,
+                       sigma=0.01, sigma_lf=1.0, gam_f=16.0, omega_u=20.0,
+                       e_deadzone=0.05, e_freeze=1.0, e_sat=0.7, k_e=0.05)
         if axis == "z":
+            # z has NO bias unlock in firmware (mrac.c:353-355 only covers pitch/roll/yaw).
+            # Explicitly set all slots to 0.0 to prevent a future reader from
+            # "fixing" this to match the other axes.
+            lower = [0.0] * 6
             return cls(gamma=list(cls._Z_GAMMA), What_limit=list(cls._Z_WLIM),
-                       What_tol=list(cls._Z_WTOL), sigma=0.01, sigma_lf=0.0,
-                       gam_f=16.0, omega_u=20.0, e_deadzone=0.05, e_freeze=1.2,
-                       e_sat=0.4, k_e=0.05)
+                       What_tol=list(cls._Z_WTOL), What_lower_limit=lower,
+                       sigma=0.01, sigma_lf=0.0, gam_f=16.0, omega_u=20.0,
+                       e_deadzone=0.05, e_freeze=1.2, e_sat=0.4, k_e=0.05)
         raise ValueError(f"unknown axis {axis!r}")
 
 

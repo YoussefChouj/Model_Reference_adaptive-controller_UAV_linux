@@ -139,8 +139,20 @@ def test_gazebo_plant_probe_reports_windows_when_absent():
 
 
 def test_gazebo_plant_step_message_mentions_linux_partition():
-    """GazeboPlant.step raises with a message that names the handoff."""
+    """GazeboPlant.step raises with a message that names the spec when
+    the simulator is unavailable. On Linux with gz-jetty installed, the
+    probe returns available=True and step() instead tries to start the
+    bridge -- this test guards the unavailable path's message clarity,
+    not the bridge path (which is exercised by the spec 4b integration
+    tests on the Linux partition)."""
     from sim.plant import GazeboPlant
+    avail, _ = GazeboPlant.is_available()
+    if avail:
+        # On a Linux box with gz-jetty installed, step() takes the
+        # bridge path; the bridge-startup error is the equivalent of
+        # the unavailable path's message. Skip the message check.
+        pytest.skip("Gazebo is available on this host; the bridge path "
+                    "is exercised by spec 4b integration tests.")
     with pytest.raises(NotImplementedError) as exc_info:
         GazeboPlant().step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
     msg = str(exc_info.value)
@@ -149,8 +161,14 @@ def test_gazebo_plant_step_message_mentions_linux_partition():
 
 
 def test_gazebo_plant_reset_message_mentions_linux_partition():
-    """GazeboPlant.reset raises with a message that names the handoff."""
+    """GazeboPlant.reset raises with a message that names the spec when
+    the simulator is unavailable. See the matching step() test for the
+    reason the unavailable-path assertion is gated."""
     from sim.plant import GazeboPlant
+    avail, _ = GazeboPlant.is_available()
+    if avail:
+        pytest.skip("Gazebo is available on this host; the bridge path "
+                    "is exercised by spec 4b integration tests.")
     with pytest.raises(NotImplementedError) as exc_info:
         GazeboPlant().reset()
     msg = str(exc_info.value)
