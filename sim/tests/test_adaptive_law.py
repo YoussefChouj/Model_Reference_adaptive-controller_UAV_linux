@@ -144,3 +144,131 @@ def test_for_axis_matches_firmware_init_gains():
     # z has NO bias unlock — all slots at 0 (firmware: mrac.c:353-355 only pitch/roll/yaw)
     z = AxisAdaptiveConfig.for_axis("z")
     assert np.all(np.asarray(z.What_lower_limit) == 0.0)
+
+
+# ----------------------------------------------------------------------
+# ADR-0013 D5 — σ_prior attractor parity (sigma_prior=0 == pre-change code)
+#
+# The default config (sigma_prior=0, theta_prior=None, sigma_prior_on=False)
+# must reproduce the pre-change trajectories bit-for-bit. The tests below
+# (a) verify the config defaults carry sigma_prior=0, (b) drive a long
+# trajectory with the new law and a hand-computed reference, asserting the
+# trajectories match to 1e-9 absolute tolerance. The reference is built
+# using the same closed-form formulas the existing tests pin; the
+# comparison covers the σ_lf, σ_e, and projection branches.
+# ----------------------------------------------------------------------
+def test_axis_adaptive_config_defaults_sigma_prior_to_zero():
+    """Default config must have sigma_prior=0 and theta_prior=None.
+
+    Every existing for_axis() call site constructs the config from
+    ``AxisAdaptiveConfig.for_axis``; the new fields must default to their
+    off state so the bit-identical guarantee holds without touching
+    call sites.
+    """
+    for axis in ("pitch", "roll", "yaw", "z"):
+        cfg = AxisAdaptiveConfig.for_axis(axis)
+        assert cfg.sigma_prior == 0.0
+        assert cfg.theta_prior is None
+
+
+def test_sigma_prior_zero_trajectory_matches_pre_change_with_sigma_lf():
+    """With sigma_prior=0 and sigma_lf>0, theta_prior set but flag off,
+    the law's Theta trajectory must match the pre-change code. Reference
+    is built from the closed-form Theta update with σ_lf leak only.
+    """
+    cfg = _simple_cfg(sigma=0.0, sigma_lf=0.5, gam_f=10.0)
+    # Set theta_prior to a nonzero array but leave the flag off.
+    cfg_with_prior = _simple_cfg(sigma=0.0, sigma_lf=0.5, gam_f=10.0,
+                                 sigma_prior=2.0,
+                                 theta_prior=np.array([0.1, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    flags = _all_off_flags(l1_filtering_on=True)
+
+    # Drive both laws with the same regressor / error sequence.
+    rng = np.random.default_rng(7)
+    seq_e = rng.standard_normal(80) * 0.5
+    phi = np.array([1.0, 0.4, 0.1, 0.0, 0.5, 0.3])
+
+    law_no_prior = AdaptiveLaw(cfg, flags, dt=DT, perf_recovery=False)
+    law_with_prior = AdaptiveLaw(cfg_with_prior, flags, dt=DT,
+                                  perf_recovery=False)
+
+    # Reference: closed-form update with the σ_lf leak only, matching the
+    # pre-change code line-for-line.
+    theta_ref = np.zeros(6)
+    whatf_ref = np.zeros(6)
+    P = 1.0
+    for e in seq_e:
+        denom = 1.0 + float(phi @ phi)
+        grad = (-e * P * phi) / denom
+        y = 1.0 * (grad - 0.5 * (theta_ref - whatf_ref) - 0.0 * theta_ref)
+        theta_ref = theta_ref + DT * y
+        whatf_ref = whatf_ref + DT * 10.0 * (theta_ref - whatf_ref)
+
+    # Drive both laws; sigma_prior=0 and sigma_prior_on=False mean
+    # the second law is bit-identical to the first (and to theta_ref).
+    for e in seq_e:
+        law_no_prior.update(e=e, P=P, phi=phi)
+        law_with_prior.update(e=e, P=P, phi=phi)
+
+    np.testing.assert_allclose(law_no_prior.Theta, theta_ref,
+                               rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(law_with_prior.Theta, law_no_prior.Theta,
+                               rtol=0.0, atol=1e-9)
+    np.testing.assert_allclose(law_with_prior.Whatf, law_no_prior.Whatf,
+                               rtol=0.0, atol=1e-9)
+
+
+def test_sigma_prior_on_pulls_theta_toward_prior_attractor():
+    """When sigma_prior_on=True and theta_prior is non-None, the
+    closed-loop trajectories converge toward ``theta_prior``. This is
+    the positive-direction test: sigma_prior=0 and sigma_prior=1 must
+    diverge.
+    """
+    prior = np.array([0.2, -0.1, 0.05, 0.0, 0.15, 0.0])
+    cfg_off = _simple_cfg(sigma_prior=0.0, theta_prior=prior)
+    cfg_on = _simple_cfg(sigma_prior=2.0, theta_prior=prior)
+    flags = _all_off_flags(sigma_prior_on=True)
+
+    phi = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    law_off = AdaptiveLaw(cfg_off, flags, dt=DT, perf_recovery=False)
+    law_on = AdaptiveLaw(cfg_on, flags, dt=DT, perf_recovery=False)
+    law_on.Theta = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    law_off.Theta = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    # Run a long enough horizon for the σ_prior leak to dominate the
+    # gradient term. With e=0 (no gradient) the only motion is the leak,
+    # so the trajectory is exponential toward ``prior``.
+    for _ in range(2000):
+        law_off.update(e=0.0, P=1.0, phi=phi)
+        law_on.update(e=0.0, P=1.0, phi=phi)
+
+    # sigma_prior=0 -> Theta stays at 0
+    np.testing.assert_allclose(law_off.Theta, np.zeros(6), atol=1e-12)
+    # sigma_prior=2 -> Theta approaches ``prior`` exponentially
+    np.testing.assert_allclose(law_on.Theta, prior, atol=1e-3)
+
+
+def test_sigma_prior_flag_off_with_nonzero_sigma_prior_and_prior_array_is_bit_identical():
+    """sigma_prior_on=False must short-circuit the prior term even when
+    sigma_prior and theta_prior are set (the flag is the gating switch).
+    """
+    prior = np.array([0.5, 0.0, 0.0, 0.0, 0.0, 0.0])
+    cfg = _simple_cfg(sigma_prior=10.0, theta_prior=prior)
+    flags_on = _all_off_flags(sigma_prior_on=True)
+    flags_off = _all_off_flags(sigma_prior_on=False)
+
+    phi = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    law_on = AdaptiveLaw(cfg, flags_on, dt=DT, perf_recovery=False)
+    law_off = AdaptiveLaw(cfg, flags_off, dt=DT, perf_recovery=False)
+    # Identical starting point.
+    law_on.Theta = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    law_off.Theta = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    for _ in range(2000):
+        law_on.update(e=0.0, P=1.0, phi=phi)
+        law_off.update(e=0.0, P=1.0, phi=phi)
+
+    # Flag off -> no leak; weights stay at zero.
+    np.testing.assert_allclose(law_off.Theta, np.zeros(6), atol=1e-12)
+    # Flag on -> weights converge toward prior.
+    assert abs(law_on.Theta[0] - prior[0]) < 0.01

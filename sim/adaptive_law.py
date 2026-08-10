@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 
@@ -40,6 +40,12 @@ class AdaptiveFlags:
     tanh_saturation_on: bool = True
     e_modification_on: bool = True
     l1_filtering_on: bool = False
+    # σ_prior attractor (ADR-0013 D5). When True and AdaptiveLaw has a
+    # non-None ``theta_prior`` plus ``sigma_prior > 0``, an extra leak
+    # term ``-sigma_prior * (Theta - theta_prior)`` is added alongside
+    # the existing σ-mod leak. Default off → bit-identical behaviour to
+    # the pre-change code on every existing scenario.
+    sigma_prior_on: bool = False
 
 
 @dataclass
@@ -58,6 +64,11 @@ class AxisAdaptiveConfig:
     e_freeze: float = 0.0
     e_sat: float = 0.0
     k_e: float = 0.05
+    # σ_prior attractor (ADR-0013 D5). The dimensionless prior weight
+    # ``theta_prior`` is opt-in; ``sigma_prior=0`` (default) keeps every
+    # pre-existing call site bit-identical.
+    sigma_prior: float = 0.0
+    theta_prior: Optional[np.ndarray] = None
 
     # per-axis firmware defaults (mrac.c:284-368)
     _PR_GAMMA = [1.5, 0.2, 0.05, 0.05, 0.1, 0.1]
@@ -143,6 +154,20 @@ class AdaptiveLaw:
         self._limit = np.asarray(config.What_limit, float)
         self._tol = np.asarray(config.What_tol, float)
         self._lower = np.asarray(config.What_lower_limit, float)
+        # σ_prior (ADR-0013 D5). The default ``sigma_prior=0`` makes the
+        # leak contribution identically zero on every existing call site.
+        self._sigma_prior = float(getattr(config, "sigma_prior", 0.0))
+        prior = getattr(config, "theta_prior", None)
+        if prior is None:
+            self._theta_prior = None
+        else:
+            prior_arr = np.asarray(prior, dtype=float)
+            if prior_arr.shape != (self.n,):
+                raise ValueError(
+                    f"theta_prior shape {prior_arr.shape} does not match "
+                    f"num_basis={self.n}"
+                )
+            self._theta_prior = prior_arr
         self.reset()
 
     def reset(self) -> None:
@@ -200,9 +225,20 @@ class AdaptiveLaw:
                 grad = _project_gradient(grad, self.Theta, self._limit,
                                          self._tol, self._lower)
             # FIX_LEAKAGE_NORMALIZATION=1: leakage terms not divided by denom
+            # σ_prior attractor (ADR-0013 D5) — opt-in. When
+            # ``sigma_prior_on`` is False or ``self._theta_prior is None``
+            # or ``self._sigma_prior == 0``, this term is identically
+            # zero and the update is bit-identical to the pre-change code.
+            sigma_prior_term = 0.0
+            if (fl.sigma_prior_on
+                    and self._theta_prior is not None
+                    and self._sigma_prior != 0.0):
+                sigma_prior_term = self._sigma_prior * (
+                    self.Theta - self._theta_prior)
             y = self._gamma * (grad
                                - sigma_lf * (self.Theta - self.Whatf)
-                               - sigma_eff * self.Theta)
+                               - sigma_eff * self.Theta
+                               - sigma_prior_term)
             self.Theta += self.dt * y
             if fl.l1_filtering_on:
                 self.Whatf += self.dt * cfg.gam_f * (self.Theta - self.Whatf)
