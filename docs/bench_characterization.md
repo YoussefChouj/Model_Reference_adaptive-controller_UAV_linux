@@ -83,6 +83,33 @@ keeps prop-wash off the scale pan (blowing down corrupts the reading with airflo
     (hysteresis) — each row records the `sweep` direction and `settle_s`, the seconds that
     operating point was held before you read the scale. Only **Log point** writes a row;
     start/stop and CCR steps do not. `thrust_N = (grams − tare) * 0.00981`.
+    `sweep` is measured **against the previous logged point**, not against the previous
+    commanded CCR — with auto-IDLE every point is approached from idle, so a commanded-CCR
+    comparison labels the whole curve `up` (it did: 22 of 79 rows in
+    `thrust_20260807_191816.csv` are wrong, including the entire descending 3300→2300 run).
+*   **Read in the green window, not "when it settles".** The `bench_arrival` line goes
+    `RAMPING` → `settling` → **`READ NOW`** (green, from `settle before reading` to +10 s)
+    → `LATE`. Above ~CCR 3300 the thrust does **not** converge — it decays — so "the
+    settled value" is not a physical quantity and what you record is a function of how
+    long you waited. The window makes dwell a *convention*: points taken at comparable
+    dwell are comparable to each other even when none is settled. The 2026-08-07 session
+    had a dwell stdev of 6.6 s (range 0.1–56.6 s), which feeds the decay straight into the
+    curve as scatter. Arrival is confirmed against the **firmware CCR echo**, so a dropped
+    `0x16` shows as `WAIT` instead of becoming a bad point.
+*   **To characterise the decay itself, don't instrument every point** — hold ONE high CCR
+    and press Log point repeatedly. Each row stamps `settle_s`, so the repeats *are* the
+    decay curve, and `sweep` marks them `rpt`. One such run at 2–3 CCRs tells you how much
+    the dwell convention is worth; after that, a fixed dwell is all you need.
+*   **Above ~CCR 3200 the reading does not settle — it overshoots, then rings down slowly.**
+    Fill in **`min (g)` / `max (g)`** with the swing you watched before picking the settled
+    number. They land in `grams_min` / `grams_max` (blank when you don't, so "not observed"
+    stays distinct from a real 0 g) and are cleared after every Log point. A point read
+    mid-ring is then identifiable in the fit instead of just being scatter. Their newtons
+    are `(g − tare) × 0.00981`, so they are not repeated as separate `thrust_N_*` columns.
+*   Logging while the motor is idling is allowed (idle points are real measurements) but is
+    **flagged in the status line** — pressing Log point twice after auto-IDLE files the
+    previous reading under the idle CCR, which is how a 655 g row ended up at CCR 2150 in
+    `thrust_20260807_191816.csv`.
 *   Set **`prop`** and **`motor tag`** before each block. `motor_id` is the ESC channel, not
     the identity of the motor bolted to the stand, and a CSV mixing a CW and a CCW block with
     no `prop` column cannot be separated afterwards.
@@ -97,6 +124,13 @@ keeps prop-wash off the scale pan (blowing down corrupts the reading with airflo
     up at idle rather than at whatever the slider was left showing. This exists because a
     2026-07-29 sweep held one motor near full power for ~50 minutes (40 points at
     CCR ≥ 3800) and burned it out.
+*   **Soft start (`soft-start ramp`, default 400 CCR/s).** `GO` walks the command up to the
+    target instead of stepping to it: peak ESC/motor current is set by the *size* of the
+    jump, not by the endpoint, so idle → 3600 in one packet is the harshest event of the
+    whole session. It also removes most of the overshoot-and-ring above CCR 3200. Only
+    **rises** are limited — IDLE, STOP and the thermal guard still drop instantly, because
+    coming down is what protects the motor. `settle_s` starts when the ramp *lands*, so a
+    slow ramp can't make an unsettled reading look like it was held. `0` = old instant step.
 *   **RPM (ADR-0010):** TCRT5000 reflective module plugged into a spare TIM2 3-pin header
     (use PB3/PB10/PB11 — avoid the PA5 header until its rail voltage is verified ≤3.3 V or a
     10k series resistor is added), sensor looking **up at the blade roots from below**, one

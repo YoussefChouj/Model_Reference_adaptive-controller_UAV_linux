@@ -58,10 +58,32 @@ degrading:
   that is baud arithmetic and the link is already ~100 % saturated by existing telemetry.
   **Measured drop-free ceiling is ~1600 B/s**; 2055 B/s was accepted and then dropped 14 %
   of frames on every slot. Cost of a slot is `(7 + payload_bytes) * 100 / divider`,
-  `divider = round(80.4 / rate)`. USART3 allows 10368 B/s but its wire was physically cut
-  on 2026-07-28 — `--transport usart3` is dead until the replacement radio is fitted.
+  `divider = round(80.4 / rate)`.
   Achieved rates land ~8 % under the request; `seq` is the ground truth.
 - **Slots.** Four. A fifth `--group` is an error, not a queue.
+
+### `--transport usart3` — the wire is fine, the HOST TOOL is broken
+
+Superseded note, kept so it is not re-derived: this file used to say the USART3 wire was
+physically cut and the transport was dead. **That is no longer true.** The 24RF radio was
+retired and commit `05ae422` moved the downlink onto a BLE module at `USART3_BAUD 921600`
+(`BSP/usart3.h:25`). The link works.
+
+**But do not reach for `--transport usart3` expecting it to work.** Four defects, all
+verified still present on 2026-08-09, would make it fail *silently* rather than loudly:
+
+| # | Where | Defect |
+| --- | --- | --- |
+| 1 | `stream_log.py:391` | usart3 data port defaults to `COM3`; the dongle is **COM7** |
+| 2 | `stream_log.py:114,116,289,291` | data port opened at hardcoded `115200` — decodes **garbage** against a 921600 link |
+| 3 | `stream_log.py:264` | `usart3_baud=115200` is a function parameter with **no CLI flag** |
+| 4 | `API/subscribe.c:531` | budget cap is `USART3_BAUD/10` = 92160 B/s, but the radio's **measured** ceiling is ~6.7 kB/s |
+
+Defect 4 is the dangerous one: the firmware will happily *accept* a subscription an order
+of magnitude beyond what the radio can carry, so the refusal you rely on (`0x7F`) will not
+fire. The cap must be the measured air ceiling, not baud arithmetic.
+
+Fix 1–3 before using this transport, and size any request against ~6.7 kB/s — not 92 kB/s.
 
 `log_frames.md` shows the arithmetic worked through for the shipped default. A test
 (`test_shipped_default_frame_fits_the_uart5_budget`) fails if an edit pushes it over.
@@ -99,9 +121,12 @@ python -m ground_station.flashtool.rebuild_and_flash --yes        # build + flas
 Without it the script builds, reports, restores, and stops.
 
 Exit codes are per-stage so a failure can never read as success: 2 uVision GUI resident,
-3 build failed, 4 `uvoptx` not restored byte-exact, 5 target dark, 6 not disarmed or
-ARM_Status unreadable, 7 flash failed after retries, 8 target did not come back up.
+3 build failed, 4 `uvoptx` not restored byte-exact, 5 target dark, 6 arm gate refused
+(armed, no readable arm flag anywhere, or the two oracles disagreeing), 7 flash failed
+after retries, 8 target did not come back up.
 **Never work around a non-zero exit** — each one means a specific guard fired.
+**Every refusal restores the flashed artifacts**, so a refused run never leaves a stale
+ELF in `OBJ/` for the next run (or livewatch) to trust.
 
 Validated end-to-end on live hardware 2026-07-29, with the drone powered and streaming
 telemetry throughout.
@@ -117,9 +142,17 @@ telemetry throughout.
    `<pMon>BIN\CMSIS_AGDI.dll`, which claims the probe over SWD. Pointing it at the simulator
    DLL for the build's duration means that driver is never loaded, and `uvoptx` is restored
    byte-exact — the script checks the SHA-256 and refuses to flash if it differs.
-4. **Reads `ARM_Status` through the *snapshot* ELF** and requires DisArmed. Reading it
-   through the fresh build would resolve the wrong address. Props off regardless: flashing
-   resets the target and motors can twitch.
+4. **Runs the two-oracle arm gate** (rebuilt 2026-08-09 — the old single unvoted SWD read
+   reported ARMED for a demonstrably disarmed drone, and the same fault can report
+   DisArmed for an armed one). **Telemetry is primary**: Frame A `status_arm`, packed by
+   the firmware, so it depends on neither the ELF nor the probe. The SWD read is
+   secondary, voted 9× requiring unanimity, and only counts if `elf_matches_target()`
+   proves its ELF is the running image — otherwise it abstains, since a stale ELF would
+   otherwise deadlock the pipeline (only flashing resyncs it). Disagreement ⇒ refuse.
+   No arm flag anywhere ⇒ refuse. `--arm-port` picks the telemetry port; it must carry the
+   `0xAA 0xBB` envelope, so USART3 does **not** qualify while it emits the bare JustFloat
+   throughput ladder. **Do not weaken this gate** — it is the operator's sole safety limit
+   for flashing, by explicit policy.
 5. **Flashes, retrying transient failures.** `Erase Done.Programming Failed!RDDI-DAP Error`
    happened on the first attempt this session over the wireless probe. It leaves the part
    **erased and the drone dark** — an incomplete write, not a brick. A plain retry fixed it
@@ -136,6 +169,15 @@ committed but marked NOT YET USABLE — its identity gate can never pass on stam
 (findings a–e, commit `9279847`), and `all` skips the custody restore on a gate failure.
 `_pMon_neutralised` and `_run_uv4` are the two reviewed pieces; `rebuild_and_flash` uses
 exactly those and none of the machinery around them.
+
+**But do not read that as "`rebuild_and_flash` is therefore clean."** Finding (d) — a
+refusal path skipping the artifact restore — turned out to be present in
+`rebuild_and_flash` too, found live 2026-08-09. Each refusal left the unflashed build in
+`OBJ/`, so the *next* run snapshotted it as "the flashed artifacts" and resolved the arm
+flag through a wrong address; refusals compounded, and a wrong address reads garbage
+*reproducibly* (a unanimous 9/9 "armed" against 126 telemetry frames saying disarmed).
+Fixed — every refusal now restores. Not importing a defective module is not the same as
+not sharing its defect.
 
 ---
 
