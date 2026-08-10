@@ -1,0 +1,57 @@
+---
+description: Prose-style principles for the agent's own replies — short sentences, active voice, one-word-one-meaning, no speculative detail. Counters the "oh wait..." spiral in verbose agents.
+alwaysApply: true
+---
+
+# Prose Style
+
+Apply these principles to all prose you write: docs, commit messages, PR descriptions, reports, and replies.
+
+## Core rules
+
+- **Use simple words.** Say "use" not "utilise". Say "show" not "demonstrate".
+- **One word for one idea.** Do not write "each and every", "various and sundry", or alternate synonyms inside one paragraph to vary the prose.
+- **Short sentences.** ≤ 20 words for instructions and findings. One idea per sentence.
+- **Short paragraphs.** One topic per paragraph. ≤ 4 sentences.
+- **Active voice.** Write "Run the test", not "The test must be run".
+- **No speculative detail.** Do not explain how something might fail in three different ways when the user did not ask. Do not preempt objections the user did not raise.
+- **No hedges for their own sake.** "Maybe we could possibly consider" is one word stretched across five. Cut.
+- **No emoji, no marketing voice.** This is engineering.
+
+## Why this matters
+
+Verbose agents spiral. They hedge, repeat, restate, qualify — and the *thinking* drifts into the *output* because writing a long answer feels like progress. Tight prose forces tight thinking: if you cannot say it in 20 words, you do not know what you mean yet.
+
+## When to break these rules
+
+- **Reporting a measurement.** Tables and numbers are denser than prose and do not need prose around them.
+- **Citing a load-bearing rule.** The hardware-safety prohibition list is a long paragraph on purpose — ambiguity costs a flight.
+- **Quoting a constraint the operator wrote verbatim.** Preserve the wording so the agent later can grep it.
+- **User explicitly asked for detail.** "Explain in detail" is a permission, not a default.
+
+## What does NOT change
+
+- Code. Style rules govern prose around code, not code itself.
+- File structures. A spec still has Sections. A journal still has Append.
+- Tables. Tables are prose compressed; they make text tighter, not looser.
+- Bash blocks. Commands stay copy-pasteable.
+
+## Anti-patterns to catch yourself doing
+
+| Anti-pattern | Fix |
+|---|---|
+| "It is worth noting that X" | Just write X. |
+| "As previously mentioned" | The reader has the prior turn in context. |
+| "In order to" | "To". |
+| "A number of" | A number, or "some". |
+| "Due to the fact that" | "Because". |
+| "At this point in time" | "Now". |
+| "In the event that" | "If". |
+| "Is able to" | "Can". |
+| "It should be noted" | Delete. |
+| Restating the question before answering | Answer first. |
+| Two synonyms for the same concept in one paragraph | Pick one. |
+
+## Tie-breaker
+
+If you are unsure whether to keep or cut, cut. Detail can always be added on the next turn; bloat cannot be unread.

@@ -6,6 +6,8 @@ description: >
   cluster. Owns the flight-test queue. Use when the user says "/uav-dispatch", asks what to
   work on next, wants to split work across parallel sessions, or is planning a flight
   session. Does NOT plan or implement — it decides what and where.
+  Decisions surfaced during the conversation go to `sessions_summary/operator-decisions.md` —
+  check that file first, append new decisions there. Do not keep open decisions only in chat.
 ---
 
 # UAV dispatcher — the main session

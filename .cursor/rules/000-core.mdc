@@ -19,6 +19,7 @@ Never read whole files — read targeted line ranges once the stack narrows the 
 - If multiple interpretations exist, present them — don't silently pick one.
 - If a simpler approach exists, say so. Push back when warranted.
 - Confirm shared understanding on any non-trivial, cross-subsystem, or hard-to-reverse change **before** acting.
+- **Research before assumption.** Before solving a problem, confirm it exists and check what is already known. See `.cursor/rules/session-lifecycle.mdc §Think before solving` for the checklist (is it solved? are there hidden constraints? was this attempted before?). Assumptions that are never checked against the codebase cost more than the time spent checking.
 
 ## 3. Simplicity + surgical changes
 - Minimum code that solves the problem. Nothing speculative.
@@ -49,9 +50,13 @@ rather than builds means artifacts got written that the user never argued with.
 - Read only files needed for the current task; prefer targeted ranges.
 - Don't re-read files you just wrote.
 - Summarize long outputs rather than quoting them wholesale.
+- Keep `CLAUDE.md` Session State short. Closed sessions live in `sessions_summary/` — point to them, do not restate them.
 
 ## 7. After editing code
 Keep the knowledge graph current:
 ```
 python -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
 ```
+
+## 8. Prose style
+Apply `.cursor/rules/prose-style.mdc` to every reply. Short sentences, active voice, one word per idea, no speculative detail. If you cannot say it in 20 words, you do not know what you mean yet.

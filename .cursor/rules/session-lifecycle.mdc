@@ -1,0 +1,81 @@
+---
+description: Decision rules for what stays in CLAUDE.md Session State vs. what moves to sessions_summary/. Always applies.
+alwaysApply: true
+---
+
+# Session State lifecycle + thinking discipline
+
+`CLAUDE.md` Session State is short on purpose. Detailed findings live in `sessions_summary/`. The full contract is `sessions_summary/POLICY.md` — read this file once and cite it; do not re-derive.
+
+## Thinking discipline — research before assumption
+
+Before solving a problem, confirm the problem exists and check what is already known. Assumptions that are never checked against the codebase cost more than the time spent checking.
+
+**Never start coding until you have confirmed:**
+
+1. **Is it already solved?** Check `wiki/`, `docs/decisions.md`, `docs/adr/`, and `sessions_summary/` for any prior work on this topic. A problem solved six months ago doesn't need a new solution.
+2. **Are there constraints you don't know about?** Check `memory.mdc`, `project-context.mdc`, and the active constraints in `CLAUDE.md` Session State. Constraints like "EKF stays in shadow mode" or "USART3 dispatch stays unwired" aren't bugs — they're deliberate decisions that make certain solutions wrong by definition.
+3. **Was this attempted before and abandoned?** Check `sessions_summary/` and `.agent_memory/lessons.jsonl`. Failed attempts are in the lessons file. The agent should not re-derive a failure.
+4. **Is there an elegant approach the agent doesn't know about?** Use `ccc search` to find related code. Check the wiki for relevant concepts. If the problem touches a subsystem the agent hasn't touched before, read the subsystem's wiki entry before assuming a solution path.
+
+**When to stop and ask instead:**
+
+- A constraint exists that the agent doesn't know how to work around.
+- Two or more valid approaches exist with no clear winner.
+- The problem touches a safety-critical path.
+- The agent's expertise ends and a domain expert (you) would know the answer.
+
+**The failure mode this counters:** The agent sees a problem, assumes the cause, writes code to fix the assumed cause, ships the fix, and the operator finds the real cause was a constraint the agent didn't know about — or a problem that was already solved.
+
+## Status taxonomy
+
+## Status taxonomy
+
+Every work block is one of `active` / `paused` / `closed` / `superseded`. The status is set by the agent working the session, on operator intent.
+
+## When to archive (Trigger A — status transition)
+
+The agent that detects acceptance writes the archive file in the same turn it edits `CLAUDE.md`. Triggers:
+
+- `ROADMAP.md` moves the task to `state: done`.
+- The operator says the goal is finished.
+- The current goal has no remaining `Open decisions` items.
+
+When in doubt: ask. The cost of a wrong transition is low; the cost of *not* asking is a `CLAUDE.md` that grows back to 30 KB.
+
+## When to compress (Trigger B — staleness cap)
+
+A session with `Last Updated` older than **7 days** AND no commits to any file it referenced is **auto-paused** the next time an agent touches `CLAUDE.md`. Compress, do not delete. Pointer remains; detail moves to the archive.
+
+Override per-session in the archive file's front-matter if a known long pause applies (e.g. waiting on seller reply, 30-day turnaround).
+
+## Decision table — quick reference
+
+| Content | Lives in |
+|---|---|
+| Current goal (one line) | `CLAUDE.md` Session State |
+| FC live state | `CLAUDE.md` while `active`; archive once moved |
+| Active constraints overriding older docs | `CLAUDE.md` (these are rules; they don't move) |
+| Open decisions | `CLAUDE.md` Session State |
+| Next-action order | `CLAUDE.md` while `active`; archive once `paused`/`closed` |
+| Measurements, diagnostic sequences, gotchas | `sessions_summary/<file>.md` |
+| Uncommitted-work inventory | `git status` covers this — do not write it down |
+| Cross-cutting harnesses | `sessions_summary/harnesses.md` |
+| Codebase facts | `wiki/` |
+| Architectural decisions | `docs/decisions.md`, `docs/adr/` |
+
+## Rot protocol — lazy on-read
+
+When opening an archive:
+
+1. Check `<Updated>` date. > 30 days: read with extra skepticism.
+2. Verify cited `file:line` references still resolve. `ccc search` or targeted Read.
+3. Follow any `Superseded by` chain.
+
+Drift detection never edits the archive's body. Append a `## Drift` section with date, what was checked, what drifted, and verdict (`still valid` or `invalidated, see <newer file>`). Original measurements stay — they are evidence of *what was true then*.
+
+Cold-start does NOT pre-validate archives. The cold-start path doesn't read them anyway; cost is paid by the agent that needs the data.
+
+## Hard rule
+
+Do not write findings directly into `CLAUDE.md` Session State. Write them to the archive file first, then update Session State to point at it. Session State holds pointers, archive holds data. This is what keeps `CLAUDE.md` short.

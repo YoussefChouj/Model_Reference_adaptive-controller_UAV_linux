@@ -13,8 +13,10 @@ loads the same context. This is what keeps the three roles in sync.
 1. `CLAUDE.md` — **Session State** section especially. It holds the current goal, the live
    safety constraint, and explicit user intent that overrides older docs. It is the newest
    source of truth; when it disagrees with an ADR, it wins.
-2. `docs/decisions.md` — why things are the way they are.
-3. `docs/interfaces.md` — cross-subsystem contracts you must not break.
+2. `sessions_summary/operator-decisions.md` — operator decisions still open. Check it before
+   proposing architecture changes; the agent surfaces decisions here, you check them off there.
+3. `docs/decisions.md` — why things are the way they are.
+4. `docs/interfaces.md` — cross-subsystem contracts you must not break.
 
 ## Load when relevant
 
@@ -22,6 +24,10 @@ loads the same context. This is what keeps the three roles in sync.
 - `wiki/index.md` — architecture and known gotchas.
 - `docs/adr/` — the ADR covering the subsystem you are touching.
 - `.agent_memory/lessons.jsonl` — past task failures in this codebase. Read before repeating one.
+- `sessions_summary/POLICY.md` — lifecycle rules for what stays in `CLAUDE.md` vs.
+  `sessions_summary/`. Read once; cite it when the question comes up, do not restate it.
+- Closed session archives (`sessions_summary/YYYY-MM-DD-*.md`) — only if the current task
+  touches the same topic. Apply the rot protocol before relying on their contents.
 
 ## Task-local shared memory
 

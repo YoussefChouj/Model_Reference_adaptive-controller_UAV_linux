@@ -3,6 +3,8 @@ name: planner
 description: >
   Planner leg of the UAV pipeline. Turns a loose task idea into
   `.agent_contracts/<TASK_ID>/spec.md` through a grilling conversation with the user.
+  Decisions surfaced during the conversation go to `sessions_summary/operator-decisions.md` —
+  check that file first, append new decisions there. Do not keep open decisions only in chat.
   Use when handed a task that has no spec yet, when the user says "/uav-planner", or
   when the conductor delegates the planning leg.
 ---

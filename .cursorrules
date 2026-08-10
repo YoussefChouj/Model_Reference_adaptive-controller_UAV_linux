@@ -7,6 +7,8 @@ The real rules are now scoped `.mdc` files under `.cursor/rules/`:
                          goal-driven loops, surgical changes, report format
 - `knowledge-stack.mdc`— full query-priority stack (ccc / graphify / wiki / decisions / interfaces / lessons)
 - `ccc-search.mdc`     — ccc/cocoindex daemon operational guide (agent-requested)
+- `prose-style.mdc`    — always-on prose principles: short, active, one-word-per-idea
+- `session-lifecycle.mdc` — always-on rules for what stays in CLAUDE.md vs. sessions_summary/
 - `embedded-c.mdc`     — STM32F4/FreeRTOS conventions + gotchas (auto-attaches on API/TASK/BSP/USER)
 
 Custom commands: `.cursor/commands/` — type `/` in the Agent (session-start, session-end, diagnose, review, livewatch).
