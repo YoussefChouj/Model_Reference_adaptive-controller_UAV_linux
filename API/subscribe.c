@@ -693,10 +693,15 @@ void Subscribe_StreamTick(void)
             continue;
         }
 
-        /* Ask the transport BEFORE building. stream_buf stays under DMA until
-         * the previous frame drains, so rebuilding it mid-transfer would put
-         * half-old, half-new bytes on the wire. Leaving the slot due retries
-         * next cycle; bumping seq leaves the gap the host uses to spot it. */
+        /* Ask the transport BEFORE building. Usart3_Stream_Busy() means
+         * BACKPRESSURE since the 2026-08-09 TX ring rework: the ring is over
+         * half full, i.e. the wire is not draining as fast as Send_Task is
+         * offering. (Usart3_Stream_TxSend copies synchronously, so stream_buf
+         * is no longer held under DMA -- the old corruption worry is gone.)
+         * The right move under sustained backpressure is to drop THIS sample,
+         * not to let the slot stay due and burst two frames next cycle deeper
+         * into backlog: bumping seq leaves the gap the host counts as loss,
+         * and a dataset with counted gaps beats one with smeared cadence. */
         if (st->transport == SUBSCRIBE_TRANSPORT_USART3) {
             if (Usart3_Stream_Busy() != 0U) {
                 st->due = 0U;

@@ -465,24 +465,27 @@ void send_to_linux(void)    //����4
  *        50     204       16361              220     884       70897
  *        80     324       25985              280    1124       90145
  */
-#define USART3_THROUGHPUT_TEST   1
+/* PRODUCTION IMAGE 2026-08-09 — flip to 1 only to re-measure the ladder in
+ * flight. The 16-byte attitude triple below is what the link carries when no
+ * 0x21 stream is subscribed. See session 2026-08-09-micoair-summary.md for the
+ * ladder history and the 90363 B/s at 0.00% loss measurement. */
+#define USART3_THROUGHPUT_TEST   0
 #define USART3_TEST_FLOAT_LADDER { 18, 30, 50, 80, 120, 170, 220, 280 }
 #define USART3_TEST_DIV_LADDER   {  1,  1,  1,  1,   1,   1,   1,   1 }
 #define USART3_TEST_MAX_FLOATS   280
 #define USART3_TEST_STEP_TICKS   560    /* ~7 s per rung at 80.2 Hz, regardless of divider */
 
 #if USART3_THROUGHPUT_TEST
-#define USART3_TX_LEN            (USART3_TEST_MAX_FLOATS * 4 + 4)   /* 900 */
+#define USART3_TX_LEN            (USART3_TEST_MAX_FLOATS * 4 + 4)   /* 1124 */
 #else
 #define USART3_TX_LEN            16
 #endif
 
 void usart3_send(void)
 {
-	/* static, NOT a local: DMA1_Stream3 keeps reading this buffer asynchronously
-	 * after this function returns. As a stack local, the frame was reused by
-	 * later calls while the ~16.7 ms transfer was still in flight, so the radio
-	 * transmitted partly-corrupted floats. */
+	/* Staging buffer only: Usart3_Stream_TxSend() copies out of it before
+	 * returning, so the DMA never reads it. Still static rather than a local
+	 * because 1124 B would not fit on Send_Task's stack. */
 	static UCHAR8 str_USART[USART3_TX_LEN];
 
 	/* The throughput ladder varies the frame length at runtime, so the DMA transfer
@@ -490,21 +493,23 @@ void usart3_send(void)
 	 * buffer's maximum size, not the length of any particular frame. */
 	USHORT16 tx_len = USART3_TX_LEN;
 
-	/* A 0x09 subscribe stream routed to USART3 owns DMA1_Stream3. Both this
-	 * function and Subscribe_StreamTick() arm that stream from their own
-	 * buffers, so they must never both run in a cycle -- the second to arm
-	 * would retarget M0AR mid-transfer. The subscription wins: it is the
-	 * variable set the operator explicitly asked for, whereas this frame is a
-	 * fixed attitude triple (or the throughput-test pattern). */
+	/* A 0x09 subscribe stream routed to USART3 stands this frame down. The TX
+	 * ring made that arbitration unnecessary for SAFETY -- both producers queue
+	 * whole frames and can no longer retarget M0AR under each other -- but it is
+	 * still the right POLICY: interleaving two unrelated frame formats on one
+	 * link just makes the host guess. The subscription wins, being the variable
+	 * set the operator explicitly asked for, whereas this frame is a fixed
+	 * attitude triple (or the throughput-test pattern). */
 	if (Subscribe_StreamOwnsUsart3() != 0U) return;
 
-	/* Non-blocking guard, replaces a busy-wait that sat here at the bottom.
-	 * A 16 B frame takes 16 * 10 / 9600 = 16.7 ms, but Send_Task cycles every
-	 * 10 ms, so waiting for the previous transfer capped the ENTIRE send loop
-	 * (telemetry + EKF predict) at ~60 Hz instead of 100 Hz. Dropping this
-	 * frame is the right trade: it also guarantees we never overwrite the
-	 * buffer while the previous DMA transfer is still reading out of it. */
-	if(DMA_GetCurrDataCounter(DMA1_Stream3)) return;
+	/* NO skip-if-busy guard any more. USART3 is now a continuous ring
+	 * (BSP/usart3.c): Usart3_Stream_TxSend() copies the frame and returns, so
+	 * str_USART is free immediately and emission is decoupled from this tick.
+	 * The old guard returned early whenever DMA1_Stream3 was still draining,
+	 * which made FRAME SIZE the limit rather than byte rate -- measured
+	 * 2026-08-09 an 884 B frame straddled the ~12.47 ms tick, every other tick
+	 * was refused and the cadence halved to 48.3 Hz, while the radio itself lost
+	 * nothing (0.00 % at every rung). */
 
 #if USART3_THROUGHPUT_TEST
 	{
@@ -547,6 +552,7 @@ void usart3_send(void)
 			if     (i == 0) v = seq;              /* host counts gaps in this */
 			else if(i == 1) v = (FP32)nfloats;    /* labels the rung: size ... */
 			else if(i == 2) v = (FP32)divider;    /* ... and cadence, since sizes repeat */
+			else if(i == 3) v = (FP32)UA3TxDrops; /* FC-side ring drops, NOT air loss */
 			else            v = (FP32)i;          /* fixed pattern: any corruption shows */
 
 			str_USART[i * 4 + 0] = BYTE0(v);
@@ -589,15 +595,10 @@ void usart3_send(void)
 #endif
 	
 	
-  /* busy-wait removed; non-blocking guard now at top of function */		   //��֮ǰ�ķ���
-  DMA_ClearITPendingBit(DMA1_Stream3, DMA_IT_TCIF3); //����DMA_Mode_Normal,����û��ʹ������ж�ҲҪ�������������ֻ��һ��
-    
-  DMA_Cmd(DMA1_Stream3, DISABLE);				             //���õ�ǰ����ֵǰ�Ƚ���DMA
-  DMA1_Stream3->M0AR = (uint32_t)&str_USART;  //���õ�ǰ�������ݻ���ַ:Memory0 tARget
-  DMA1_Stream3->NDTR = tx_len;  //���õ�ǰ���������ݵ�����:Number of Data units to be TRansferred
-  DMA_Cmd(DMA1_Stream3, ENABLE);		
-                                        //����DMA���� 
-                                        //����DMA���� 		
+  /* Queue it. Returns 0 only when the ring is full, i.e. the wire cannot keep
+   * up -- that is FC-side loss, counted in UA3TxDrops and stamped into float[3]
+   * above so the host can tell it apart from air loss. */
+  (void)Usart3_Stream_TxSend(str_USART, tx_len);
 }
 
 /* Max frame: 6-byte header + payload + 1 CRC; Frame B payload up to ~326 bytes @ MAX_NUM_BASIS=8 */

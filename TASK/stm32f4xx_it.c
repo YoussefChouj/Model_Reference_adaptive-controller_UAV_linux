@@ -119,24 +119,24 @@ void USART3_IRQHandler(void)
 		Clear_IT = USART3->SR;
 		Clear_IT = USART3->DR;//先读SR后读DR清楚中断标志位
 
-		/* Drain the RX DMA ring into UA3RxMailbox. Previously this handler cleared
-		 * the IDLE flag and discarded the byte, so the long-range module's RX line
-		 * was dead in firmware even though the pin and peripheral were configured
-		 * for it. Instrumentation only -- NO command dispatch is wired here yet,
-		 * deliberately: USART3 is a radio link and adding a 0xCC 0xDD parser would
-		 * create a command-injection path. Mirrors UART5_IRQHandler below. */
-		/* USART_Receive is defined further down this file (no header prototype),
-		 * so it needs forward-declaring here. */
+		/* Drain the RX DMA ring into UA3RxMailbox (was: drained and counted,
+		 * never parsed). USART3 is now a command ingress: dispatch the bytes
+		 * through the same 0xCC 0xDD parser UART5 uses, so the radio link can
+		 * carry every dashboard command (CMD 0x01..0x18). Mirrors the UART5
+		 * path below. UA3RxFrameCnt / UA3RxLastLen stay as livewatch-visible
+		 * proof the radio downlink is alive when driven in full duplex. */
 		extern USHORT16 USART_Receive(USART_RX_TypeDef* USARTx);
 		extern USART_RX_TypeDef USART3_Rcr;
 		extern volatile uint32_t UA3RxFrameCnt;
 		extern volatile uint16_t UA3RxLastLen;
+		extern void Handle_USART3_GroundStation_Command(const uint8_t*, USHORT16);
 		{
 			uint16_t rx_len = USART_Receive(&USART3_Rcr);
 			if(rx_len > 0)
 			{
 				UA3RxLastLen = rx_len;
 				UA3RxFrameCnt++;
+				Handle_USART3_GroundStation_Command(UA3RxMailbox, (USHORT16)USART3_Rcr.rxSize);
 			}
 		}
 	}
@@ -161,11 +161,13 @@ void USART3_IRQHandler(void)
 
 void DMA1_Stream3_IRQHandler(void)//串口3发送完成中断，这个一定不能删除，否则系统会卡死
 {
-   if(DMA_GetITStatus(DMA1_Stream3, DMA_IT_TCIF3))
-   {
-      DMA_ClearFlag(DMA1_Stream3, DMA_FLAG_TCIF3);//清除标志位
-    	DMA_Cmd(DMA1_Stream3, DISABLE);             //关闭DMA传输 
-   }
+   /* Body moved into BSP/usart3.c so the ring's tail pointer stays private to
+    * the driver. It no longer just parks the stream: it advances the ring and
+    * immediately arms the next chunk, which is what keeps USART3 transmitting
+    * back to back instead of one frame per Send_Task tick. Calls no FreeRTOS
+    * API, so running at preemption priority 0 is safe. */
+   extern void Usart3_Tx_DmaIsr(void);
+   Usart3_Tx_DmaIsr();
 }
 /* ADR-0010: RPM acquisition - EXTI handlers for PA0/PA1/PC6/PC7.
  * Re-targeted 2026-07-21 from PA5/PB3/PB10/PB11; the new pins are

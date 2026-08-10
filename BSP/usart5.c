@@ -151,24 +151,29 @@ void Uart5_Subscribe_TxSend(const uint8_t* buf, uint16_t len)
     DMA_Cmd(DMA1_Stream7, ENABLE);
 }
 
-void Handle_UART5_GroundStation_Command(void)
+/* Transport-agnostic GS command-frame parser. Walks `mailbox[0..total)`, matching
+ * the 0xCC 0xDD / 0xCC 0xDE grammar originally written for UART5 (BSP/usart5.c
+ * Handle_UART5_GroundStation_Command) but parameterised so USART3 can call it
+ * off its own IDLE without duplicating the parser.
+ *
+ * `allow_subscribe` selects the 0xCC 0xDE branch: only UART5 has the file-scope
+ * subscribe staging buffer (UA5RxSubscribeBuf) and the reply DMA path the
+ * subscribe handler arms off the back of Send_Task. USART3 callers must pass 0
+ * so a 0xCC 0xDE byte sequence is consumed (offset advances) without touching
+ * UART5-only state -- which would otherwise silently extend the reply path to
+ * a transport that has no DMA wired for it.
+ *
+ * CONSTRAINT: 0xCC 0xDD frame layout and XOR CRC must match serial_bridge.py
+ * `_pack_command_frame()` -- Format: [0xCC] [0xDD] [CMD_ID u8] [INDEX u8]
+ * [VALUE float32 LE] [CRC8], total 9 B. */
+static void ParseGsCommandFrames(const uint8_t* mailbox, uint16_t total,
+                                  uint8_t allow_subscribe)
 {
-	// CONSTRAINT: Frame layout and XOR CRC must match serial_bridge.py _pack_command_frame().
-	// ARCH: Queue storage ownership is in BSP/usart4.c; this function is an additional ingress source.
-	// Format: [0xCC] [0xDD] [CMD_ID: uint8] [INDEX: uint8] [VALUE: float32 LE] [CRC8]
-	// Total frame length is 9 bytes.
-	// ADR-0011 follow-up: extended-prefix subscribe request.
-	// Format: [0xCC] [0xDE] [CMD_ID: 0x20] [LEN_HI] [LEN_LO] [MAX_NUM_BASIS] [payload: N * 6 bytes] [CRC8].
-	// Total frame length is 6 + LEN + 1, where LEN = N * 6 (each tuple is 4-byte address LE + 2-byte size LE).
-	// The IF-01 (0xCC 0xDD) 9-byte parser runs first and is untouched.
-	// WHY loop: the PC serial bridge coalesces multiple rapid writes into one OS-level burst.
-	// IDLE fires once for the whole burst; parsing only mailbox[0..8] silently drops every
-	// frame after the first (e.g. the execute flag sent last in a TWC sequence).
-	uint16_t total = UART5_Rcr.rxSize;
 	uint16_t offset = 0;
 	while (offset + 9U <= total)
 	{
-		if (UA5RxMailbox[offset] == 0xCC && UA5RxMailbox[offset + 1U] == 0xDE)
+		if (allow_subscribe != 0U &&
+		    mailbox[offset] == 0xCC && mailbox[offset + 1U] == 0xDE)
 		{
 			// Extended-prefix subscribe request: variable payload, run-length encoded.
 			// Header layout (offsets inside mailbox):
@@ -181,9 +186,9 @@ void Handle_UART5_GroundStation_Command(void)
 			//   +6 .. +6+LEN-1  payload tuples (each 6 B)
 			//   +6+LEN         CRC8 XOR
 			// Minimum frame is 7 B (zero tuples: 6 header + 0 payload + 1 CRC).
-			uint8_t  sub_cmd = UA5RxMailbox[offset + 2U];
-			uint16_t len_hi = UA5RxMailbox[offset + 3U];
-			uint16_t len_lo = UA5RxMailbox[offset + 4U];
+			uint8_t  sub_cmd = mailbox[offset + 2U];
+			uint16_t len_hi = mailbox[offset + 3U];
+			uint16_t len_lo = mailbox[offset + 4U];
 			uint16_t payload_len = (uint16_t)((len_hi << 8) | len_lo);
 			uint8_t  len_ok;
 			// Reject malformed frames early: total in mailbox must cover header + payload + 1 CRC.
@@ -222,9 +227,9 @@ void Handle_UART5_GroundStation_Command(void)
 			uint16_t i;
 			for (i = 2U; i < (uint16_t)(frame_len - 1U); i++)
 			{
-				calc_crc ^= UA5RxMailbox[offset + i];
+				calc_crc ^= mailbox[offset + i];
 			}
-			uint8_t crc = UA5RxMailbox[offset + frame_len - 1U];
+			uint8_t crc = mailbox[offset + frame_len - 1U];
 			if (calc_crc == crc)
 			{
 				// Stage the validated frame for Send_Task. Copy into the file-scope
@@ -239,7 +244,7 @@ void Handle_UART5_GroundStation_Command(void)
 				{
 					for (i = 0U; i < frame_len; i++)
 					{
-						UA5RxSubscribeBuf[i] = UA5RxMailbox[offset + i];
+						UA5RxSubscribeBuf[i] = mailbox[offset + i];
 					}
 					UA5RxSubscribeLen = frame_len;
 					UA5RxSubscribePending = 1U;
@@ -247,26 +252,26 @@ void Handle_UART5_GroundStation_Command(void)
 			}
 			offset = (uint16_t)(offset + frame_len);
 		}
-		else if (UA5RxMailbox[offset] == 0xCC && UA5RxMailbox[offset + 1U] == 0xDD)
+		else if (mailbox[offset] == 0xCC && mailbox[offset + 1U] == 0xDD)
 		{
-			uint8_t cmd_id = UA5RxMailbox[offset + 2U];
-			uint8_t index  = UA5RxMailbox[offset + 3U];
+			uint8_t cmd_id = mailbox[offset + 2U];
+			uint8_t index  = mailbox[offset + 3U];
 
 			union {
 				float f;
 				uint8_t b[4];
 			} val;
 
-			val.b[0] = UA5RxMailbox[offset + 4U];
-			val.b[1] = UA5RxMailbox[offset + 5U];
-			val.b[2] = UA5RxMailbox[offset + 6U];
-			val.b[3] = UA5RxMailbox[offset + 7U];
+			val.b[0] = mailbox[offset + 4U];
+			val.b[1] = mailbox[offset + 5U];
+			val.b[2] = mailbox[offset + 6U];
+			val.b[3] = mailbox[offset + 7U];
 
-			uint8_t crc = UA5RxMailbox[offset + 8U];
+			uint8_t crc = mailbox[offset + 8U];
 			uint8_t calc_crc = 0;
 			int i;
 			for (i = 2; i < 8; i++) {
-				calc_crc ^= UA5RxMailbox[offset + (uint16_t)i];
+				calc_crc ^= mailbox[offset + (uint16_t)i];
 			}
 
 			if (calc_crc == crc) {
@@ -287,4 +292,31 @@ void Handle_UART5_GroundStation_Command(void)
 			offset += 1U;
 		}
 	}
+}
+
+/* UART5 ingress wrapper. Source of truth for the 0xCC 0xDE subscribe path --
+ * only UART5 has the staging buffer (UA5RxSubscribeBuf) and the reply DMA
+ * (DMA1_Stream7) the subscribe handler arms off the back of Send_Task. */
+void Handle_UART5_GroundStation_Command(void)
+{
+	// ARCH: Queue storage ownership is in BSP/usart4.c; this function is an additional ingress source.
+	// WHY loop: the PC serial bridge coalesces multiple rapid writes into one OS-level burst.
+	// IDLE fires once for the whole burst; parsing only mailbox[0..8] silently drops every
+	// frame after the first (e.g. the execute flag sent last in a TWC sequence).
+	ParseGsCommandFrames(UA5RxMailbox, UART5_Rcr.rxSize, 1U);
+}
+
+/* USART3 ingress wrapper. Exported (BSP/usart5.h) for USART3_IRQHandler in
+ * TASK/stm32f4xx_it.c. Reads UA3RxMailbox via the parameter so the parser has
+ * no UART5-specific state in its body.
+ *
+ * Subscribe (0xCC 0xDE) is rejected by the parser when allow_subscribe=0 -- a
+ * 0xCC 0xDE byte sequence on the radio link is consumed (offset advances past
+ * it) without touching UART5-only state, so a malformed subscribe cannot reach
+ * a transport that has no reply DMA wired. The dashboard command set (every
+ * CMD_ID 0x01..0x18) is 0xCC 0xDD, so this is the entire functional surface
+ * the radio needs today; the 0xCC 0xDE subscribe path stays UART5-only. */
+void Handle_USART3_GroundStation_Command(const uint8_t* mailbox, uint16_t total)
+{
+	ParseGsCommandFrames(mailbox, total, 0U);
 }

@@ -203,9 +203,17 @@ uint32_t Subscribe_TimeMs(void);
  * the nominal 100 Hz so it rejects slightly early, which is the safe
  * direction. Budget differs per transport because UART5 is not empty:
  * frames A/B/C already measure 8569 B/s = 74% of its 11520 B/s capacity,
- * whereas a USART3 stream suppresses usart3_send() and owns the link. */
+ * whereas a USART3 stream suppresses usart3_send() and owns the link.
+ *
+ * RAISED 90 -> 95 on 2026-08-09, once the TX ring rework proved USART3_BAUD/10
+ * is itself the true ceiling: the wire carries 91304 B/s at the attained
+ * 913043 baud, the ladder measured 90363 B/s clean (98.8%), and nothing above
+ * is reachable at this baud. 95% of that = 87552 B/s budgeted at the NOMINAL
+ * 100 Hz; the real 80.4 Hz cadence means an accepted stream puts at most
+ * ~70 kB/s on the wire, so the ring's jitter margin stays intact. The last 5%
+ * is deliberately unallocatable, not an oversight. */
 #define SUBSCRIBE_SEND_TASK_HZ       100U
-#define SUBSCRIBE_BUDGET_PCT_USART3  90U
+#define SUBSCRIBE_BUDGET_PCT_USART3  95U
 #define SUBSCRIBE_BUDGET_PCT_UART5   20U
 /* Mirrors BSP/usart5.c:55. Only the budget guard reads it, and a stale value
  * here can only make the guard stricter, never looser. */
