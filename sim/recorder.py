@@ -1,4 +1,9 @@
-"""Append-only trajectory recorders for Gazebo experiments (spec 4c)."""
+"""Append-only trajectory recorders (engine-agnostic, ADR-0012 D7).
+
+The column schema matches the ``state_dict`` returned by any
+:class:`sim.plant.Plant.step()`, so the recorder is agnostic to which
+engine (identified / rigid-body / MuJoCo) produced the trajectory.
+"""
 from __future__ import annotations
 
 import csv
@@ -16,7 +21,7 @@ CSV_COLUMNS = [
 
 
 class Recorder(Protocol):
-    """Pluggable sink used by :func:`sim.runner.run_experiment`."""
+    """Pluggable sink used by :class:`sim.runner.Runner` (the ``loop.tick``-driven run)."""
 
     def start(self, outdir: Path) -> None: ...
     def record(self, state_dict: dict, t: float) -> None: ...

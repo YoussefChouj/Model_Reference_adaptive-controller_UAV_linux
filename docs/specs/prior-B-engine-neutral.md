@@ -1,5 +1,12 @@
 # prior-B — Engine-neutral sim pipeline + relative scenario parametrisation
 
+> **STATUS: ✅ DONE 2026-08-10** — recorder/aggregator/manifest are engine-neutral (no
+> `gz`/`gazebo`/`sdf`/`urdf` strings, no subprocess; manifest records `plant_name`);
+> scenarios_yaml parses relative `u_max`-fraction disturbances via `MagnitudeSpec`;
+> `U_MAX_TORQUE` added to `sim/scenarios.py`. `sim/tests/` is now **276 passed / 0 failed**
+> (incl. the engine-neutrality + relative-parameterisation tests). Acceptance criteria 2–5
+> all verified.
+>
 > **Pre-reading**: `docs/adr/0014-dimensionless-priors-and-declared-regressor-variants.md` (D5),
 > `docs/adr/0012-retire-gazebo-mujoco-plant-ladder.md` (D7).
 >

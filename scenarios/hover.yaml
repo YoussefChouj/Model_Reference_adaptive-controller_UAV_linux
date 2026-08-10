@@ -4,14 +4,12 @@ name: hover
 duration_s: 5.0
 # Controller period in seconds: 200 Hz, with five 1 ms physics steps.
 dt: 0.005
-# Optional initial pose, velocity, rates, and motor thrusts.
+# Optional initial pose and motor thrusts. Attitude/rates/velocities are
+# defaulted by the plant (level, at rest) — ADR-0012 D7.
 initial_state:
   x: 0.0
   y: 0.0
   z: 0.0
-  phi: 0.0
-  theta: 0.0
-  psi: 0.0
 # Commands use total thrust in N and body-rate commands in rad/s.
 # A z value of zero selects canonical hover thrust in the runner.
 command:

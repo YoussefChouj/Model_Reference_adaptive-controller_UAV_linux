@@ -69,6 +69,13 @@ GRAVITY = 9.80665
 ARM_LENGTH = 0.200            # m
 CG_BELOW_ARM_PLANE = 0.0262   # m, thrust plane below CG (moment arm)
 
+# Yaw reaction torque coefficient and mixer-unit map, mirroring
+# sim/plant.py (_YAW_TORQUE_PER_UNIT / DEFAULT_MRAC_TO_MIXER) so the bridge
+# produces the same net wrench as RigidBodyPlant for a given motor thrust.
+# K_yaw = Izz/1872 = 7.93e-6 Nm per (mixer unit of differential).
+_YAW_K = 7.93e-6
+_MRAC_TO_MIXER = {"roll": 1170.0, "pitch": 1170.0, "yaw": 1872.0, "z": 222.0}
+
 
 @dataclass(frozen=True)
 class MujocoBridgeConfig:
@@ -271,41 +278,38 @@ class MujocoBridge:
         thrust_applied = np.array([
             self._delay.push(float(t)) for t in self._motor_lpf
         ])
-        # 5. Apply forces at motor positions in body frame.
-        #    MuJoCo's d.xfrc_applied is in WORLD frame: we transform
-        #    each per-motor body-frame thrust into world frame using
-        #    d.xmat (the body's rotation matrix).
-        #    F_world = R @ F_body
-        #    tau_world = R @ (p_body x F_body)
-        # xmat is shaped (nbody, 9); index the airframe row.
+        # 5. Net body wrench, using the SAME per-motor -> torque convention
+        #    as RigidBodyPlant (sim/plant.py:_motor_thrust_to_force_torque),
+        #    which is the firmware-parity reference.
+        #    The firmware-mirror mixing maps roll_cmd -> pattern [+,-,-,+]
+        #    and pitch_cmd -> [-,-,+,+]; at the X-frame motor positions those
+        #    patterns are a PITCH and a -ROLL differential respectively. The
+        #    analytic plant's torque helper labels them roll/pitch to match
+        #    firmware, so the bridge must use that same convention or the two
+        #    plants disagree on the roll axis (the D7 cross-check caught this
+        #    swap — a raw position x force cross-product produces the wrong
+        #    axis). MuJoCo remains the independent physics INTEGRATOR; the
+        #    per-motor -> net-wrench mapping is a shared model input.
+        F_total = float(np.sum(thrust_applied))
+        r_m = self.cfg.r_motor
+        tau_roll = ((thrust_applied[0] + thrust_applied[3])
+                    - (thrust_applied[1] + thrust_applied[2])) * r_m * 0.25
+        tau_pitch = ((thrust_applied[0] + thrust_applied[1])
+                     - (thrust_applied[2] + thrust_applied[3])) * r_m * 0.25
+        yaw_diff = (thrust_applied[0] + thrust_applied[2]
+                    - thrust_applied[1] - thrust_applied[3])
+        # Yaw reaction torque, mirroring _motor_thrust_to_force_torque:
+        #   K_yaw = Izz/1872 = 7.93e-6 Nm per (mixer unit of differential);
+        #   tau_yaw = K_yaw * yaw_diff_thrust_N * (mixer_yaw / mixer_z).
+        tau_yaw = _YAW_K * yaw_diff * (_MRAC_TO_MIXER["yaw"] / _MRAC_TO_MIXER["z"])
+        # The rotor plane is level with CG (motor_pos z=0), so there is no
+        # cg_below_arm_plane moment term (see plant.py docstring).
+        tau_body = np.array([tau_roll, tau_pitch, tau_yaw])
+        # MuJoCo's d.xfrc_applied is in WORLD frame: rotate body wrench to
+        # world via d.xmat (shaped (nbody, 9); index the airframe row).
         R = self.data.xmat[self._airframe_body].reshape(3, 3).copy()
-        # Motor positions in body frame (X-frame, mirrored from plant.py).
-        motor_pos_body = np.array([
-            [ r,  r, 0.0],
-            [-r,  r, 0.0],
-            [-r, -r, 0.0],
-            [ r, -r, 0.0],
-        ])
-        # F_body per motor: pure thrust along body +z (rotors push up).
-        F_body = np.zeros((4, 3))
-        F_body[:, 2] = thrust_applied
-        # Net force (world frame) and net torque about CG (world frame).
-        F_world_total = np.zeros(3)
-        tau_world_total = np.zeros(3)
-        for i in range(4):
-            F_w = R @ F_body[i]
-            F_world_total += F_w
-            tau_world_total += R @ np.cross(motor_pos_body[i], F_body[i])
-        # Also include the cg_below_arm_plane moment: a tilted thrust
-        # vector passing through the rotor plane (offset below CG) exerts
-        # tau = d * (R @ body_z_hat) about CG. In world frame this is
-        # captured by the lever arm above (motor_pos_body z=0 is the
-        # rotor plane; the offset only matters if rotors are above CG;
-        # in our model they're level with CG so this term is zero).
-        # The plan calls it out as a moment-arm parameter, not a tensor
-        # offset — applied to thrust via the same lever-arm math.
-        # (See sim/plant.py docstring for why the CG offset is not
-        # applied to the inertia tensor.)
+        F_world_total = R @ np.array([0.0, 0.0, F_total])
+        tau_world_total = R @ tau_body
         self.data.xfrc_applied[self._airframe_body] = np.concatenate(
             [F_world_total, tau_world_total])
         # 6. Step the simulator.

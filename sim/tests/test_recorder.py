@@ -1,4 +1,4 @@
-"""Recorder tests for spec 4c."""
+"""Recorder tests (engine-agnostic, ADR-0012 D7)."""
 from __future__ import annotations
 
 import csv
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from sim.recorder import CSVRecorder, JSONLRecorder
+from sim.recorder import CSVRecorder, CSV_COLUMNS, JSONLRecorder
 
 
 def _state(i):
@@ -38,3 +38,15 @@ def test_recorders_round_trip_1000_records(tmp_path, recorder_cls, filename):
         rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
         assert len(rows) == 1000
         assert rows[-1]["x"] == 999
+
+
+def test_csv_columns_are_engine_neutral():
+    """The column schema matches any Plant.step() state_dict — no
+    Gazebo-specific column names (gz, sdf, gazebo, urdf)."""
+    joined = " ".join(CSV_COLUMNS).lower()
+    for token in ("gz", "gazebo", "sdf", "urdf"):
+        assert token not in joined, f"gazebo-flavoured column {token!r} present"
+    # Core state_dict keys the analytic and MuJoCo plants both emit.
+    for key in ("t", "x", "y", "z", "p", "q", "r", "vz", "thrust", "m1", "m2",
+                "m3", "m4"):
+        assert key in CSV_COLUMNS

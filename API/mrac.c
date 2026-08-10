@@ -278,6 +278,18 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
             grad[i] = (-s * state->Phi[i]) / denom;
         }
 
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+        /* Opt-in prior attractor folded into the gradient BEFORE projection.
+         * It is the gradient of (1/2)*sigma_prior*||Theta-Theta_prior||^2, so
+         * projection must bound the combined gradient — otherwise a large
+         * sigma_prior pushes Theta past What_limit (prior-D-fix). */
+        if (sigma_prior != 0.0f) {
+            for (i = 0; i < MAX_NUM_BASIS; i++) {
+                grad[i] -= sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i]);
+            }
+        }
+#endif
+
         if (mrac_flags.projection_on) {
             MRAC_ProjectGradient(grad, state->Theta, MAX_NUM_BASIS,
                                  config->What_limit, config->What_tol, config->What_lower_limit);
@@ -288,26 +300,30 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
             y = config->gamma[i] * (grad[i]
                 - sigma_lf_active * (state->Theta[i] - state->Whatf[i])
                 - sigma_eff * state->Theta[i]
-#ifdef MRAC_ENABLE_SIGMA_PRIOR
-                /* Opt-in prior attractor: pulls Theta toward Theta_prior[axis]
-                 * at rate sigma_prior. Equilibrium shifts to Theta_prior; the
-                 * sigma-mod UUB Lyapunov argument carries over (gradient-style,
-                 * projected). Sits inside the existing adaptation branch so the
-                 * deadzone / hard-freeze gating apply unchanged. */
-                - sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i])
-#endif
                 );
 #else
             y = config->gamma[i] * (grad[i]
                 - sigma_lf_active * (state->Theta[i] - state->Whatf[i]) / denom
                 - sigma_eff * state->Theta[i] / denom
-#ifdef MRAC_ENABLE_SIGMA_PRIOR
-                - sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i])
-#endif
                 );
 #endif
 
             state->Theta[i] += MRAC_DT * y;
+
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+            /* Discrete-time safeguard: the band-scaling projection cannot
+             * bound a single large sigma_prior-driven step (the gradient
+             * magnitude can overshoot the band in one tick), so hard-bounds
+             * Theta to the projection set after the update (prior-D-fix).
+             * No-op when sigma_prior=0, keeping the baseline update exact. */
+            if (sigma_prior != 0.0f) {
+                if (state->Theta[i] > config->What_limit[i]) {
+                    state->Theta[i] = config->What_limit[i];
+                } else if (state->Theta[i] < config->What_lower_limit[i]) {
+                    state->Theta[i] = config->What_lower_limit[i];
+                }
+            }
+#endif
 
             // L1-style low-frequency leakage: pull fast weights toward filtered copy
             if (mrac_flags.l1_filtering_on) {

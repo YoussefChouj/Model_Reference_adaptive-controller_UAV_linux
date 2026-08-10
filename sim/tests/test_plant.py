@@ -10,7 +10,16 @@ import numpy as np
 import pytest
 
 from sim.delay import ActuatorDelayBuffer
-from sim.plant import AxisModel, GazeboPlant, IdentifiedPlant, Plant
+from sim.plant import (
+    CANONICAL_AIRFRAME,
+    GRAVITY,
+    AxisModel,
+    GazeboPlant,
+    IdentifiedPlant,
+    MujocoPlant,
+    Plant,
+    RigidBodyPlant,
+)
 
 DT = 0.005  # 200 Hz, matches MRAC_DT (ADR-0006 D1)
 
@@ -153,3 +162,126 @@ def test_axis_sim_reset_clears_delay_buffer():
     assert out[0] == pytest.approx(0.0, abs=1e-12)
     assert out[1] == pytest.approx(0.0, abs=1e-12)
     assert out[2] == pytest.approx(0.0, abs=1e-12)
+
+
+# ----------------------------------------------------------------------
+# ADR-0012 D7 — MujocoPlant × RigidBodyPlant oracle cross-check
+# ----------------------------------------------------------------------
+def _steady_state(traj, key: str) -> float:
+    """Mean of the last 50 ticks of ``key`` over a trajectory of state dicts."""
+    return float(np.mean([t[key] for t in traj[-50:]]))
+
+
+def test_mujoco_vs_rigid_body_roll_step():
+    """ADR-0012 D7: two independent 6-DOF implementations agree.
+
+    Drive :class:`MujocoPlant` and :class:`RigidBodyPlant` with the same
+    hover thrust + a small roll torque for 200 ticks (1 s). Both use the
+    shared firmware-mirror motor mixing, so a roll command must map to a
+    roll response in BOTH — the roll/pitch swap in the MuJoCo torque path
+    (mujoco_bridge computing a raw position x force cross-product) was
+    caught by exactly this test. MuJoCo remains the independent physics
+    integrator; the per-motor -> net-wrench mapping is a shared model
+    input. Acceptance: the rate responses agree within 20% (measured:
+    p ~1%, vz ~5%).
+    """
+    hover = CANONICAL_AIRFRAME.mass * GRAVITY
+    u = {"roll": 0.01, "pitch": 0.0, "yaw": 0.0, "z": hover}
+    rb = RigidBodyPlant(dt=DT)
+    mj = MujocoPlant(dt=DT)
+    rb.reset(); mj.reset()
+    rbt = [rb.step(u) for _ in range(200)]
+    mjt = [mj.step(u) for _ in range(200)]
+    for k in ("p", "q", "r", "vz"):
+        rv, mv = _steady_state(rbt, k), _steady_state(mjt, k)
+        # 20% relative, floored at an absolute 1e-3 so near-zero values
+        # (e.g. vz under hover) don't blow up the relative comparison.
+        tol = max(0.20 * max(abs(rv), abs(mv), 1e-9), 1e-3)
+        assert abs(rv - mv) <= tol, (
+            f"{k}: rigid={rv:.6f} mujoco={mv:.6f} differ beyond "
+            f"tol={tol:.4f}")
+    # A roll command must produce roll in BOTH, same (positive) sign, and
+    # no significant roll->pitch or ->yaw cross-coupling.
+    assert _steady_state(rbt, "p") > 0.0
+    assert _steady_state(mjt, "p") > 0.0
+    assert abs(_steady_state(rbt, "q")) < 1e-3
+    assert abs(_steady_state(mjt, "q")) < 1e-3
+    assert abs(_steady_state(rbt, "r")) < 1e-3
+    assert abs(_steady_state(mjt, "r")) < 1e-3
+
+
+def test_rigid_body_plant_thrust_delay_shifts_response_by_N():
+    """ADR-0012 D6: RigidBodyPlant wraps per-motor thrust through
+    ``ActuatorDelayBuffer``. A thrust step with ``thrust_delay_s=0.015``
+    (N=3) holds hover for the first N ticks, then the realised thrust is
+    exactly the undelayed plant's response shifted by N ticks (delay and
+    motor LPF commute as LTI operators). The default ``thrust_delay_s=0``
+    is an unchanged passthrough.
+    """
+    hover = CANONICAL_AIRFRAME.mass * GRAVITY
+    u = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": hover + 1.0}
+    delayed = RigidBodyPlant(dt=DT, thrust_delay_s=0.015)
+    undelayed = RigidBodyPlant(dt=DT, thrust_delay_s=0.0)
+    delayed.reset(); undelayed.reset()
+    d = np.array([delayed.step(u)["thrust"] for _ in range(40)])
+    n = np.array([undelayed.step(u)["thrust"] for _ in range(40)])
+    N = 3
+    # First N ticks hold hover (pre-loaded FIFO), not 0.
+    np.testing.assert_allclose(d[:N], hover, rtol=1e-6, atol=1e-9)
+    # Delayed == undelayed shifted by N.
+    np.testing.assert_allclose(d[N:], n[:-N], rtol=1e-6, atol=1e-9)
+
+
+def test_rigid_body_plant_default_thrust_delay_is_passthrough():
+    """``thrust_delay_s=0`` (the default) must not change dynamics: the
+    plant with an explicit 0 delay is bit-identical to the plant with the
+    default. This is the prior-A 'delay refactor doesn't change dynamics'
+    invariant.
+    """
+    hover = CANONICAL_AIRFRAME.mass * GRAVITY
+    u = {"roll": 0.01, "pitch": 0.0, "yaw": 0.0, "z": hover}
+    default = RigidBodyPlant(dt=DT)
+    explicit0 = RigidBodyPlant(dt=DT, thrust_delay_s=0.0)
+    default.reset(); explicit0.reset()
+    for _ in range(50):
+        a = default.step(u)
+        b = explicit0.step(u)
+        for k in ("p", "q", "r", "vz", "thrust", "q0", "q1", "q2", "q3"):
+            assert a[k] == pytest.approx(b[k], rel=0, abs=1e-12), k
+
+
+def test_mujoco_step_response_smoke():
+    """Step roll torque 0 -> 0.02 on a :class:`MujocoPlant`.
+
+    Hover for 0.1 s, then step roll command to 0.02 for 0.5 s. Verifies:
+    no NaN, the quaternion stays normalized, roll rate ``p`` increases
+    (positive), pitch/yaw rates stay near zero (no cross-coupling sign
+    error), and vertical velocity stays near hover (thrust correct).
+    """
+    hover = CANONICAL_AIRFRAME.mass * GRAVITY
+    mj = MujocoPlant(dt=DT)
+    mj.reset()
+    states = []
+    for i in range(int(0.1 / DT) + int(0.5 / DT)):
+        u = {
+            "roll": 0.02 if i * DT >= 0.1 else 0.0,
+            "pitch": 0.0, "yaw": 0.0, "z": hover,
+        }
+        states.append(mj.step(u))
+    # No NaN in any measured state.
+    for s in states:
+        for k in ("p", "q", "r", "vz", "q0", "q1", "q2", "q3"):
+            assert np.isfinite(s[k]), f"{k} is NaN at some tick"
+    # Quaternion stays normalized.
+    for s in states:
+        q = np.array([s["q0"], s["q1"], s["q2"], s["q3"]])
+        assert abs(float(np.linalg.norm(q)) - 1.0) < 1e-6
+    # Roll rate increases (positive) over the step window.
+    step = states[int(0.1 / DT):]
+    assert step[0]["p"] < step[-1]["p"]
+    assert step[-1]["p"] > 0.0
+    # No cross-coupling into pitch/yaw (these are ~1e-20 in practice).
+    assert max(abs(s["q"]) for s in step) < 1e-6
+    assert max(abs(s["r"]) for s in step) < 1e-6
+    # Thrust holds hover: vertical velocity stays near zero.
+    assert max(abs(s["vz"]) for s in step) < 0.01

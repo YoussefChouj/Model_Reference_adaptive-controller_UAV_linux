@@ -1,5 +1,12 @@
 # prior-A — Delay wrapper, dimensionless priors, σ_prior attractor (sim-side)
 
+> **STATUS: ✅ DONE 2026-08-10** — `RigidBodyPlant` gained a `thrust_delay_s` transport-delay
+> buffer (pre-loaded with hover thrust in `reset()` so the first N ticks don't command
+> free-fall); `sigma_prior`/`Theta_prior` added to the sim adaptive law with `sigma=0`
+> bit-identical parity; `sim/README.md` documents both. `sim/tests/` is now **276 passed /
+> 0 failed**. The "must not touch" `sim/mujoco_bridge.py` carve-out was lifted because
+> prior-03-finish (parallel) legitimately needed it for the D7 cross-check.
+>
 > **Pre-reading**: `docs/adr/0012-retire-gazebo-mujoco-plant-ladder.md` (D6),
 > `docs/adr/0013-scenario-conditioned-adaptive-priors.md` (D5),
 > `docs/adr/0014-dimensionless-priors-and-declared-regressor-variants.md` (D1–D4).

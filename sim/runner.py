@@ -39,7 +39,7 @@ import yaml
 from sim.aggregator import aggregate
 from sim.manifest import write_manifest
 from sim.recorder import CSVRecorder, Recorder
-from sim.scenarios_yaml import Scenario, scenario_to_dict, validate_scenario
+from sim.scenarios_yaml import MagnitudeSpec, Scenario, scenario_to_dict, validate_scenario
 
 
 @dataclass(frozen=True)
@@ -75,13 +75,29 @@ def _default_outdir(scenario: Scenario) -> Path:
     return Path("runs") / f"{scenario.name}_{scenario.seed}_{timestamp}"
 
 
-def _command_at(scenario: Scenario, t: float) -> dict[str, float]:
+def _resolve_magnitude(raw: Any, u_max: float | None) -> float:
+    """Resolve a disturbance magnitude to an absolute value.
+
+    ``raw`` may be a plain number (absolute) or a ``{value, unit}`` mapping
+    (ADR-0014 D5). A relative ``unit="u_max"`` magnitude resolves against
+    ``u_max``; if ``u_max`` is unavailable it falls back to treating the
+    value as absolute (matching the "keep absolute if u_max unavailable"
+    rule).
+    """
+    spec = MagnitudeSpec(raw)
+    if spec.is_relative and u_max is not None:
+        return spec.value * float(u_max)
+    return spec.value
+
+
+def _command_at(scenario: Scenario, t: float, u_max: float | None = None) -> dict[str, float]:
     """Project the scenario's command + disturbances at simulation time ``t``."""
     command = scenario.command(t) if callable(scenario.command) else dict(scenario.command)
     for disturbance in scenario.disturbances:
         if t >= float(disturbance["start_s"]):
             axis = str(disturbance["axis"])
-            command[axis] = command.get(axis, 0.0) + float(disturbance["magnitude"])
+            command[axis] = command.get(axis, 0.0) + _resolve_magnitude(
+                disturbance["magnitude"], u_max)
     return command
 
 

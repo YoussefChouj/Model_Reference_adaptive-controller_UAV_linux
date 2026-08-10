@@ -1,47 +1,19 @@
-"""Reproducibility receipts for Gazebo experiments (spec 4c)."""
+"""Engine-agnostic reproducibility receipts (ADR-0012 D7).
+
+One manifest per run: scenario, seed, shas, timing, and the plant that
+produced the trajectory. No external binary is invoked (the Gazebo
+version capture was removed when Gazebo was retired — ADR-0012 D1).
+"""
 from __future__ import annotations
 
 import json
 import os
 import platform as platform_module
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from sim.scenarios_yaml import Scenario, scenario_to_dict
-
-_GZ_VERSION: str | None = None
-_GZ_VERSION_CAPTURED: bool = False
-
-
-def _capture_gz_version() -> str:
-    """Capture ``gz sim --version`` exactly once per process.
-
-    If the first call fails the cached value stays ``"unavailable"``
-    so subsequent calls never re-shell out. ``reset`` allows the
-    orchestrator to force a retry after installing Gazebo.
-    """
-    global _GZ_VERSION, _GZ_VERSION_CAPTURED
-    if _GZ_VERSION_CAPTURED:
-        return _GZ_VERSION or "unknown"
-    try:
-        completed = subprocess.run(
-            ["gz", "sim", "--version"], capture_output=True, text=True,
-            timeout=10.0, check=False,
-        )
-        _GZ_VERSION = (completed.stdout + completed.stderr).strip() or "unknown"
-    except (OSError, subprocess.SubprocessError) as exc:
-        _GZ_VERSION = f"unavailable: {exc}"
-    _GZ_VERSION_CAPTURED = True
-    return _GZ_VERSION
-
-
-def reset_gz_version_cache() -> None:
-    """Force the next ``_capture_gz_version`` call to re-shell out."""
-    global _GZ_VERSION, _GZ_VERSION_CAPTURED
-    _GZ_VERSION = None
-    _GZ_VERSION_CAPTURED = False
 
 
 def write_manifest(
@@ -56,6 +28,7 @@ def write_manifest(
     sim_time_s: float,
     exit_reason: str,
     machine: Any,
+    plant_name: str = "identified",
     spawn_z: float | None = None,
 ) -> dict:
     """Write ``manifest.json`` and plain-text receipt sidecars."""
@@ -72,10 +45,10 @@ def write_manifest(
         "sim_time_s": float(sim_time_s),
         "exit_reason": str(exit_reason),
         "machine": machine,
+        "plant_name": str(plant_name),
         "python_version": sys.version,
         "platform": platform_module.platform(),
         "cpu_count": os.cpu_count(),
-        "gz_version": _capture_gz_version(),
         "spawn_z": float(spawn_z) if spawn_z is not None else None,
     }
     (directory / "manifest.json").write_text(
@@ -88,4 +61,4 @@ def write_manifest(
     return manifest
 
 
-__all__ = ["write_manifest", "reset_gz_version_cache"]
+__all__ = ["write_manifest"]

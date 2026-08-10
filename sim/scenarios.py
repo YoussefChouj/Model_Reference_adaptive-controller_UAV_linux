@@ -25,6 +25,12 @@ DEG2RAD = 0.0174533
 # shared single source of truth (sim/plant.py); kept under the old name locally.
 _CANON = CANONICAL_MODELS
 
+# Nominal per-axis torque authority (Nm) used for relative (fraction-of-u_max)
+# disturbance parameterisation (ADR-0014 D5). Disturbances declared as
+# ``torque_u_max_frac`` resolve to ``frac * U_MAX_TORQUE``; the absolute
+# ``torque_nm`` default remains the fallback when no relative fraction is given.
+U_MAX_TORQUE = 0.4
+
 
 def _zero(_t: float) -> float:
     return 0.0
@@ -101,13 +107,21 @@ def inertia_offset(axis: str, *, factor: float = 0.6, amp_dps: float = 30.0,
                    plant_factory=lambda dt: IdentifiedPlant(dt, {axis: scaled}))
 
 
-def disturbance_rejection(axis: str, *, torque_nm: float = 0.08, t0: float = 0.5,
+def disturbance_rejection(axis: str, *, torque_nm: float = 0.08,
+                          torque_u_max_frac: float = 0.0, t0: float = 0.5,
                           duration: float = 2.5) -> Scenario:
-    """Hold zero rate, then a constant torque bias hits the plant input."""
+    """Hold zero rate, then a constant torque bias hits the plant input.
+
+    ``torque_u_max_frac`` (if >0) expresses the bias as a fraction of
+    ``U_MAX_TORQUE`` (ADR-0014 D5 relative parameterisation); otherwise the
+    absolute ``torque_nm`` is used. The absolute value remains the fallback
+    so the scenario transfers across airframes without re-tuning.
+    """
+    torque = torque_u_max_frac * U_MAX_TORQUE if torque_u_max_frac else torque_nm
     return Scenario(name=f"disturbance_{axis}", axis=axis, duration=duration,
                     setpoint=_zero,
-                    disturbance=lambda t: torque_nm if t >= t0 else 0.0,
-                    description=f"{torque_nm:g} Nm bias at t={t0}s, r=0")
+                    disturbance=lambda t: torque if t >= t0 else 0.0,
+                    description=f"{torque:g} Nm bias at t={t0}s, r=0")
 
 
 ALL: dict[str, Callable[[], Scenario]] = {

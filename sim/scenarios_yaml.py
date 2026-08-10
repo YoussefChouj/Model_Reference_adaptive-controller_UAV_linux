@@ -8,12 +8,78 @@ from typing import Any
 import yaml
 
 
+# Plants default attitude/rates/velocities from the Airframe (level, at
+# rest, at source-condition), so only the position + motor pre-load are
+# declarable. ADR-0012 D7: the analytic and MuJoCo plants own these defaults.
 _INITIAL_KEYS = {
-    "x", "y", "z", "phi", "theta", "psi", "p", "q", "r",
-    "vx", "vy", "vz", "motor_thrust",
+    "x", "y", "z", "motor_thrust",
 }
 _COMMAND_KEYS = {"z", "roll", "pitch", "yaw"}
 _STOP_KEYS = {"max_abs_phi_deg", "min_z_m"}
+# Magnitude fields that accept an ADR-0014 D5 relative ``{value, unit}`` spec
+# (e.g. a disturbance declared as a fraction of ``u_max``).
+_RELATIVE_KEYS = {"magnitude"}
+
+
+class MagnitudeSpec:
+    """A magnitude that is either absolute or a fraction of a reference scale.
+
+    ADR-0014 D5 relative parameterisation: scenarios are declared in relative
+    magnitudes (fractions of ``u_max`` torque authority, ``J`` inertia, etc.)
+    so the same scenario transfers across airframes/binaries without
+    re-tuning. Two accepted forms:
+
+      * a plain number -> absolute magnitude (unit-less torque/force/N).
+      * a mapping ``{"value": 0.1, "unit": "u_max"}`` -> resolved to
+        ``value * reference`` by :meth:`resolve`; ``unit="absolute"`` keeps
+        the value unchanged (explicit absolute).
+
+    ``unit`` is one of ``"absolute"`` or ``"u_max"``; unknown units are a
+    clear error rather than a silent kwarg.
+    """
+
+    __slots__ = ("value", "unit")
+
+    def __init__(self, raw: Any):
+        if isinstance(raw, (int, float)):
+            self.value = float(raw)
+            self.unit = "absolute"
+            return
+        if isinstance(raw, dict):
+            try:
+                self.value = float(raw["value"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"MagnitudeSpec requires a numeric 'value', got {raw!r}"
+                ) from exc
+            self.unit = str(raw.get("unit", "absolute"))
+            if self.unit not in ("absolute", "u_max"):
+                raise ValueError(
+                    f"unknown MagnitudeSpec unit {self.unit!r}; use "
+                    f"'absolute' or 'u_max'"
+                )
+            return
+        raise ValueError(
+            f"MagnitudeSpec must be a number or {{value, unit}} mapping, "
+            f"got {raw!r}"
+        )
+
+    @property
+    def is_relative(self) -> bool:
+        return self.unit != "absolute"
+
+    def resolve(self, reference: float) -> float:
+        """Return the absolute magnitude for reference scale ``reference``.
+
+        ``reference`` is e.g. ``u_max`` (the axis torque authority); a
+        relative spec resolves to ``value * reference``. Absolute specs
+        return ``value`` unchanged.
+        """
+        return self.value * reference if self.is_relative else self.value
+
+    def to_yaml(self) -> Any:
+        """Return a YAML-safe form (number for absolute, mapping for relative)."""
+        return {"value": self.value, "unit": self.unit} if self.is_relative else self.value
 
 
 class Command(dict[str, Any]):
@@ -117,6 +183,11 @@ def validate_scenario(scenario: Scenario) -> list[str]:
                 errors.append(f"disturbances[{index}] requires start_s, axis, and magnitude")
             elif item["axis"] not in _COMMAND_KEYS:
                 errors.append(f"disturbances[{index}].axis must be one of {sorted(_COMMAND_KEYS)}")
+            else:
+                try:
+                    MagnitudeSpec(item["magnitude"])
+                except ValueError as exc:
+                    errors.append(f"disturbances[{index}].magnitude: {exc}")
     if not isinstance(scenario.stop_conditions, list):
         errors.append("stop_conditions must be a list")
     else:
@@ -130,13 +201,19 @@ def validate_scenario(scenario: Scenario) -> list[str]:
 
 def scenario_to_dict(scenario: Scenario) -> dict[str, Any]:
     """Return a YAML-safe dictionary preserving the scenario fields."""
+    disturbances = []
+    for item in scenario.disturbances:
+        row = dict(item)
+        if "magnitude" in row:
+            row["magnitude"] = MagnitudeSpec(row["magnitude"]).to_yaml()
+        disturbances.append(row)
     return {
         "name": scenario.name,
         "duration_s": float(scenario.duration_s),
         "dt": float(scenario.dt),
         "initial_state": dict(scenario.initial_state),
         "command": dict(scenario.command),
-        "disturbances": [dict(item) for item in scenario.disturbances],
+        "disturbances": disturbances,
         "stop_conditions": [dict(item) for item in scenario.stop_conditions],
         "seed": scenario.seed,
     }

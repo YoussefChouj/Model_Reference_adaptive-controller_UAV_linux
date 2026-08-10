@@ -154,9 +154,12 @@ int main(void)
             okv_leq(msg, fabs(mrac_state.pitch.Theta[i]),
                     mrac_config_pitch.What_limit[i] + 1e-6f);
         }
-        /* Spot check: |Theta[0]| > 0 (adaptation actually ran). */
-        ok("T1 pitch.Theta[0] > 0 (adaptation ran)",
-           mrac_state.pitch.Theta[0] > 1e-4f);
+        /* Spot check: adaptation actually ran. grad[0] = -s*Phi[0]/denom is
+         * negative under a positive tracking error, so the bias weight Theta[0]
+         * drives NEGATIVE toward its unlocked lower bound (-What_limit[0]) —
+         * magnitude, not sign, is the signal. */
+        ok("T1 pitch.Theta[0] != 0 (adaptation ran)",
+           fabsf(mrac_state.pitch.Theta[0]) > 1e-4f);
     }
 
     /* Test 2: sigma_prior large converges to Theta_prior.
@@ -167,10 +170,15 @@ int main(void)
      * limit. */
     {
         float prior[6];
-        /* Choose a prior inside the per-axis What_limit (so projection
-         * does not immediately clip it). 0.05 sits well inside the
-         * 0.15 pitch limit. */
-        for (i = 0; i < 6; i++) { prior[i] = 0.05f; }
+        /* Choose a prior inside EVERY per-slot What_limit so the projection
+         * does not clip it. The tightest slot is yaw[2] at 0.012 (0.6 x
+         * pitch[2]=0.02); 0.01 sits safely below it and clear of the zero
+         * lower bound on slots 1..5. (0.05 as originally written exceeded
+         * yaw[1..3] and pitch[2], so those slots could never converge to it
+         * under projection — the caps are exactly the T4 contract. The old
+         * test only passed there because the unprojected-term bug pushed
+         * Theta past the limit.) */
+        for (i = 0; i < 6; i++) { prior[i] = 0.01f; }
         sigma_prior = 50.0f;  /* strong attractor; equilibrium shift dominates */
         set_prior_axis(MRAC_AXIS_PITCH, prior, 6);
         set_prior_axis(MRAC_AXIS_ROLL,  prior, 6);
@@ -179,20 +187,20 @@ int main(void)
         reset_state();
         drive_zero_steady_state(N_TICKS);
         /* After 2000 ticks @ 5 ms the leakage equilibrium is the prior.
-         * The convergence is asymptotic; we accept within 20% of the
+         * The convergence is asymptotic; we accept within 0.01 of the
          * prior magnitude as a robust check that the term is active
          * (and active in the right direction). */
         for (i = 0; i < MAX_NUM_BASIS; i++) {
             char msg[80];
-            sprintf(msg, "T2 pitch.Theta[%d] near prior 0.05", i);
-            okv_close(msg, mrac_state.pitch.Theta[i], 0.05f, 0.01);
+            sprintf(msg, "T2 pitch.Theta[%d] near prior 0.01", i);
+            okv_close(msg, mrac_state.pitch.Theta[i], 0.01f, 0.01);
         }
-        /* Yaw has a stricter What_limit (0.6Ã— pitch). The 0.05 prior is
-         * still inside the yaw limit. */
+        /* Yaw has a stricter What_limit (0.6 x pitch). The 0.01 prior is
+         * inside the yaw limit for every slot (tightest is 0.012). */
         for (i = 0; i < MAX_NUM_BASIS; i++) {
             char msg[80];
-            sprintf(msg, "T2 yaw.Theta[%d] near prior 0.05", i);
-            okv_close(msg, mrac_state.yaw.Theta[i], 0.05f, 0.01);
+            sprintf(msg, "T2 yaw.Theta[%d] near prior 0.01", i);
+            okv_close(msg, mrac_state.yaw.Theta[i], 0.01f, 0.01);
         }
     }
 
@@ -253,15 +261,16 @@ int main(void)
      *
      * The prior-attractor term is a gradient of the scalar penalty
      * (1/2) * sigma_prior * ||Theta - Theta_prior||^2 â€” the same shape
-     * as the existing sigma-mod term. The projection operator in
-     * MRAC_ProjectGradient bounds |Theta| regardless of the source of
-     * the gradient, so adding the prior-attractor term must NOT violate
-     * the projection. We test this by running the system for N_TICKS
-     * with a strong prior that is OUTSIDE the What_limit envelope; the
-     * projection must keep |Theta| <= What_limit. */
+     * as the existing sigma-mod term. The prior is folded into grad before
+     * MRAC_ProjectGradient, and Theta is hard-bounded to the projection set
+     * after the update (the band-scaling projection alone cannot cap a single
+     * sigma_prior=100 step), so the prior-attractor term must NOT violate the
+     * envelope. We test this by running the system for N_TICKS with a strong
+     * prior that is OUTSIDE the What_limit envelope; |Theta| must stay <=
+     * the per-slot What_limit. */
     {
         float outside[6];
-        /* 1.0 is 6Ã— the pitch What_limit[0] (0.15). Projection must
+        /* 1.0 is 6 x the pitch What_limit[0] (0.15). The clamp must
          * cap the actual |Theta| at 0.15. */
         for (i = 0; i < 6; i++) { outside[i] = 1.0f; }
         sigma_prior = 100.0f;  /* very strong */

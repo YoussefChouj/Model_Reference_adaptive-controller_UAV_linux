@@ -659,6 +659,7 @@ class RigidBodyPlant(Plant):
     def __init__(self, dt: float = 0.005,
                  airframe: Airframe | None = None,
                  motor_tau: float = DEFAULT_MOTOR_TAU,
+                 thrust_delay_s: float = 0.0,
                  initial_state: dict | None = None):
         self.dt = dt
         self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
@@ -667,6 +668,12 @@ class RigidBodyPlant(Plant):
         self.I = self.airframe.I
         self.I_inv = np.linalg.inv(self.I)
         self.motor_pos = motor_positions(self.airframe)
+        # ADR-0012 D6: actuator transport delay on per-motor thrust. N=0
+        # (thrust_delay_s=0, the default) is a passthrough, so this is
+        # bit-identical to the pre-change plant. Use 4 independent FIFOs,
+        # one per motor, matching the MujocoPlant bridge.
+        self._thrust_delay = ActuatorDelayBuffer(round(thrust_delay_s / dt),
+                                                 n_axes=4)
         self.reset(initial_state)
 
     def reset(self, initial_state: dict | None = None) -> None:
@@ -706,9 +713,18 @@ class RigidBodyPlant(Plant):
         # Motors: per-motor thrust (N), start at hover
         if "motor_thrust" in kw:
             self.motor_thrust = np.asarray(kw["motor_thrust"], float).copy()
+            T_each = float(np.mean(self.motor_thrust))
         else:
             T_each = self.airframe.thrust_per_motor_hover
             self.motor_thrust = np.full(4, T_each)
+        # ADR-0012 D6: pre-load the transport-delay FIFO with the current
+        # (hover) per-motor thrust so the first N reads return hover, not 0.
+        # A delay-free plant holding hover must keep producing hover during
+        # the transport lag; the MujocoPlant bridge achieves the same via
+        # its reset() warm-up loop. N=0 (default) is unaffected.
+        self._thrust_delay.reset()
+        for _ in range(self._thrust_delay.N):
+            self._thrust_delay.step(np.full(4, T_each))
 
     def _quat_normalise(self) -> None:
         n = np.linalg.norm(self.q)
@@ -814,6 +830,9 @@ class RigidBodyPlant(Plant):
             -r_roll * dF_roll_unit + r_pitch * dF_pitch_unit - r_yaw * dF_yaw_unit,
             +r_roll * dF_roll_unit + r_pitch * dF_pitch_unit + r_yaw * dF_yaw_unit,
         ])
+        # ADR-0012 D6: actuator transport delay on per-motor thrust. N=0
+        # (thrust_delay_s=0) is a passthrough, so the default is unchanged.
+        thrust_target = self._thrust_delay.step(thrust_target)
         # 1st-order motor lag: thrust tracks target with time constant tau.
         self.motor_thrust = (
             (1.0 - self.alpha) * self.motor_thrust

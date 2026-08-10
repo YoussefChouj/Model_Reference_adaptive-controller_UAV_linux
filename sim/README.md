@@ -40,6 +40,41 @@ transfers between `API/mrac.c` and here with **zero rescaling** (ADR-0006 D1).
 | `runner.py` | — | Engine-agnostic scenario runner (ADR-0012 D7). Holds a `Plant` instance + a `Recorder`, drives the closed-loop tick at `dt`. Replaces the spec-4c Gazebo runner; the `Plant` seam is the only coupling. |
 | `sanity.py` | — | Per-plant SysID gain-matching gate (ADR-0012 D5). Instantiates a plant, runs a step excitation, compares measured `(K, p, T)` against `CANONICAL_MODELS`. Replaces the Gazebo-era hover gate. |
 
+## Delay wrapper (ADR-0012 D6)
+
+Every 6-DOF plant used for prior learning carries an **actuator transport delay**
+on per-motor thrust, because weights learned on a delay-free plant are
+systematically over-confident. One primitive, `sim/delay.py:ActuatorDelayBuffer`,
+is shared by all plants (`N = round(T/dt)` integer-sample FIFO, `N=0` passthrough):
+
+- `_AxisSim` (the `IdentifiedPlant` rate axis) delays its scalar input.
+- `RigidBodyPlant(thrust_delay_s=...)` delays the 4-per-motor thrust target,
+  pre-loading the FIFO with hover thrust so a plant holding hover keeps producing
+  hover during the lag (matching the MujocoPlant bridge's reset warm-up).
+- `MujocoPlant(thrust_delay_s=...)` delays per-motor thrust inside `mujoco_bridge`.
+
+Default `thrust_delay_s=0` (or `delay=0`) is a pure passthrough — bit-identical to
+the pre-change plants. The delay and the motor LPF commute as LTI operators, so a
+delayed plant's response is exactly the undelayed response shifted by N ticks
+(verified in `test_plant.py::test_rigid_body_plant_thrust_delay_shifts_response_by_N`).
+
+## Dimensionless priors (ADR-0014 D1–D4, ADR-0013 D5)
+
+`sim/priors.py` defines the dimensionless adaptive prior `Prior`, the stored form
+`Theta_tilde = K * Theta` learned on a source plant tagged by `plant_tag = (K, p, T)`.
+Deployment on any target is `Theta = Theta_tilde / K_target` — the `1/K` matching
+argument is what makes priors airframe-invariant. The raw `Theta` and the source
+`(K, p, T)` are stored alongside, never instead.
+
+- `Prior.convert_to(target_plant_tag)` rescales for a target plant; **cross-plant
+  application without an explicit `convert_to` is refused** — the failure mode
+  ADR-0014 D7 identifies as the thesis headline result.
+- Cross-variant transfer is forbidden (`RegressorVariant` registry, ADR-0014 D4).
+- `sim/adaptive_law.py` carries the `sigma_prior` / `theta_prior` attractor
+  (ADR-0013 D5): `-sigma_prior·(Theta − theta_prior)` added to the gradient when
+  `sigma_prior_on` is set. Default `sigma_prior=0` is bit-identical to pre-change
+  (parity tests in `test_adaptive_law.py`).
+
 ## The unit chain (firmware-faithful)
 
 ```

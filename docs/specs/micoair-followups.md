@@ -5,6 +5,12 @@
 > See `sessions_summary/2026-08-09-micoair-summary.md` for the full session record.
 >
 > **Firmware is FLASHED and running on the drone.** The pct-95 build is live.
+>
+> **STATUS: ⏸️ SKIPPED as an agent task 2026-08-10** — the only safe agent-side edit
+> (item 2, flip `USART3_THROUGHPUT_TEST`) is **already satisfied**: `TASK/send_data.c:472`
+> already reads `#define USART3_THROUGHPUT_TEST   0` (production image 2026-08-09). The
+> source needs no change. Items 1, 3, 4, 5 are human-operator or decision-gated. Per the
+> hard safety constraints, no flashing/bench interaction is routed through an agent.
 
 ## Remaining items
 

@@ -146,26 +146,27 @@ def _build_with_patch(patched_mrac_text: str, tmpdir: Path) -> Path:
 
 
 def test_self_test_drop_prior_term(tmp_path, gcc_spec):
-    """Drop the -sigma_prior*(Theta - Theta_prior) term. The gate must catch it.
+    """Drop the sigma_prior*(Theta - Theta_prior) fold. The gate must catch it.
 
     The patch: replace the entire prior-attractor LINE (including its
     leading whitespace and trailing newline) with an empty string. The
-    surrounding `- sigma_eff * state->Theta[i]` term remains, but the
-    `- sigma_prior * (...)` term is gone. The expression stays
-    syntactically valid because the parenthesised expression's
-    last operand is now `- sigma_eff * state->Theta[i]`.
+    fold now lives inside the grad accumulation loop (it is subtracted from
+    grad before projection), so the line is a complete statement:
+    `grad[i] -= sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i]);`
+    Dropping the whole line leaves the `for { ... }` loop body empty, which
+    is syntactically valid, and the prior term is gone entirely.
     """
     if gcc_spec is None:
         pytest.skip("no host gcc available - SIL gate requires one")
 
     src = (REPO_ROOT / "API" / "mrac.c").read_text(encoding="utf-8")
-    # Each occurrence of the prior term is on its own line in the
-    # #ifdef MRAC_ENABLE_SIGMA_PRIOR block. Drop the WHOLE LINE so the
-    # surrounding expression stays valid.
+    # The prior-attractor fold is one line inside the grad-accumulation
+    # loop in the #ifdef MRAC_ENABLE_SIGMA_PRIOR block. Drop the WHOLE LINE
+    # so the loop body stays syntactically valid (empty).
     needle_line = (
-        "                - sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i])\n"
+        "                grad[i] -= sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i]);\n"
     )
-    assert needle_line in src, "expected opt-in prior line in API/mrac.c"
+    assert needle_line in src, "expected opt-in prior fold in API/mrac.c"
     patched = src.replace(needle_line, "")
     assert patched != src, "patch did not apply"
     assert "sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i])" not in patched, (
