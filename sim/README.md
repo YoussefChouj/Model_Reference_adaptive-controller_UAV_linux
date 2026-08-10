@@ -20,12 +20,14 @@ transfers between `API/mrac.c` and here with **zero rescaling** (ADR-0006 D1).
 2. **Virtual simulation** — run the firmware-parity controller against a pluggable
    plant. Phase 1 = identified linear rate models; later = 6-DOF / Gazebo, swapped
    behind the `Plant` seam without the controller knowing (ADR-0006 D3/D6).
+   **Gazebo is retired** (ADR-0012 D1); the high-fidelity 6-DOF plant is
+   `MujocoPlant` (delivered by the parallel MuJoCo session, ADR-0012 D2).
 
 ## Module map
 
 | Module | Mirrors | Role |
 |---|---|---|
-| `plant.py` | — (identified models) | Rate-loop plant seam `step(u_dict)->state_dict`; ZOH + integer transport-delay buffer. `IdentifiedPlant`, `GazeboPlant` (stub). `CANONICAL_MODELS` is the **single source of truth** for the identified per-axis plants (scenarios reads it too). |
+| `plant.py` | — (identified models) | Rate-loop plant seam `step(u_dict)->state_dict`; ZOH + integer transport-delay buffer. `IdentifiedPlant`, `RigidBodyPlant`, `GazeboPlant` (stub, slated for retirement per ADR-0012 D1). `CANONICAL_MODELS` is the **single source of truth** for the identified per-axis plants (scenarios reads it too). |
 | `reference_model.py` | `mrac.c:168-196` | Per-axis `xm` recurrence + adaptive-law gains (`P`, and `Pe`/`Pedot` for 2nd order). `for_axis(..., ref_model_type=)` mirrors the firmware CMD-0x13 runtime switch — pass `0/1/2` to force passthrough/1st/2nd on any axis. `l1`/`l2` = CRM feedback gain `L` (ADR-0008); `Pe`/`Pedot` are the analytic 2×2 Lyapunov solution for `Am−L·C`, collapsing to ADR-0007 when `L=0`. |
 | `regressor.py` | `mrac.c:65-91` | 6-basis structured regressor `[bias, x, x·tanh x, cross, u_nom, xm]`. |
 | `drive.py` | (the `s` in `mrac.c`) | **Lyapunov-drive seam**: `s = eᵥᵀ P B`. Two adapters — `scalar_drive` (ADR-0003) and `state_space_drive` (ADR-0007). A new law (CRM, set-theoretic) is a new Drive, not another branch in `update()`. |
@@ -35,6 +37,8 @@ transfers between `API/mrac.c` and here with **zero rescaling** (ADR-0006 D1).
 | `scenarios.py` | — | Step / doublet / yaw-test (tracking) + inertia-offset / disturbance (dynamics change). |
 | `metrics.py` | — | **Run evaluation** (pure, log-only): tracking (IAE/ISE/ITAE/settling/overshoot), control effort + saturation, adaptation health (active fraction, bound saturation), robustness (`ė` RMS, zero-crossings), disturbance recovery. Tested on synthetic logs. |
 | `run.py` | — | Closed-loop runner: owns the clock + log arrays, calls `loop.tick`, then `metrics.compute`; writes the per-run artifact folder. |
+| `runner.py` | — | Engine-agnostic scenario runner (ADR-0012 D7). Holds a `Plant` instance + a `Recorder`, drives the closed-loop tick at `dt`. Replaces the spec-4c Gazebo runner; the `Plant` seam is the only coupling. |
+| `sanity.py` | — | Per-plant SysID gain-matching gate (ADR-0012 D5). Instantiates a plant, runs a step excitation, compares measured `(K, p, T)` against `CANONICAL_MODELS`. Replaces the Gazebo-era hover gate. |
 
 ## The unit chain (firmware-faithful)
 
@@ -156,6 +160,7 @@ Run the calibrator integration tests:
 cd sim && python -m pytest tests/test_scenarios_cal.py -v
 ```
 
-6-DOF / Gazebo plant (`GazeboPlant` is a `NotImplementedError` stub, Linux-partition
-bring-up later), outer position/attitude loops, operational/geofence limits, and the
-Z axis (un-wired in firmware). See ADR-0006 D5/D6.
+6-DOF / Gazebo plant is retired (ADR-0012 D1); the 6-DOF backend is `MujocoPlant`
+(delivered by the parallel MuJoCo session, ADR-0012 D2). Outer position/attitude
+loops, operational/geofence limits, and the Z axis (un-wired in firmware). See
+ADR-0006 D5/D6.
