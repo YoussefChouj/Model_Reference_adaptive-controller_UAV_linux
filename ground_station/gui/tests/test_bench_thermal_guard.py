@@ -17,6 +17,7 @@ is not a way to skip the cooldown.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -57,6 +58,14 @@ DEFAULTS = {
     "bench_autoidle": True,
     "bench_grams": 0.0,
     "bench_tare_g": 0.0,
+    "bench_grams_min": 0.0,
+    "bench_grams_max": 0.0,
+    "bench_settle_min_s": 8,
+    "bench_arrival": "",
+    # Off by default HERE (production default is 400) so these tests pin the target/
+    # commanded split without every assertion having to wait out a ramp. The ramp gets
+    # its own tests below, which turn it on explicitly.
+    "bench_ramp_rate": 0,
 }
 
 
@@ -76,6 +85,10 @@ def _dash(monkeypatch, **overrides):
     d._bench_sweep = ""
     d._bench_idling = False
     d._bench_target = int(fake.values["bench_ccr"])
+    d._bench_ramping = False
+    d._bench_ramp_from = int(fake.values["bench_ccr"])
+    d._bench_ramp_t0 = 0.0
+    d._bench_last_logged_ccr = 0
     d.sent = []
     d._send_cmd = lambda c, i, v: d.sent.append((c, i, v))
     return d, fake
@@ -180,7 +193,6 @@ def test_idle_button_drops_ccr_without_stopping(monkeypatch):
     assert d._motor_test_ccr == 2150
     assert d._motor_test_active, "IDLE is not STOP"
     assert (0x16, 2, 2150.0) in d.sent
-    assert d._bench_sweep == "down"
     assert fake.values["bench_ccr"] == 3800, "IDLE must not move the slider"
 
 
@@ -215,7 +227,6 @@ def test_resume_restarts_the_settle_clock(monkeypatch):
     d._bench_ccr_change_t = 0.0
     d._bench_resume()
     assert d._bench_ccr_change_t > 0.0
-    assert d._bench_sweep == "up"
 
 
 def test_log_point_auto_idles(monkeypatch, tmp_path):
@@ -241,6 +252,213 @@ def test_start_comes_up_at_idle_not_at_the_stale_slider_value(monkeypatch):
     assert d._bench_current_ccr() == 2150, "RUN is not a request for full power"
     assert (0x16, 2, 2150.0) in d.sent
     assert (0x16, 2, 3800.0) not in d.sent
+
+
+# --- soft start ----------------------------------------------------------------------
+# Peak ESC/motor current is set by the SIZE of the command jump, not by the endpoint, so
+# stepping idle -> 3600 in one packet is the harshest thing the bench does. It is also
+# what makes the scale overshoot and ring for seconds above ~CCR 3200. Rises are rate-
+# limited; drops must stay instant, because coming down is what protects the motor.
+
+def _ramping(monkeypatch, rate=400, **kw):
+    d, fake = _dash(monkeypatch, bench_ramp_rate=rate, **kw)
+    return d, fake
+
+
+def test_go_ramps_instead_of_stepping(monkeypatch):
+    d, _ = _ramping(monkeypatch, bench_ccr=3600)
+    d._bench_go_idle("manual")                 # at 2150, target 3600
+    d._bench_resume()
+    t0 = d._bench_ramp_t0
+    assert d._bench_ramping
+    assert d._bench_current_ccr(t0) == 2150, "the rise starts where the motor already is"
+    assert d._bench_current_ccr(t0 + 1.0) == 2550, "400 CCR/s"
+    assert d._bench_current_ccr(t0 + 2.0) == 2950
+    assert d._bench_current_ccr(t0 + 10.0) == 3600, "and lands exactly on target"
+    assert not d._bench_ramping
+
+
+def test_ramp_never_overshoots_the_target(monkeypatch):
+    d, _ = _ramping(monkeypatch, bench_ccr=3600)
+    d._bench_go_idle("manual")
+    d._bench_resume()
+    for k in range(0, 60):
+        assert d._bench_current_ccr(d._bench_ramp_t0 + 0.1*k) <= 3600
+
+
+def test_settle_clock_starts_when_the_ramp_lands_not_at_go(monkeypatch):
+    """Otherwise a 4 s ramp makes an unsettled reading look like it was held for 4 s."""
+    d, _ = _ramping(monkeypatch, bench_ccr=3600)
+    d._bench_go_idle("manual")
+    d._bench_resume()
+    t0 = d._bench_ramp_t0
+    at_go = d._bench_ccr_change_t
+    d._bench_current_ccr(t0 + 1.0)
+    assert d._bench_ccr_change_t == at_go, "mid-ramp the clock has not restarted"
+    d._bench_current_ccr(t0 + 99.0)
+    assert d._bench_ccr_change_t == t0 + 99.0, "it restarts when the target is reached"
+
+
+def test_idle_wins_over_an_in_progress_ramp(monkeypatch):
+    d, _ = _ramping(monkeypatch, bench_ccr=3900)
+    d._bench_go_idle("manual")
+    d._bench_resume()
+    d._bench_current_ccr(d._bench_ramp_t0 + 1.0)
+    d._bench_go_idle("operator hit IDLE mid-ramp")
+    assert not d._bench_ramping
+    assert d._bench_current_ccr() == 2150, "coming down is never rate-limited"
+
+
+def test_guard_can_still_pull_down_during_a_ramp(monkeypatch):
+    """A ramp must not be able to outrun the thing that protects the motor."""
+    d, _ = _ramping(monkeypatch, bench_ccr=3900)
+    d._bench_go_idle("manual")
+    d._bench_resume()
+    d._motor_test_ccr = 3900               # ramp has landed hot
+    d._bench_ramping = False
+    _run(d, 25.0)
+    assert d._bench_rest_until > 0.0
+    assert d._bench_current_ccr() == 2150
+
+
+def test_stepping_down_while_running_is_immediate(monkeypatch):
+    d, _ = _ramping(monkeypatch, bench_ccr=3600)
+    d._bench_idling = False
+    d._motor_test_ccr = 3600
+    d._bench_step_ccr(-1)                  # step is 200
+    assert d._bench_current_ccr() == 3400
+    assert not d._bench_ramping
+
+
+def test_ramp_rate_zero_is_the_old_instant_step(monkeypatch):
+    d, _ = _ramping(monkeypatch, rate=0, bench_ccr=3600)
+    d._bench_go_idle("manual")
+    d._bench_resume()
+    assert d._bench_current_ccr() == 3600
+
+
+# --- oscillation envelope -------------------------------------------------------------
+
+def _logging_dash(monkeypatch, tmp_path, **kw):
+    d, fake = _dash(monkeypatch, **kw)
+    d._bench_csv_path = tmp_path/"t.csv"
+    d._bench_csv_path.write_text("hdr\n", encoding="utf-8")
+    d._log_lock = __import__("threading").Lock()
+    d._telem = {}
+    return d, fake
+
+
+def test_min_max_are_logged_then_cleared(monkeypatch, tmp_path):
+    """A band left in the boxes would silently attach itself to the next point too."""
+    d, fake = _logging_dash(monkeypatch, tmp_path, bench_ccr=3400, bench_grams=680.0,
+                            bench_grams_min=655.0, bench_grams_max=742.0)
+    d._bench_log_point()
+    row = d._bench_csv_path.read_text().splitlines()[-1]
+    assert "680.000,655.000,742.000" in row
+    assert fake.values["bench_grams_min"] == 0.0
+    assert fake.values["bench_grams_max"] == 0.0
+
+
+def test_unobserved_band_is_blank_not_zero(monkeypatch, tmp_path):
+    """0 g is a real reading near idle; 'I did not watch it swing' is not."""
+    d, _ = _logging_dash(monkeypatch, tmp_path, bench_ccr=2400, bench_grams=84.0)
+    d._bench_log_point()
+    row = d._bench_csv_path.read_text().splitlines()[-1]
+    assert "84.000,,," in row, "empty fields, so a fit can tell them apart from a real 0"
+
+
+# --- hysteresis direction -------------------------------------------------------------
+
+def test_sweep_is_measured_between_logged_points_not_commanded_ccr(monkeypatch, tmp_path):
+    """Regression, found in thrust_20260807_191816.csv.
+
+    Direction used to be taken from the previous COMMANDED CCR. Once auto-IDLE existed
+    every point was approached from idle, so every point looked like a rise: the whole
+    descending 3300->2300 run in that file is labelled "up" and 22 of its 79 rows
+    disagree with the actual sweep, which silently destroys the hysteresis column."""
+    d, fake = _logging_dash(monkeypatch, tmp_path, bench_ccr=3000, bench_grams=350.0)
+    for ccr, expect in ((3000, ""), (3200, "up"), (3400, "up"), (3200, "down"),
+                        (3000, "down"), (3000, "rpt")):
+        fake.values["bench_ccr"] = ccr
+        d._bench_idling = False
+        d._motor_test_ccr = ccr
+        d._bench_log_point()                 # auto-IDLEs, exactly as in the real loop
+        assert d._bench_sweep == expect, f"CCR {ccr} should be {expect!r}"
+    rows = d._bench_csv_path.read_text().splitlines()[1:]
+    assert [r.split(",")[-3] for r in rows] == ["", "up", "up", "down", "down", "rpt"]
+
+
+def test_unsettled_point_is_flagged(monkeypatch, tmp_path):
+    """The other half of that file's damage: 655 g filed under CCR 2150, logged 3.2 s
+    after the drop to idle while the scale was still falling from the 3500 point. The
+    discriminator is DWELL, not operating point -- deliberate idle points are fine."""
+    d, fake = _logging_dash(monkeypatch, tmp_path, bench_ccr=3500, bench_grams=655.0)
+    d._bench_go_idle("auto after Log point")
+    d._bench_ccr_change_t = time.monotonic() - 3.2      # held 3.2 s, want 8
+    d._bench_log_point()
+    assert "UNSETTLED" in fake.values["bench_log_status"]
+    # A warning, not a refusal: the operator may still want the row.
+    assert d._bench_csv_path.read_text().count("\n") == 2
+
+
+def test_a_deliberate_idle_point_held_long_enough_is_not_flagged(monkeypatch, tmp_path):
+    """Idle thrust vs pack voltage is a real measurement -- at fixed CCR the only thing
+    that moves is V, which is the cleanest way to identify the voltage exponent."""
+    d, fake = _logging_dash(monkeypatch, tmp_path, bench_ccr=3500, bench_grams=27.0)
+    d._bench_go_idle("manual")
+    d._bench_ccr_change_t = time.monotonic() - 30.0
+    d._bench_log_point()
+    assert "UNSETTLED" not in fake.values["bench_log_status"]
+    assert ",2150," in d._bench_csv_path.read_text()
+
+
+# --- arrival indicator ----------------------------------------------------------------
+
+def test_arrival_reports_ramping_then_settling_then_settled(monkeypatch):
+    d, fake = _dash(monkeypatch, bench_ramp_rate=400, bench_ccr=3600)
+    d._telem = {}
+    d._bench_go_idle("manual")
+    d._bench_resume()
+    t0 = d._bench_ramp_t0
+    d._bench_current_ccr(t0 + 1.0)
+    assert d._bench_arrival(t0 + 1.0)[0].startswith("RAMPING")
+    d._bench_current_ccr(t0 + 99.0)                     # lands, restamps the settle clock
+    assert "settling" in d._bench_arrival(t0 + 100.0)[0]
+    txt, col = d._bench_arrival(t0 + 108.0)             # 9 s held, want 8
+    assert "READ NOW" in txt and col == (90, 220, 90, 255)
+
+
+def test_arrival_goes_late_once_the_read_window_closes(monkeypatch):
+    """Above ~CCR 3300 thrust decays instead of settling, so a point held 40 s is not
+    'more settled' than one held 10 s -- it is a different measurement."""
+    d, _ = _dash(monkeypatch, bench_ccr=3400)
+    d._bench_idling = False
+    d._motor_test_ccr = 3400
+    d._telem = {}
+    d._bench_ccr_change_t = 100.0
+    assert "settling" in d._bench_arrival(105.0)[0]     # 5 s, want 8
+    assert "READ NOW" in d._bench_arrival(112.0)[0]     # 12 s, inside 8..18
+    txt, col = d._bench_arrival(140.0)                  # 40 s, window closed
+    assert "LATE" in txt and col == (220, 160, 60, 255)
+
+
+def test_arrival_waits_on_the_firmware_echo(monkeypatch):
+    """A dropped 0x16 packet must read as WAIT, not as a settled point."""
+    d, _ = _dash(monkeypatch, bench_ccr=3400)
+    d._bench_idling = False
+    d._motor_test_ccr = 3400
+    d._bench_ccr_change_t = 90.0
+    d._telem = {"bench": {"bench.ccr": 2150}}
+    assert d._bench_arrival(100.0)[0].startswith("WAIT")
+    d._telem = {"bench": {"bench.ccr": 3400}}
+    assert "READ NOW" in d._bench_arrival(100.0)[0]
+
+
+def test_arrival_is_quiet_when_the_motor_is_off(monkeypatch):
+    d, _ = _dash(monkeypatch)
+    d._motor_test_active = False
+    d._telem = {}
+    assert d._bench_arrival(100.0)[0] == "-- motor off --"
 
 
 def test_guard_ignores_a_stalled_render_loop(monkeypatch):

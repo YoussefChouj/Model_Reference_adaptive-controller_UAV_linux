@@ -97,6 +97,10 @@ VRC_STICK_MAX = 1.0
 VRC_STICK_CENTER = 0.0
 # Bench mode UI cap: limits throttle to 20 % from bottom so drone cannot lift off.
 VRC_BENCH_THR_MAX = -0.6
+# How long the bench "READ NOW" window stays open after the configured settle time.
+# Wide enough not to rush the operator, narrow enough that every point in a session
+# shares a comparable dwell -- see _bench_arrival for why that matters more than settling.
+BENCH_READ_WINDOW_S = 10.0
 
 # Battery (4S LiPo) state-of-charge estimate from pack voltage. Linear V->% is rough but
 # adequate as a "time to land" cue. Empty floor is 3.5 V/cell (conservative land threshold).
@@ -330,7 +334,8 @@ class Dashboard:
         self._motor_test_hb_t: float = 0.0      # last heartbeat send time
         self._bench_csv_path: Optional[Path] = None  # manual-point log (lazily created)
         self._bench_ccr_change_t: float = 0.0    # monotonic time of the last CCR change (settle_s)
-        self._bench_sweep: str = ""              # "up"/"down" — direction of that change (hysteresis)
+        self._bench_sweep: str = ""              # "up"/"down"/"rpt" vs the PREVIOUS LOGGED point
+        self._bench_last_logged_ccr: int = 0     # what that previous point was at
         # Thermal guard. A 2026-07-29 sweep held one motor near full power for ~50 min
         # (40 points at CCR>=3800, ~6 s apart) and burned it out. Dwell above BENCH_HOT_CCR
         # is budgeted; spending the budget drops the motor to idle and starts a rest.
@@ -339,6 +344,13 @@ class Dashboard:
         self._bench_guard_t: float = 0.0         # last guard tick (for dt)
         self._bench_idling: bool = False         # holding idle, sweep target preserved
         self._bench_target: int = 2000           # the sweep point (slider), NOT what is commanded
+        # Soft start. A step from idle straight to a high CCR is the harshest thing the
+        # bench does to a motor/ESC — peak current is set by the size of the jump, not by
+        # the endpoint — and it is also what makes the scale overshoot and ring for
+        # several seconds above ~CCR 3200. Rises are rate-limited; drops are not.
+        self._bench_ramping: bool = False        # a rate-limited rise is in progress
+        self._bench_ramp_from: int = 2000        # CCR the rise started from
+        self._bench_ramp_t0: float = 0.0         # monotonic time it started
 
         self._flight_logger = FlightLogger()
         self._log_lock = threading.Lock()       # serialize CSV writes across render + telemetry-rx threads
@@ -2261,6 +2273,24 @@ class Dashboard:
                               min_value=3, max_value=120, step=5, width=140)
             dpg.add_input_int(tag="bench_rest_s", label="rest s", default_value=45,
                               min_value=5, max_value=600, step=15, width=140)
+        # Soft start: peak ESC/motor current is set by the SIZE of the command jump, so a
+        # step from idle to 3600 is far harsher than the endpoint alone. 400 CCR/s walks
+        # idle->3600 in ~3.6 s. Rises only; drops stay instant.
+        with dpg.group(horizontal=True):
+            dpg.add_input_int(tag="bench_ramp_rate", label="soft-start ramp (CCR/s, 0=off)",
+                              default_value=400, min_value=0, max_value=4000, step=50,
+                              width=200)
+            dpg.add_text("(GO ramps up; IDLE/guard still drop instantly)",
+                         color=(150, 150, 150, 255))
+        dpg.add_separator()
+        # Arrival + settling. "Is it there yet?" was previously only inferable from the
+        # firmware's CCR echo buried in the telemetry line. Arrival is confirmed against
+        # that echo, not just against what the dashboard believes it sent.
+        with dpg.group(horizontal=True):
+            dpg.add_input_int(tag="bench_settle_min_s", label="settle before reading (s)",
+                              default_value=8, min_value=0, max_value=120, step=1, width=170)
+            dpg.add_text("(green = safe to read the scale)", color=(150, 150, 150, 255))
+        dpg.add_text("-- motor off --", tag="bench_arrival", color=(150, 150, 150, 255))
         dpg.add_text("guard: idle", tag="bench_guard_status", color=(150, 150, 150, 255))
         dpg.add_text("link: --   vbat: --   ccr(echo): --   motor(echo): --   fw_active: --",
                      tag="bench_telem", color=(180, 180, 180, 255))
@@ -2295,6 +2325,19 @@ class Dashboard:
             dpg.add_input_float(tag="bench_grams", label="scale (g)", default_value=0.0, width=160)
             dpg.add_input_float(tag="bench_tare_g", label="tare (g, no-throttle)",
                                 default_value=0.0, width=220)
+        # Above ~CCR 3200 the reading overshoots and then rings down over several seconds
+        # instead of settling to a number. `grams` alone then records one arbitrary sample
+        # of a moving signal with no record of how wide it was moving. min/max bound the
+        # envelope the settled value was picked out of, so a point read mid-ring is
+        # identifiable afterwards rather than silently poisoning the fit. Optional: left
+        # blank in the CSV when not filled in, so "not observed" stays distinct from a
+        # genuine 0 g. Both are cleared after each Log point — a stale envelope carried
+        # onto the next point would be invisible and wrong.
+        with dpg.group(horizontal=True):
+            dpg.add_input_float(tag="bench_grams_min", label="min (g)", default_value=0.0, width=150)
+            dpg.add_input_float(tag="bench_grams_max", label="max (g)", default_value=0.0, width=150)
+            dpg.add_text("(optional: the swing you saw before it settled)",
+                         color=(150, 150, 150, 255))
         # What is physically on the stand. Without these, a CSV that mixes a CW and a CCW
         # block is unanalysable after the fact -- and motor_id is the ESC channel, not the
         # identity of the motor bolted on (the 2026-07-29 unit burned out and was replaced).
@@ -2360,16 +2403,78 @@ class Dashboard:
             return self._bench_target
 
     def _bench_note_ccr_change(self, prev_ccr: int) -> None:
-        """Record WHEN the operating point last moved and in which direction.
+        """Record WHEN the operating point last moved, for settle_s.
 
         CCR changes used to emit their own CSV row with grams=0, which put fake
         zero-thrust points in the middle of the curve. The two things those rows
         actually carried — settling time and sweep direction (hysteresis) — are
-        now columns on the next real logged point instead."""
+        now columns on the next real logged point instead. Direction is NOT taken
+        here: see _bench_write_row for why."""
         if self._motor_test_ccr == prev_ccr:
             return
         self._bench_ccr_change_t = time.monotonic()
-        self._bench_sweep = "up" if self._motor_test_ccr > prev_ccr else "down"
+
+    def _bench_ramp_rate(self) -> int:
+        """CCR counts per second for a rise. 0 disables the ramp (instant step)."""
+        try:
+            return max(0, int(dpg.get_value("bench_ramp_rate")))
+        except Exception:
+            return 400
+
+    def _bench_settle_min_s(self) -> float:
+        """Seconds the point must be held before the scale is worth reading."""
+        try:
+            return max(0.0, float(dpg.get_value("bench_settle_min_s")))
+        except Exception:
+            return 8.0
+
+    def _bench_held_s(self, now: Optional[float] = None) -> float:
+        """Seconds at the current operating point (measured from ramp landing)."""
+        if not self._bench_ccr_change_t:
+            return 0.0
+        return (time.monotonic() if now is None else now) - self._bench_ccr_change_t
+
+    def _bench_arrival(self, now: float) -> Tuple[str, Any]:
+        """The 'is it there yet?' line. Arrival is confirmed against the firmware's CCR
+        echo, so a dropped command packet shows up as WAIT instead of as a bad data point."""
+        if not self._motor_test_active:
+            return "-- motor off --", (150, 150, 150, 255)
+        if self._bench_rest_until:
+            return f"COOLING at idle {self._motor_test_ccr}", (220, 120, 60, 255)
+        target = self._bench_target_ccr()
+        if self._bench_ramping:
+            rate = self._bench_ramp_rate()
+            left = (target - self._motor_test_ccr)/rate if rate > 0 else 0.0
+            return (f"RAMPING {self._motor_test_ccr} -> {target}   {left:4.1f} s to go",
+                    (220, 200, 90, 255))
+        echo = (self._telem.get("bench") or {}).get("bench.ccr")
+        if echo is not None and int(echo) != self._motor_test_ccr:
+            return (f"WAIT — commanded {self._motor_test_ccr}, motor is at {int(echo)}",
+                    (220, 80, 80, 255))
+        held = self._bench_held_s(now)
+        need = self._bench_settle_min_s()
+        where = "idle" if self._bench_idling else "CCR"
+        if held < need:
+            return (f"AT {where} {self._motor_test_ccr} — settling {held:4.1f} / {need:.0f} s",
+                    (220, 200, 90, 255))
+        if held <= need + BENCH_READ_WINDOW_S:
+            return (f"AT {where} {self._motor_test_ccr} — READ NOW ({held:4.1f} s)",
+                    (90, 220, 90, 255))
+        # Above ~CCR 3300 the thrust does not converge, it decays slowly, so "the settled
+        # value" is not a physical quantity -- what you record is a function of how long
+        # you waited. The window makes dwell a CONVENTION instead of an accident: points
+        # logged at a comparable dwell are comparable to each other even when none of them
+        # is settled. The 2026-08-07 session had a dwell stdev of 6.6 s (0.1..56.6 s),
+        # which injects the decay straight into the curve as scatter.
+        return (f"AT {where} {self._motor_test_ccr} — LATE, held {held:4.1f} s "
+                f"(target {need:.0f}-{need + BENCH_READ_WINDOW_S:.0f} s; it is still decaying)",
+                (220, 160, 60, 255))
+
+    def _bench_begin_ramp(self, now: Optional[float] = None) -> None:
+        """Start a rate-limited rise from wherever the motor is now to the target."""
+        self._bench_ramp_from = self._motor_test_ccr
+        self._bench_ramp_t0 = time.monotonic() if now is None else now
+        self._bench_ramping = True
 
     def _bench_set_target(self, ccr: Any) -> None:
         """Move the sweep point. Legal while idling — that is the point of it."""
@@ -2380,7 +2485,9 @@ class Dashboard:
             pass
         if not self._bench_idling:
             prev = self._motor_test_ccr
-            self._motor_test_ccr = self._bench_target
+            if self._bench_target > self._motor_test_ccr:
+                self._bench_begin_ramp()
+            self._motor_test_ccr = self._bench_current_ccr()
             self._bench_note_ccr_change(prev)
             if self._motor_test_active:
                 self._send_cmd(0x16, 2, float(self._motor_test_ccr))
@@ -2397,6 +2504,7 @@ class Dashboard:
         The slider is left alone: it still shows the target you were working towards, so
         GO returns to it in one click and +/- pre-sets the next point while cooling."""
         self._bench_idling = True
+        self._bench_ramping = False        # abandon any rise in progress; down is immediate
         prev = self._motor_test_ccr
         self._motor_test_ccr = self._bench_clamp_ccr(self._bench_guard_cfg()["idle"])
         self._bench_note_ccr_change(prev)
@@ -2413,15 +2521,22 @@ class Dashboard:
             return
         self._bench_idling = False
         prev = self._motor_test_ccr
-        self._motor_test_ccr = self._bench_target_ccr()
+        target = self._bench_target_ccr()
         # Settling starts now: the motor only begins moving to the target at this moment,
         # so settle_s on the next logged point must count from here, not from the +/- click.
+        # A ramped rise re-stamps this when it lands, so settle_s never counts the ramp.
         self._bench_ccr_change_t = time.monotonic()
-        if self._motor_test_ccr != prev:
-            self._bench_sweep = "up" if self._motor_test_ccr > prev else "down"
+        if target > prev:
+            self._bench_begin_ramp()
+        self._motor_test_ccr = self._bench_current_ccr()
         if self._motor_test_active:
             self._send_cmd(0x16, 2, float(self._motor_test_ccr))
-        self._bench_say(f"running at CCR {self._motor_test_ccr}")
+        rate = self._bench_ramp_rate()
+        if self._bench_ramping and rate > 0:
+            self._bench_say(f"ramping {prev} -> {target} at {rate} CCR/s "
+                            f"({(target - prev)/rate:.1f} s)")
+        else:
+            self._bench_say(f"running at CCR {self._motor_test_ccr}")
 
     def _bench_say(self, msg: str) -> None:
         try:
@@ -2482,16 +2597,34 @@ class Dashboard:
         except Exception:
             pass
 
-    def _bench_current_ccr(self) -> int:
+    def _bench_current_ccr(self, now: Optional[float] = None) -> int:
         """What the firmware is actually told, re-derived every heartbeat.
 
         Idle wins over the target, and a thermal rest wins over everything short of STOP —
         deriving it here rather than storing it means no code path can leave the motor at a
-        stale operating point, and a rest cannot be escaped by nudging the slider."""
+        stale operating point, and a rest cannot be escaped by nudging the slider.
+
+        A rise towards the target is rate-limited (soft start); a drop is not. Coming down
+        unloads the motor, so there is nothing to protect it from, and the guard must be
+        able to pull the operating point to idle in one step."""
+        now = time.monotonic() if now is None else now
         if self._bench_rest_until or self._bench_idling:
+            self._bench_ramping = False
             self._motor_test_ccr = self._bench_clamp_ccr(self._bench_guard_cfg()["idle"])
-        else:
-            self._motor_test_ccr = self._bench_target_ccr()
+            return self._motor_test_ccr
+        target = self._bench_target_ccr()
+        rate = self._bench_ramp_rate()
+        if self._bench_ramping and rate > 0 and target > self._bench_ramp_from:
+            ccr = int(self._bench_ramp_from + rate*max(0.0, now - self._bench_ramp_t0))
+            if ccr < target:
+                self._motor_test_ccr = self._bench_clamp_ccr(ccr)
+                return self._motor_test_ccr
+        if self._bench_ramping:
+            # The rise just landed. settle_s counts from here, not from GO, so a slow ramp
+            # cannot make an unsettled reading look like it was held for 5 s.
+            self._bench_ramping = False
+            self._bench_ccr_change_t = now
+        self._motor_test_ccr = target
         return self._motor_test_ccr
 
     def _bench_start(self) -> None:
@@ -2545,13 +2678,17 @@ class Dashboard:
         # the heartbeat below must then push THAT value, not the one the operator set.
         self._bench_guard_tick(now)
 
-        if self._motor_test_active and (now - self._motor_test_hb_t) >= 0.15:
+        # 0.15 s is ample to pet the dead-man, but it also sets the ramp's step size
+        # (0.15 s x 400 CCR/s = 60 counts). Push faster while ramping so the soft start is
+        # actually smooth rather than a staircase of medium-sized jumps.
+        hb_period = 0.05 if self._bench_ramping else 0.15
+        if self._motor_test_active and (now - self._motor_test_hb_t) >= hb_period:
             self._motor_test_hb_t = now
             # Re-push the full operating point every heartbeat (not just the enable):
             # the slider is the source of truth, so the firmware always tracks what the
             # operator sees, and a dropped motor/CCR packet self-heals within 0.15 s.
             self._send_cmd(0x16, 1, float(self._motor_test_id))
-            self._send_cmd(0x16, 2, float(self._bench_current_ccr()))
+            self._send_cmd(0x16, 2, float(self._bench_current_ccr(now)))
             self._send_cmd(0x16, 0, 1.0)  # heartbeat — pets the firmware dead-man
         try:
             bench = self._telem.get("bench") or {}
@@ -2610,6 +2747,9 @@ class Dashboard:
             elif self._bench_idling:
                 col = (120, 180, 220, 255)
                 mode = "  [IDLE — press GO]"
+            elif self._bench_ramping:
+                col = (220, 200, 90, 255)
+                mode = "  [RAMPING — wait]"
             else:
                 col = (90, 200, 90, 255)
                 mode = "  [running]"
@@ -2617,6 +2757,9 @@ class Dashboard:
                           f"test: {st}   commanded CCR {self._motor_test_ccr}   "
                           f"target {self._bench_target_ccr()}   M{self._motor_test_id}{mode}")
             dpg.configure_item("bench_status", color=col)
+            arr_txt, arr_col = self._bench_arrival(now)
+            dpg.set_value("bench_arrival", arr_txt)
+            dpg.configure_item("bench_arrival", color=arr_col)
         except Exception:
             pass
 
@@ -2632,7 +2775,11 @@ class Dashboard:
             # column (the live channel), left EMPTY when there is no tacho on the stand —
             # back-fill it from a flight log by CCR. ADR-0010's t_est_N = k*(rpm*2pi/60)^2
             # is then a one-line offline computation, not 6 constant columns per row.
-            header = ("iso_time,motor_id,motor_tag,prop,ccr,ccr_echo,vbat,grams,tare_g,"
+            # grams_min/grams_max bound the oscillation the settled `grams` was read out
+            # of (empty when not observed). Their newtons are just x0.00981, so they are
+            # not repeated as thrust_N_min/max columns.
+            header = ("iso_time,motor_id,motor_tag,prop,ccr,ccr_echo,vbat,"
+                      "grams,grams_min,grams_max,tare_g,"
                       "thrust_N,sweep,settle_s,rpm\n")
             with self._log_lock:
                 self._bench_csv_path.write_text(header, encoding="utf-8")
@@ -2655,9 +2802,18 @@ class Dashboard:
         return out
 
     def _bench_log_point(self) -> None:
-        grams, tare = self._bench_read_floats("bench_grams", "bench_tare_g")
+        grams, tare, g_min, g_max = self._bench_read_floats(
+            "bench_grams", "bench_tare_g", "bench_grams_min", "bench_grams_max")
         logged_ccr = self._motor_test_ccr
-        self._bench_write_row(grams=grams, tare=tare)
+        held = self._bench_held_s()
+        self._bench_write_row(grams=grams, tare=tare, g_min=g_min, g_max=g_max)
+        # The envelope belongs to THIS point only. Leaving it in the boxes would quietly
+        # attach it to the next one too, and a wrong band is worse than no band.
+        for tag in ("bench_grams_min", "bench_grams_max"):
+            try:
+                dpg.set_value(tag, 0.0)
+            except Exception:
+                pass
         auto = True
         try:
             auto = bool(dpg.get_value("bench_autoidle"))
@@ -2667,10 +2823,24 @@ class Dashboard:
             # Drop to idle the instant the point is captured: the reading is already taken,
             # so every further second at the operating point is heat for nothing.
             self._bench_go_idle("auto after Log point")
-        self._bench_say(f"logged: CCR {logged_ccr} -> {(grams - tare):.1f} g net"
+        band = (f"  (+{(g_max - grams):.0f}/-{(grams - g_min):.0f} g swing)"
+                if (g_min and g_max) else "")
+        need = self._bench_settle_min_s()
+        if held < need:
+            # Reading a point that has not settled is the main way to poison the curve, and
+            # it is invisible afterwards unless flagged. Both bad rows in
+            # thrust_20260807_191816.csv are short-settle: 655 g at CCR 2150 with settle_s
+            # 3.2 (the scale still falling from the previous 3500 point) and a CCR 3300 row
+            # at settle_s 1.3 that reads 4 % below its five siblings. Deliberate idle points
+            # are fine and common -- the discriminator is dwell, not operating point.
+            self._bench_say(f"logged UNSETTLED: CCR {logged_ccr} held only {held:.1f} s "
+                            f"(want {need:.0f} s) -> {(grams - tare):.1f} g — re-take it")
+            return
+        self._bench_say(f"logged: CCR {logged_ccr} -> {(grams - tare):.1f} g net" + band
                         + ("  |  idling, set next target then GO" if auto else ""))
 
-    def _bench_write_row(self, *, grams: float, tare: float) -> None:
+    def _bench_write_row(self, *, grams: float, tare: float,
+                         g_min: float = 0.0, g_max: float = 0.0) -> None:
         bench = self._telem.get("bench") or {}
         ccr_echo = bench.get("bench.ccr")
         vbat = bench.get("bench.vbat")
@@ -2685,13 +2855,28 @@ class Dashboard:
         # How long this operating point has been held. A point read before the thrust
         # settles is the main way to poison the curve, so it is recorded, not assumed.
         settle_s = (time.monotonic() - self._bench_ccr_change_t) if self._bench_ccr_change_t else 0.0
+        # Hysteresis direction, measured against the previous LOGGED point rather than
+        # against the previous commanded CCR. Once auto-IDLE existed, every point was
+        # approached from idle, so a commanded-CCR comparison labelled everything "up" —
+        # in thrust_20260807_191816.csv the whole descending 3300->2300 run is mislabelled
+        # and 22 of 79 rows disagree with the actual sweep. The curve is what has
+        # hysteresis, so the direction that matters is point-to-point along it.
+        if self._bench_last_logged_ccr:
+            self._bench_sweep = ("up" if self._motor_test_ccr > self._bench_last_logged_ccr
+                                 else "down" if self._motor_test_ccr < self._bench_last_logged_ccr
+                                 else "rpt")
+        else:
+            self._bench_sweep = ""
+        self._bench_last_logged_ccr = self._motor_test_ccr
         row = (
             f"{time.strftime('%Y-%m-%dT%H:%M:%S')},"
             f"{self._motor_test_id},{self._bench_text('bench_motor_tag')},"
             f"{self._bench_text('bench_prop')},{self._motor_test_ccr},"
             f"{int(ccr_echo) if ccr_echo is not None else ''},"
             f"{('%.3f' % vbat) if vbat is not None else ''},"
-            f"{grams:.3f},{tare:.3f},{thrust_N:.5f},"
+            f"{grams:.3f},"
+            f"{('%.3f' % g_min) if g_min else ''},{('%.3f' % g_max) if g_max else ''},"
+            f"{tare:.3f},{thrust_N:.5f},"
             f"{self._bench_sweep},{settle_s:.1f},{rpm if rpm > 0 else ''}\n"
         )
         try:
@@ -3066,10 +3251,11 @@ class Dashboard:
             pass
 
     # -- Live Log tab --------------------------------------------------
-    # Read-only streaming through a selected livewatch transport. SWD remains
-    # the default; UART5 fails loud until the firmware subscription producer lands.
+    # Read-only streaming through a selected livewatch transport. SWD is the
+    # default; "WiFi (USART3)" uses the MicoAir module's UDP downlink for data
+    # and UART5 for subscribe commands (2026-08-10).
 
-    _LIVELOG_TRANSPORTS = ("Debugger (SWD)", "Long-range (UART5)")
+    _LIVELOG_TRANSPORTS = ("Debugger (SWD)", "Long-range (UART5)", "WiFi (USART3 + UART5)")
 
     def _build_live_log_tab(self) -> None:
         from ground_station.livewatch.manifest import ManifestStore
@@ -3166,16 +3352,20 @@ class Dashboard:
 
     def _livelog_transport(self):
         from ground_station.livewatch.transport import (
-            LiveTransportError, SwdCmsisDap, Uart5LongRange,
+            LiveTransportError, SwdCmsisDap, Uart5LongRange, Usart3LongRange,
         )
+        from ground_station.gui._gui_utils import simple_yaml_kv_load as _simple_yaml_kv_load
         selected = dpg.get_value("combo_livelog_link")
         if selected == self._LIVELOG_TRANSPORTS[0]:
             return SwdCmsisDap()
+        if selected == self._LIVELOG_TRANSPORTS[2]:
+            # USART3 data path over MicoAir WiFi (UDP 14550). Subscribe requests
+            # still go over UART5 -- the dashboard's SerialBridge owns that port.
+            return Usart3LongRange()
         # The dashboard's SerialBridge owns the long-range COM port. On Windows
         # the COM port is exclusive, so opening a second serial.Serial for the
         # livewatch transport would fail with access-denied. Refuse loud here
-        # and surface the message in the status box instead; demux-with-bridge
-        # is a separate HANDOFF follow-on.
+        # and surface the message in the status box instead.
         if self.connected and self.bridge is not None:
             raise LiveTransportError(
                 "disconnect the dashboard's COM6 link first, then retry"
@@ -3220,7 +3410,7 @@ class Dashboard:
             lr = LiveReader(self._livelog_current_elf(), transport=transport)
             try:
                 plan = lr.plan(tokens)
-                if transport.name == "uart5":
+                if transport.name in ("uart5", "usart3"):
                     lr.connect()
                     lr.sample(plan)
                 feas = feasibility(plan, cost_model=transport.cost_model)
@@ -3368,6 +3558,10 @@ class Dashboard:
                 if transport.name == "uart5":
                     status = ("Long-range (UART5): no firmware subscription reply yet -- "
                               "re-flash after uart5_address_subscription_cmd lands "
+                              f"({exc})")
+                elif transport.name == "usart3":
+                    status = ("WiFi (USART3 + UART5): subscribe command failed over UART5 -- "
+                              "check SerialBridge connection to COM6 "
                               f"({exc})")
                 else:
                     status = f"<stream error: {exc}>"

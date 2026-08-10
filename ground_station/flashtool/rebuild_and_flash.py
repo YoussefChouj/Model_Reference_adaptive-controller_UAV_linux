@@ -103,19 +103,103 @@ def target_alive(seconds: float = 1.5, port: str = "COM6") -> bool:
     return powered_from_sample(sample(port, seconds))
 
 
-def arm_status(elf: Path):
+def arm_status(elf: Path, votes: int = 9):
     """Read ARM_Status through the given ELF, releasing SWD afterwards.
 
     Must be the SNAPSHOT ELF, not the freshly built one -- the drone is still
     running the old image and the symbol has moved.
+
+    VOTED, never a single read. The wireless CMSIS-DAP corrupts individual
+    transfers: measured 2026-08-09 on a healthy, disarmed drone, 15 attempts gave
+    10 outright TransferErrors and the 5 survivors disagreed (four 1s, one 0).
+    A single read therefore returned "armed" for a disarmed aircraft -- and the
+    same mechanism can return "disarmed" for an ARMED one, which would flash a
+    live aircraft. Requires unanimity among successful reads; anything else
+    returns None meaning INCONCLUSIVE, never a value.
+
+    Returns (value_or_None, ok_count, err_count).
     """
     from ..livewatch.reader import LiveReader
+    seen, errors = [], 0
     reader = LiveReader(str(elf)).connect()
     try:
-        return reader.sample(reader.plan(["DroneStatus.ARM_Status"]))[
-            "DroneStatus.ARM_Status"]
+        plan = reader.plan(["DroneStatus.ARM_Status"])
+        for _ in range(votes):
+            try:
+                seen.append(reader.sample(plan)["DroneStatus.ARM_Status"])
+            except Exception:
+                errors += 1
     finally:
         reader.close()
+    if not seen or len(set(seen)) != 1:
+        return None, len(seen), errors
+    return seen[0], len(seen), errors
+
+
+def elf_matches_target(elf: Path, chunks: int = 5) -> bool:
+    """Is `elf` the build actually running on the drone?
+
+    The SWD arm read resolves DroneStatus.ARM_Status out of this ELF, so if the
+    ELF is not the flashed image the address is wrong and the value is garbage --
+    reproducibly garbage, which is worse than noise because it looks stable.
+    Measured 2026-08-09: a poisoned snapshot returned a UNANIMOUS 9/9 "armed" for
+    a drone that telemetry showed disarmed across 126 frames.
+
+    Without this check the gate cannot tell "armed" from "wrong address", so a
+    stale ELF would deadlock the pipeline: the SWD oracle can only be resynced by
+    flashing, and it is the thing blocking the flash.
+    """
+    from ..livewatch.reader import LiveReader
+    from ..livewatch.verify import compare, flash_segments, plan_samples
+    samples = plan_samples(flash_segments(elf), n=chunks)
+    with LiveReader(str(elf)) as lr:
+        return compare(samples,
+                       lambda a, n: lr._target.read_memory_block8(a, n)).ok
+
+
+def arm_status_from_telemetry(port: str, seconds: float = 2.0):
+    """Arm flag straight off the telemetry stream. -> (value_or_None, frames).
+
+    This is the PRIMARY oracle and outranks the SWD read, because it depends on
+    neither the ELF nor the debug probe:
+      * ELF-independent -- the firmware packs the byte itself, so a stale or
+        mismatched .axf cannot move it.
+      * probe-independent -- it is UART bytes, not SWD transfers, so it survives
+        the transfer corruption that makes the voted read inconclusive. Measured
+        2026-08-09: 288/288 frames correct while SWD was erroring 67 % of reads.
+
+    Frame A (0x01) payload is 8 floats then uint8 status.arm, inside the standard
+    ``AA BB | type | len_hi len_lo | max_basis | payload | crc`` envelope. Both
+    the 39- and 41-byte payload variants put status.arm at payload offset 32.
+    Returns None unless every decoded frame agrees -- fail closed.
+    """
+    import serial
+    buf = bytearray()
+    with serial.Serial(port, 115200, timeout=0.05) as ser:
+        ser.reset_input_buffer()
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < seconds:
+            n = ser.in_waiting
+            if n:
+                buf.extend(ser.read(n))
+            else:
+                time.sleep(0.002)
+    seen, i = set(), 0
+    frames = 0
+    while i < len(buf) - 6:
+        if buf[i] == 0xAA and buf[i + 1] == 0xBB:
+            ftype = buf[i + 2]
+            ln = (buf[i + 3] << 8) | buf[i + 4]
+            if 0 < ln <= 400 and i + 6 + ln <= len(buf):
+                if ftype == 0x01 and ln in (39, 41):
+                    seen.add(buf[i + 6 + 32])
+                    frames += 1
+                i += 6 + ln
+                continue
+        i += 1
+    if frames == 0 or len(seen) != 1:
+        return None, frames
+    return seen.pop(), frames
 
 
 def flash(attempts: int = 3, timeout: float = 600):
@@ -139,6 +223,11 @@ def main(argv=None) -> int:
                     help="consent to flash; without it this builds and stops")
     ap.add_argument("--incremental", action="store_true", help="UV4 -b instead of -r")
     ap.add_argument("--port", default="COM6")
+    ap.add_argument("--arm-port", default=None,
+                    help="port carrying Frame A for the arm gate (default: --port). "
+                         "Point this at the USART3 radio once that link carries the "
+                         "0xAA 0xBB envelope -- today it emits a bare JustFloat "
+                         "throughput ladder with no status_arm byte.")
     ap.add_argument("--attempts", type=int, default=3)
     args = ap.parse_args(argv)
 
@@ -173,26 +262,76 @@ def main(argv=None) -> int:
                  "the running image (the new build is in OBJ/ only after --yes).")
         return 0
 
+    def _refuse(msg: str, code: int) -> int:
+        """Refuse, and ALWAYS put the flashed artifacts back.
+
+        Every early return here used to skip the restore, so a refusal left the
+        freshly-built (unflashed) ELF in OBJ/. That is the stale-.axf hazard:
+        livewatch then reads the wrong addresses, and -- worse -- the NEXT run
+        snapshots that unflashed build as "the flashed artifacts" and resolves
+        the arm flag through it. Refusals compounded, each degrading the next.
+        """
+        _say(msg)
+        if had_snapshot:
+            restore_artifacts()
+            _say("restored the flashed artifacts (refusal must not leave a stale "
+                 "ELF in OBJ/).")
+        return code
+
     try:
         if not target_alive(port=args.port):
-            _say("REFUSING to flash: the target is dark.")
-            return 5
+            return _refuse("REFUSING to flash: the target is dark.", 5)
     except PortUnavailable as exc:
-        _say("REFUSING to flash: cannot read %s" % exc)
-        return 5
+        return _refuse("REFUSING to flash: cannot read %s" % exc, 5)
 
+    # --- arm gate -------------------------------------------------------
+    # PRIMARY: telemetry. Independent of both the ELF and the debug probe, so it
+    # survives the two failure modes that make the SWD read untrustworthy.
+    arm_port = args.arm_port or args.port
+    try:
+        tel_status, tel_frames = arm_status_from_telemetry(arm_port)
+    except Exception as exc:
+        return _refuse("REFUSING to flash: telemetry arm read failed on %s (%s)"
+                       % (arm_port, exc), 6)
+    if tel_status is None:
+        return _refuse("REFUSING to flash: no usable arm flag in telemetry on %s "
+                       "(%d Frame A decoded). Fail closed." % (arm_port, tel_frames), 6)
+    if tel_status != DISARMED:
+        return _refuse("REFUSING to flash: telemetry says ARMED (status_arm=%d "
+                       "across %d frames)." % (tel_status, tel_frames), 6)
+    _say("arm gate: telemetry says DisArmed (%d Frame A, unanimous)" % tel_frames)
+
+    # SECONDARY: voted SWD read. It may abstain, but it may not contradict --
+    # and it only earns a vote if its ELF provably matches the running image.
     snap_elf = SNAPSHOT / "JX_FLY.axf"
     if had_snapshot and snap_elf.exists():
         try:
-            status = arm_status(snap_elf)
+            usable = elf_matches_target(snap_elf)
         except Exception as exc:
-            _say("REFUSING to flash: could not read ARM_Status (%s)" % exc)
-            return 6
-        if status != DISARMED:
-            _say("REFUSING to flash: ARM_Status=%r, expected %d (DisArmed)"
-                 % (status, DISARMED))
-            return 6
-        _say("ARM_Status=0 (DisArmed) -- props off; flashing resets the target")
+            usable = False
+            _say("arm gate: could not verify the snapshot ELF (%s)" % exc)
+        if not usable:
+            _say("arm gate: snapshot ELF does NOT match the running image, so the "
+                 "SWD arm read would resolve a wrong address -- abstaining. "
+                 "(Flashing is what resyncs it; blocking on it would deadlock.)")
+            swd_status, ok_n, err_n = None, 0, 0
+        else:
+            try:
+                swd_status, ok_n, err_n = arm_status(snap_elf)
+            except Exception as exc:
+                swd_status, ok_n, err_n = None, 0, 0
+                _say("arm gate: SWD read unavailable (%s)" % exc)
+        if swd_status is None:
+            _say("arm gate: SWD INCONCLUSIVE (%d ok, %d transfer errors) -- "
+                 "continuing on telemetry, which outranks it" % (ok_n, err_n))
+        elif swd_status != DISARMED:
+            return _refuse("REFUSING to flash: telemetry says DisArmed but SWD says "
+                           "ARMED (%r). Oracles disagree -> fail closed."
+                           % swd_status, 6)
+        else:
+            _say("arm gate: SWD confirms DisArmed (%d reads unanimous, %d errors)"
+                 % (ok_n, err_n))
+    _say("arm gate PASSED -- flashing resets the target; motors can twitch.")
 
     ok, _ = flash(attempts=args.attempts)
     if not ok:

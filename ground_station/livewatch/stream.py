@@ -73,8 +73,12 @@ _TRANSPORT_NAMES = {TRANSPORT_UART5: "uart5", TRANSPORT_USART3: "usart3"}
 
 # UART5 already carries frames A/B/C at a measured 8569 B/s = 74% of its
 # 11520 B/s capacity, so a stream there gets a thin slice. A USART3 stream
-# suppresses usart3_send() and owns the link.
-BUDGET_PCT = {TRANSPORT_UART5: 20, TRANSPORT_USART3: 90}
+# suppresses usart3_send() and owns the link. Must mirror API/subscribe.h's
+# SUBSCRIBE_BUDGET_PCT_* (test_constants_match_firmware_header enforces it).
+# The USART3 figure was raised 90 -> 95 on 2026-08-09: the TX ring rework
+# proved the baud-derived cap IS the wire ceiling (90363 B/s measured clean =
+# 98.8% of it), so the guard arithmetic is finally honest.
+BUDGET_PCT = {TRANSPORT_UART5: 20, TRANSPORT_USART3: 95}
 
 _SRAM = (0x20000000, 0x2001FFFF)
 _CCM = (0x10000000, 0x1000FFFF)
@@ -196,7 +200,10 @@ def stream_bps(total_bytes: int, divider: int) -> int:
 
 def build_stream_request(ranges, divider: int,
                          transport: int = TRANSPORT_USART3,
-                         usart3_baud: int = 115200,
+                         # Mirrors USART3_BAUD in BSP/usart3.h. The old 115200
+                         # default belonged to the retired 24RF and silently
+                         # rejected every USART3 subscription above ~1 kB/s.
+                         usart3_baud: int = 921600,
                          slot: int = 0,
                          other_bps: int = 0) -> bytes:
     """Build the 0x21 subscribe frame. ``divider=0`` stops that slot's stream."""
@@ -397,7 +404,7 @@ class MultiStreamDecoder:
 
 def subscribe(control_serial, ranges, divider: int,
               transport: int = TRANSPORT_USART3,
-              usart3_baud: int = 115200,
+              usart3_baud: int = 921600,   # mirrors USART3_BAUD, BSP/usart3.h
               slot: int = 0,
               other_bps: int = 0,
               timeout: float = 1.0) -> StreamSchema:

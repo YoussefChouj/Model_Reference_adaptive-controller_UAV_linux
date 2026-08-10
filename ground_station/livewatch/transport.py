@@ -1,8 +1,7 @@
-"""Read-only livewatch transport seam for SWD and the UART5 long-range link.
+"""Read-only livewatch transport seam for SWD, UART5, and USART3 over the MicoAir WiFi link.
 
-The seam is the host-side producer of the future ``uart5_address_subscription_cmd``
-spec. Both transports expose only block-read paths; neither halts, resets, writes
-core memory, arms, nor spins motors. The wireless CMSIS-DAP transport preserves
+All three transports expose only block-read paths; none halts, resets, writes core
+memory, arms, or spins motors. The wireless CMSIS-DAP transport preserves
 ``connect_mode=attach`` / ``target_override=cortex_m`` / ``resume_on_disconnect=False``.
 
 Pinned UART5 wire contract (host <-> FC):
@@ -33,6 +32,7 @@ UART5 never falls back to SWD: a missing or malformed reply raises
 """
 from __future__ import annotations
 
+import socket
 import struct
 import time
 from abc import ABC, abstractmethod
@@ -356,3 +356,117 @@ class Uart5LongRange(LiveTransport):
         if offset != len(payload):
             raise LiveTransportError("uart5-read: trailing bytes after address+value tuples")
         return out
+
+
+# ----------------------------------------------------------------------
+# USART3 over MicoAir WiFi link
+# ----------------------------------------------------------------------
+
+class UdpDataPort:
+    """serial.Serial look-alike over the MicoAir module's UDP downlink.
+
+    The module forwards USART3's byte stream as datagrams to UDP 14550; a data
+    frame can span several datagrams, so datagrams are reassembled into one
+    byte stream and exposed through the same ``in_waiting`` / ``read`` interface
+    the serial path uses.
+
+    THE NUDGE: the module routes its UDP downlink to the source of the most
+    recent uplink datagram. A bind alone receives NOTHING. ``__init__`` sends
+    one 1-byte datagram from THIS socket so the downlink lands here. The byte
+    is harmless on the FC (USART3 RX has no command parser, it merely counts
+    the frame in UA3RxFrameCnt).
+    """
+
+    def __init__(self, port: int = 14550, module_ip: str = "192.168.4.1"):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 * 1024 * 1024)
+        sock.settimeout(0)  # non-blocking drain; caller paces itself
+        try:
+            sock.bind(("0.0.0.0", port))
+        except OSError as exc:
+            sock.close()
+            raise LiveTransportError(
+                "usart3-read: cannot bind UDP %d (%s) -- "
+                "is another process holding it?" % (port, exc))
+        sock.sendto(b"\x00", (module_ip, port))  # aim the downlink here
+        self._sock = sock
+        self._buf = bytearray()
+
+    def _drain(self):
+        while True:
+            try:
+                chunk, _ = self._sock.recvfrom(65535)
+            except OSError:  # timeout(0) raises BlockingIOError, an OSError
+                return
+            if not chunk:
+                return
+            self._buf.extend(chunk)
+
+    @property
+    def in_waiting(self) -> int:
+        self._drain()
+        return len(self._buf)
+
+    def read(self, n: int) -> bytes:
+        out = bytes(self._buf[:n])
+        del self._buf[:n]
+        return out
+
+    def reset_input_buffer(self):
+        self._buf.clear()
+        self._drain()
+
+    def close(self):
+        self._sock.close()
+
+
+class Usart3LongRange(LiveTransport):
+    """Read-only USART3 telemetry from the MicoAir WiFi module.
+
+    Subscribe requests still go out UART5 (CMSIS-DAP VCP) because that is the
+    only port the firmware accepts commands on. Data returns on this socket
+    (UDP 14550, forwarded by the module from USART3).  Measured 2026-08-09:
+    90363 B/s at 0.00%% loss = 98.8%% of the 921600-baud wire.
+    """
+
+    name = "usart3"
+    cost_model = CostModel(
+        8.0, 0.31, "usart3-long-range",
+        "conservative 921600-baud model; 90363 B/s measured 2026-08-09",
+    )
+    gap_merge_bytes = 26
+
+    def __init__(self, port: int = 14550, module_ip: str = "192.168.4.1"):
+        self.port = int(port)
+        self.module_ip = module_ip
+        self._udp: UdpDataPort = UdpDataPort(self.port, self.module_ip)
+        self._rx = bytearray()
+
+    def connect(self) -> "Usart3LongRange":
+        return self
+
+    def close(self) -> None:
+        udp = self._udp
+        self._udp = None
+        self._rx.clear()
+        if udp is not None:
+            udp.close()
+
+    def sample(self, plan) -> list[bytes]:
+        # Usart3LongRange is data-only; caller must send subscribe over UART5 first.
+        # The Live Log tab wires the UART5 command path separately.
+        raise LiveTransportError(
+            "usart3-read: subscribe requests must go over UART5; "
+            "use 'WiFi (USART3 + UART5)' in the transport selector"
+        )
+
+    def _drain_quiet_window(self) -> None:
+        deadline = time.monotonic() + 0.05
+        while time.monotonic() < deadline:
+            self._udp._drain()
+            if not self._udp.in_waiting:
+                time.sleep(0.005)
+        self._rx.clear()
+
+    def _pop_frame(self) -> tuple[int, int, bytes] | None:
+        return pop_frame(self._rx)

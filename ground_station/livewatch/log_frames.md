@@ -54,7 +54,7 @@ frames.
 | Transport | Share | Budget |
 | --- | --- | --- |
 | UART5 (CMSIS-DAP VCP, `--transport uart5`, default) | 20 % of 11520 B/s | **2304 B/s** |
-| USART3 (long-range radio, `--transport usart3`) | 90 % | 10368 B/s |
+| USART3 (MicoAir WiFi radio, `--transport usart3`) | 95 % of 92160 B/s | **87552 B/s** |
 
 UART5 is the tight one — it is already ~100 % saturated by the existing telemetry frames,
 which is why streaming only gets a fifth of it. Cost of a slot:
@@ -90,8 +90,10 @@ gaps in the `dropped` count — the link degrades loudly, never silently.
 Expect achieved rates ~8 % under the requested figure: the stream's own bytes slow
 `Send_Task` on a link this full. `seq` is the ground truth for what was actually emitted.
 
-If you need more than ~1600 B/s, move to USART3 once the replacement radio is fitted — it
-allows 10368 B/s, 6.5× the headroom — or slow a slot down; halving a rate halves its cost.
+If you need more than ~1600 B/s, move to USART3 — the MicoAir WiFi radio fitted 2026-08-09
+allows 87552 B/s and was measured clean at 90363 B/s on the wire, 55× the UART5 headroom.
+Its data path is UDP 14550, not a COM port (`stream_log` handles that when given
+`--transport usart3`). Or slow a slot down; halving a rate halves its cost.
 
 ## Finding variable names
 

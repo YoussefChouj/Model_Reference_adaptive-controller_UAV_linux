@@ -25,10 +25,13 @@ COM port*, i.e. UART5's wire -- the flight controller actively pushes frames
 down it. Nothing here halts the core, reads RAM over SWD, or needs pyOCD. The
 firmware copies bytes out of its own memory and never writes back.
 
-``--transport usart3`` routes the data to the long-range radio instead, which is
-where it belongs for real flights. That path is **physically disconnected as of
-2026-07-28** (the USART3 wire to the module was cut), so the default is uart5
-until the replacement module is fitted.
+``--transport usart3`` routes the data to the MicoAir WiFi module instead, which
+is where it belongs for real flights: measured 2026-08-09 it carries 90363 B/s at
+0.00% loss = 98.8% of the UART wire, 13x what UART5 ever managed. That path is
+**UDP, not a COM port** -- the module forwards USART3 bytes as datagrams to UDP
+14550, so the data port defaults to ``udp:14550`` and needs no driver. The
+default transport stays uart5 only until the usart3 path has been verified
+end-to-end on the bench.
 """
 
 from __future__ import annotations
@@ -45,13 +48,25 @@ from .stream import (
     decode_schema, stream_bps,
 )
 from .symbols import SymbolResolver
-from .transport import LiveTransportError, pop_frame
+from .transport import LiveTransportError, UdpDataPort, pop_frame
 
 _TRANSPORTS = {"usart3": TRANSPORT_USART3, "uart5": TRANSPORT_UART5}
 DEFAULT_FRAMES = Path(__file__).with_name("log_frames.md")
+DEFAULT_USART3_UDP_PORT = 14550
 _STRUCT_FMT = {(4, "float"): "f", (4, "int"): "i", (4, "uint"): "I",
                (2, "int"): "h", (2, "uint"): "H",
                (1, "int"): "b", (1, "uint"): "B"}
+
+
+
+def _open_data(data_port: str, control, control_port: str):
+    """Open the data path for whichever transport was chosen."""
+    if data_port == control_port:
+        return control
+    if data_port.startswith("udp:"):
+        return UdpDataPort(int(data_port.split(":", 1)[1]))
+    import serial
+    return serial.Serial(data_port, 115200, timeout=0.05)
 
 
 def resolve_ranges(resolver: SymbolResolver, specs) -> list[StreamRange]:
@@ -105,15 +120,14 @@ def columns_for(schema) -> list[str]:
 
 
 def run(control_port, data_port, ranges, divider, transport, seconds, out_path,
-        elf="OBJ/JX_FLY.axf", quiet=False):
+        elf="OBJ/JX_FLY.axf", usart3_baud=921600, quiet=False):
     import serial
 
-    req = build_stream_request(ranges, divider, transport)
-    stop = build_stream_request([], 0, transport)
+    req = build_stream_request(ranges, divider, transport, usart3_baud)
+    stop = build_stream_request([], 0, transport, usart3_baud)
 
     control = serial.Serial(control_port, 115200, timeout=0.05)
-    data = (control if data_port == control_port
-            else serial.Serial(data_port, 115200, timeout=0.05))
+    data = _open_data(data_port, control, control_port)
     try:
         control.reset_input_buffer()
         control.write(req)
@@ -261,7 +275,7 @@ def load_frames(path=DEFAULT_FRAMES):
 
 
 def run_groups(control_port, data_port, groups, transport, seconds, out_path,
-               elf="OBJ/JX_FLY.axf", usart3_baud=115200, quiet=False):
+               elf="OBJ/JX_FLY.axf", usart3_baud=921600, quiet=False):
     """Subscribe several slots at different rates; one CSV per slot.
 
     Separate files because the slots tick at different rates -- interleaving
@@ -287,8 +301,7 @@ def run_groups(control_port, data_port, groups, transport, seconds, out_path,
         plans.append((slot, ranges, divider, request))
 
     control = serial.Serial(control_port, 115200, timeout=0.05)
-    data = (control if data_port == control_port
-            else serial.Serial(data_port, 115200, timeout=0.05))
+    data = _open_data(data_port, control, control_port)
     schemas, writers, handles, rows = [], {}, [], {}
     out_path = Path(out_path)
     try:
@@ -343,6 +356,11 @@ def run_groups(control_port, data_port, groups, transport, seconds, out_path,
                 control.write(build_stream_request([], 0, transport,
                                                    usart3_baud, slot))
                 control.flush()
+                # The UART5 side stages only ONE request at a time; back-to-back
+                # stops collide and silently never happen (hit for real on
+                # 2026-08-09: slots 1+2 kept streaming after a "clean" stop).
+                # One Send_Task tick is ~12.5 ms; 250 ms leaves wide margin.
+                time.sleep(0.25)
             except Exception:
                 pass
         control.close()
@@ -380,7 +398,14 @@ def main(argv=None):
     ap.add_argument("--transport", choices=sorted(_TRANSPORTS), default="uart5")
     ap.add_argument("--control-port", default="COM6", help="UART5 / CMSIS-DAP VCP")
     ap.add_argument("--data-port", default=None,
-                    help="defaults to COM3 for usart3, else the control port")
+                    help="defaults to udp:%d for usart3 (the MicoAir module's "
+                         "downlink port), else the control port. A COMx name "
+                         "still selects a serial data path."
+                         % DEFAULT_USART3_UDP_PORT)
+    ap.add_argument("--usart3-baud", type=int, default=921600,
+                    help="USART3 baud used ONLY for the link-budget check; "
+                         "nothing on the wire changes. Mirrors USART3_BAUD in "
+                         "BSP/usart3.h")
     ap.add_argument("--elf", default="OBJ/JX_FLY.axf")
     ap.add_argument("--frames", default=None, metavar="FILE",
                     help="Markdown frame table to log when neither --symbol nor "
@@ -388,8 +413,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     transport = _TRANSPORTS[args.transport]
-    data_port = args.data_port or ("COM3" if transport == TRANSPORT_USART3
-                                   else args.control_port)
+    data_port = args.data_port or (
+        "udp:%d" % DEFAULT_USART3_UDP_PORT if transport == TRANSPORT_USART3
+        else args.control_port)
     if args.symbol and args.group:
         ap.error("--symbol and --group are alternatives, not both")
 
@@ -402,7 +428,8 @@ def main(argv=None):
                 groups = load_frames(frames)
                 print("frame: %s (%d slot(s))" % (frames, len(groups)))
             stats = run_groups(args.control_port, data_port, groups, transport,
-                               args.seconds, args.out, elf=args.elf)
+                               args.seconds, args.out, elf=args.elf,
+                               usart3_baud=args.usart3_baud)
             print("")
             for row in stats:
                 print("slot %d: %5d rows = %5.1f Hz   dropped %d (%.2f%%)   "
@@ -415,7 +442,8 @@ def main(argv=None):
         resolver = SymbolResolver(args.elf)
         ranges = resolve_ranges(resolver, args.symbol)
         one = run(args.control_port, data_port, ranges, divider, transport,
-                  args.seconds, args.out, elf=args.elf)
+                  args.seconds, args.out, elf=args.elf,
+                  usart3_baud=args.usart3_baud)
     except LiveTransportError as exc:
         print(str(exc), file=sys.stderr)
         return 1

@@ -19,7 +19,13 @@ def rig(monkeypatch, tmp_path):
     monkeypatch.setattr(rf, "restore_artifacts",
                         lambda: calls.__setitem__("restored", calls["restored"] + 1))
     monkeypatch.setattr(rf, "target_alive", lambda *a, **k: True)
-    monkeypatch.setattr(rf, "arm_status", lambda elf: rf.DISARMED)
+    # Both arm oracles must be stubbed. arm_status_from_telemetry opens a real
+    # serial port, so leaving it live makes the suite read the actual drone.
+    monkeypatch.setattr(rf, "arm_status",
+                        lambda elf, votes=9: (rf.DISARMED, votes, 0))
+    monkeypatch.setattr(rf, "arm_status_from_telemetry",
+                        lambda port, seconds=2.0: (rf.DISARMED, 128))
+    monkeypatch.setattr(rf, "elf_matches_target", lambda elf, chunks=5: True)
     monkeypatch.setattr(rf.shutil, "rmtree", lambda *a, **k: None)
     monkeypatch.setattr(rf.time, "sleep", lambda *a: None)
 
@@ -87,17 +93,86 @@ def test_a_dark_target_is_not_flashed(rig, monkeypatch):
 
 
 def test_an_armed_drone_is_not_flashed(rig, monkeypatch):
-    monkeypatch.setattr(rf, "arm_status", lambda elf: 1)
+    """Telemetry is the primary oracle: if IT says armed, nothing else matters."""
+    monkeypatch.setattr(rf, "arm_status_from_telemetry",
+                        lambda port, seconds=2.0: (1, 128))
+    assert rf.main(["--yes"]) == 6
+    assert rig["flashed"] == 0
+    assert rig["restored"] == 1
+
+
+def test_an_armed_drone_is_not_flashed_even_if_swd_says_disarmed(rig, monkeypatch):
+    """A corrupted SWD read must never be able to unlock an armed aircraft."""
+    monkeypatch.setattr(rf, "arm_status_from_telemetry",
+                        lambda port, seconds=2.0: (1, 128))
+    monkeypatch.setattr(rf, "arm_status",
+                        lambda elf, votes=9: (rf.DISARMED, votes, 0))
     assert rf.main(["--yes"]) == 6
     assert rig["flashed"] == 0
 
 
 def test_an_unreadable_arm_status_is_not_assumed_disarmed(rig, monkeypatch):
-    def boom(elf):
+    """No usable arm flag from ANY oracle => refuse. Never assume disarmed."""
+    monkeypatch.setattr(rf, "arm_status_from_telemetry",
+                        lambda port, seconds=2.0: (None, 0))
+
+    def boom(elf, votes=9):
         raise RuntimeError("probe busy")
     monkeypatch.setattr(rf, "arm_status", boom)
     assert rf.main(["--yes"]) == 6
     assert rig["flashed"] == 0
+    assert rig["restored"] == 1
+
+
+def test_a_telemetry_read_that_raises_fails_closed(rig, monkeypatch):
+    def boom(port, seconds=2.0):
+        raise RuntimeError("port in use")
+    monkeypatch.setattr(rf, "arm_status_from_telemetry", boom)
+    assert rf.main(["--yes"]) == 6
+    assert rig["flashed"] == 0
+
+
+def test_disagreeing_oracles_fail_closed(rig, monkeypatch):
+    """Telemetry says disarmed, SWD says armed -> refuse rather than pick one."""
+    monkeypatch.setattr(rf, "arm_status", lambda elf, votes=9: (1, votes, 0))
+    assert rf.main(["--yes"]) == 6
+    assert rig["flashed"] == 0
+    assert rig["restored"] == 1
+
+
+def test_a_stale_snapshot_elf_makes_the_swd_oracle_abstain(rig, monkeypatch):
+    """A wrong address reads garbage *reproducibly*, so it looks like a real answer.
+
+    Measured: a poisoned snapshot returned a unanimous 9/9 "armed" while telemetry
+    showed disarmed across 126 frames. Letting that veto the flash deadlocks the
+    pipeline, because only flashing can resync the ELF.
+    """
+    monkeypatch.setattr(rf, "elf_matches_target", lambda elf, chunks=5: False)
+    monkeypatch.setattr(rf, "arm_status", lambda elf, votes=9: (1, votes, 0))
+    assert rf.main(["--yes"]) == 0
+    assert rig["flashed"] == 1
+
+
+def test_a_stale_elf_still_cannot_flash_an_armed_drone(rig, monkeypatch):
+    """Abstention must not become a bypass: telemetry still has the final word."""
+    monkeypatch.setattr(rf, "elf_matches_target", lambda elf, chunks=5: False)
+    monkeypatch.setattr(rf, "arm_status_from_telemetry",
+                        lambda port, seconds=2.0: (1, 128))
+    assert rf.main(["--yes"]) == 6
+    assert rig["flashed"] == 0
+
+
+def test_an_inconclusive_swd_read_does_not_block_a_disarmed_drone(rig, monkeypatch):
+    """The whole point of the telemetry oracle.
+
+    The wireless probe corrupts transfers (measured: 10/15 errors, survivors
+    disagreeing). Requiring SWD to succeed would make the pipeline unusable
+    exactly when the probe is flaky, so an INCONCLUSIVE SWD read abstains --
+    but only because telemetry independently and unanimously says DisArmed.
+    """
+    monkeypatch.setattr(rf, "arm_status", lambda elf, votes=9: (None, 3, 6))
+    assert rf.main(["--yes"]) == 0
+    assert rig["flashed"] == 1
 
 
 # ---- failure leaves disk honest -----------------------------------------

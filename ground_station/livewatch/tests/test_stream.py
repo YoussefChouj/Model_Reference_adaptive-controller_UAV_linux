@@ -151,9 +151,11 @@ def test_budget_ceilings_at_both_bauds():
     # guard is deliberately ~20% pessimistic.
     # Each ceiling is 5 B/frame lower than before the timestamp+CRC16: that
     # overhead is real bandwidth and the guard must charge for it.
-    assert _max_float32(115200, 1) == 22
-    assert _max_float32(115200, 2) == 48
-    assert _max_float32(921600, 1) == 204
+    # Values track SUBSCRIBE_BUDGET_PCT_USART3 (95% since 2026-08-09, when the
+    # TX ring rework proved the baud-derived cap is the true wire ceiling).
+    assert _max_float32(115200, 1) == 24
+    assert _max_float32(115200, 2) == 51
+    assert _max_float32(921600, 1) == 215
     assert _max_float32(921600, 2) == 256      # clipped by STREAM_MAX_BYTES
 
 
