@@ -21,6 +21,21 @@ MRAC_AxisConfig_t mrac_config_z;
 
 // Supplied by SINS/baro-IMU fusion � wire this before flight test.
 
+// ------------------------------------------------------------------------------
+// Opt-in sigma-prior attractor (prior-D / ADR-0013 D5, D10)
+// ------------------------------------------------------------------------------
+// Guarded by MRAC_ENABLE_SIGMA_PRIOR. Default build is byte-identical to the
+// pre-change build (sil_gate parity test enforces). When the flag is defined
+// the gradient update in MRAC_UpdateAxis pulls Theta toward Theta_prior at
+// rate sigma_prior. File-scope zero-init matches the existing convention.
+//
+// Axis-indexed storage: Theta_prior[MRAC_AXIS_*][:MAX_NUM_BASIS].
+// ---------------------------------------------------------------------------
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+float Theta_prior[AXES][MAX_NUM_BASIS];
+float sigma_prior = 0.0f;
+#endif
+
 // TODO [HW-PARAM]: identify from motor characterization
 #define MOTOR_CT 0.0f
 
@@ -272,11 +287,24 @@ static void MRAC_UpdateAxis(MRAC_Axis_e axis_id, MRAC_AxisState_t* state, const 
 #if FIX_LEAKAGE_NORMALIZATION == 1
             y = config->gamma[i] * (grad[i]
                 - sigma_lf_active * (state->Theta[i] - state->Whatf[i])
-                - sigma_eff * state->Theta[i]);
+                - sigma_eff * state->Theta[i]
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+                /* Opt-in prior attractor: pulls Theta toward Theta_prior[axis]
+                 * at rate sigma_prior. Equilibrium shifts to Theta_prior; the
+                 * sigma-mod UUB Lyapunov argument carries over (gradient-style,
+                 * projected). Sits inside the existing adaptation branch so the
+                 * deadzone / hard-freeze gating apply unchanged. */
+                - sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i])
+#endif
+                );
 #else
             y = config->gamma[i] * (grad[i]
                 - sigma_lf_active * (state->Theta[i] - state->Whatf[i]) / denom
-                - sigma_eff * state->Theta[i] / denom);
+                - sigma_eff * state->Theta[i] / denom
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+                - sigma_prior * (state->Theta[i] - Theta_prior[axis_id][i])
+#endif
+                );
 #endif
 
             state->Theta[i] += MRAC_DT * y;
@@ -542,6 +570,57 @@ void MRAC_Control(const CtrlerTypeDef* current_state)
         mrac_state.yaw.u_ad = 0.0f;
     }
     MRAC_UpdateAxis(MRAC_AXIS_Z,     &mrac_state.z_rate,&mrac_config_z,     0.0f,        r_z);
-    
+
 
 }
+
+// ------------------------------------------------------------------------------
+// Opt-in sigma-prior accessors (prior-D / ADR-0013 D5, D10)
+// ------------------------------------------------------------------------------
+// Only emitted when MRAC_ENABLE_SIGMA_PRIOR is defined. Critical-section
+// protected against the 200 Hz task-context MRAC_UpdateAxis read of
+// Theta_prior[axis_id][:]. The ground-station command dispatch is the
+// intended writer; MRAC_Control/UpdateAxis is the reader. A single-writer /
+// single-reader pair is race-free under a PRIMASK critical section.
+// ---------------------------------------------------------------------------
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+
+void MRAC_SetPrior(uint8_t axis, const float *arr)
+{
+    uint32_t pri;
+    int i;
+
+    if (axis >= (uint8_t)AXES) {
+        return;
+    }
+    if (arr == (const float *)0) {
+        return;
+    }
+    pri = __get_PRIMASK();
+    __disable_irq();
+    for (i = 0; i < MAX_NUM_BASIS; i++) {
+        Theta_prior[axis][i] = arr[i];
+    }
+    __set_PRIMASK(pri);
+}
+
+void MRAC_GetPrior(uint8_t axis, float *out_arr)
+{
+    uint32_t pri;
+    int i;
+
+    if (axis >= (uint8_t)AXES) {
+        return;
+    }
+    if (out_arr == (float *)0) {
+        return;
+    }
+    pri = __get_PRIMASK();
+    __disable_irq();
+    for (i = 0; i < MAX_NUM_BASIS; i++) {
+        out_arr[i] = Theta_prior[axis][i];
+    }
+    __set_PRIMASK(pri);
+}
+
+#endif /* MRAC_ENABLE_SIGMA_PRIOR */

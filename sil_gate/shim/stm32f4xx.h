@@ -92,4 +92,24 @@ typedef struct _GPIO_TYPEDEF GPIO_TypeDef;
 #define __IO volatile
 #endif
 
+/* PRIMASK access intrinsics — same pattern used in BSP/usart3.c. The real
+ * CMSIS `core_cmFunc.h` provides them on the ARM target. The shim provides
+ * a no-op for the sil_gate host compile: the critical section is vacuous
+ * (single-threaded test harness) but the API is callable, so MRAC's
+ * #ifdef-guarded SetPrior/GetPrior compile and link. The sil_gate never
+ * exercises a true race, so the no-op is a faithful semantic mapping for
+ * the test purpose. */
+#ifndef __get_PRIMASK
+#define __get_PRIMASK()   (0U)
+#endif
+#ifndef __set_PRIMASK
+#define __set_PRIMASK(v)  ((void)(v))
+#endif
+#ifndef __disable_irq
+#define __disable_irq()   ((void)0)
+#endif
+#ifndef __enable_irq
+#define __enable_irq()    ((void)0)
+#endif
+
 #endif /* SIL_SHIM_STM32F4XX_H */

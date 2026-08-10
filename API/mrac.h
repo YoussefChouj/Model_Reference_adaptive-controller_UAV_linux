@@ -107,6 +107,9 @@ typedef enum {
     MRAC_AXIS_Z     = 3
 } MRAC_Axis_e;
 
+// Number of MRAC axes. Equal to the number of distinct enum values above.
+#define AXES 4
+
 // Control limits (defaults applied in MRAC_Init)
 // Refactored to mutable float fields in MRAC_AxisConfig_t
 
@@ -243,6 +246,46 @@ extern MRAC_AxisConfig_t mrac_config_pitch;
 extern MRAC_AxisConfig_t mrac_config_roll;
 extern MRAC_AxisConfig_t mrac_config_yaw;
 extern MRAC_AxisConfig_t mrac_config_z;
+
+// ------------------------------------------------------------------------------
+// 5. Opt-in sigma-prior attractor (prior-D / ADR-0013 D5, D10)
+// ------------------------------------------------------------------------------
+// The default firmware build does NOT change: the terms below are guarded by
+// MRAC_ENABLE_SIGMA_PRIOR. When the flag is undefined, none of the symbols are
+// emitted and `mrac.c`'s object code is bit-identical to the pre-change build
+// (sil_gate parity test enforces this). The flag is OFF in the production
+// JX_FLY.uvprojx.
+//
+// When the flag IS defined, the gradient update in `MRAC_UpdateAxis` gains a
+// sibling σ-mod term that pulls the adaptive weights toward a scenario-
+// conditioned `Theta_prior` at rate `sigma_prior`:
+//
+//     y = γ · (grad − σ_lf·(Θ − Whatf) − σ_eff·Θ − σ_prior·(Θ − Θ_prior))
+//
+// Equilibrium shifts from Θ=0 to Θ=Θ_prior; the σ-mod UUB Lyapunov argument
+// carries over directly (gradient-style term, bounded by projection).
+//
+// `Theta_prior` is zero-initialised via file-scope zero-init. `sigma_prior`
+// defaults to 0.0 (no effect). `MRAC_SetPrior` / `MRAC_GetPrior` provide a
+// critical-section-protected read/write path from the ground-station command
+// dispatch (NOT wired in this slice — see journal "Operator decision").
+#ifdef MRAC_ENABLE_SIGMA_PRIOR
+
+/* Scenario-conditioned prior per axis. Default zero-init. */
+extern float Theta_prior[AXES][MAX_NUM_BASIS];
+
+/* Common scalar attractor rate. Default 0.0. */
+extern float sigma_prior;
+
+/* Write `arr[:MAX_NUM_BASIS]` into `Theta_prior[axis][:]`. Critical-section
+ * protected so a ground-station command path can write safely against the
+ * 200 Hz task-context update. `axis` is `MRAC_Axis_e`. */
+void MRAC_SetPrior(uint8_t axis, const float *arr);
+
+/* Read `Theta_prior[axis][:]` into `out_arr[:MAX_NUM_BASIS]`. */
+void MRAC_GetPrior(uint8_t axis, float *out_arr);
+
+#endif /* MRAC_ENABLE_SIGMA_PRIOR */
 
 #include "robot_types.h"
 

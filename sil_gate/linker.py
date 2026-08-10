@@ -82,6 +82,39 @@ def build_ekf_runner(
     return RunnerExe(path=so, module="ekf9")
 
 
+def build_mrac_sigma_prior_runner(
+    spec: GccSpec,
+    repo_root: Path,
+    build_dir: Path,
+    shim_dir: Path,
+) -> Path:
+    """Compile API/tests/test_mrac_sigma_prior.c + API/mrac.c + API/mrac_math.c
+    into a standalone host-test runner.
+
+    The runner is a pure host harness: it does not consume the wire protocol
+    of run_ekf_subprocess. It runs to completion, prints its result lines,
+    and exits. The sil_gate pytest case reads stdout and counts
+    "FAIL"/"failure(s)" substrings. Returns the .exe path.
+
+    Defined: -DMRAC_ENABLE_SIGMA_PRIOR=1 so the opt-in branch is reachable.
+    """
+    runner_src = repo_root / "API" / "tests" / "test_mrac_sigma_prior.c"
+    mrac_src = repo_root / "API" / "mrac.c"
+    mrac_math_src = repo_root / "API" / "mrac_math.c"
+    out_path = build_dir / f"sil_runner_mrac_sigma_prior{_exe_suffix()}"
+    return compile_executable(
+        spec,
+        source=runner_src,
+        out_path=out_path,
+        include_dirs=(shim_dir, repo_root / "API"),
+        extra_sources=(mrac_src, mrac_math_src),
+        extra_cflags=(
+            "-DMRAC_ENABLE_SIGMA_PRIOR=1",
+            "-Wno-unused-but-set-variable",
+        ),
+    )
+
+
 def _exe_suffix() -> str:
     import sys
     return ".exe" if sys.platform == "win32" else ""
