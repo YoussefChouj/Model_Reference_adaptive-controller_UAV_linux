@@ -1,0 +1,53 @@
+<?xml version="1.0" ?>
+<!--
+  jx_fly_mujoco.xml — MuJoCo MJCF description of the JX_FLY airframe.
+
+  Source parameters from sim/plant.py (CANONICAL_AIRFRAME) and
+  docs/sysid_results.md (mass, inertia, gains).
+
+  World frame: MuJoCo default (Z up, ENU). Body +z is UP when level hover.
+  Gravity in MuJoCo is -Z (positive-down); this matches the plant's
+  ENU world with gravity -world-z.
+
+  Mass / inertia (2026-07-28 campaign):
+    m         = 1.2961 kg
+    Ixx       = 0.00839 kg m^2
+    Iyy       = 0.00930 kg m^2
+    Izz       = 0.01485 kg m^2
+    Ixy/Ixz/Iyz = 0 (diagonal)
+
+  CG is at body origin (the inertia tensor is about CG). The 0.0262 m
+  CG offset below the arm plane is captured as a moment-arm parameter
+  applied to thrust in mujoco_bridge.py — NOT to the inertia tensor.
+
+  Motor layout: X-frame, arm length r_motor = 0.200 m. MuJoCo restricts
+  free joints to top-level bodies (verified in test_mjc4.py), so the
+  airframe is the only free body. Thrust forces are applied at each
+  motor position via d.xfrc_applied in mujoco_bridge.py.
+
+    Motor 1: front-right  (+r, +r,  0)  — CCW (positive yaw reaction)
+    Motor 2: rear-right   (-r, +r,  0)  — CW  (negative yaw reaction)
+    Motor 3: rear-left    (-r, -r,  0)  — CW  (negative yaw reaction)
+    Motor 4: front-left   (+r, -r,  0)  — CCW (positive yaw reaction)
+
+  dt = 0.005 s (200 Hz) — must match MRAC_DT.
+-->
+<mujoco model="jx_fly">
+
+  <!-- Defaults -->
+  <option gravity="0 0 -9.80665" integrator="Euler" timestep="0.005"/>
+
+  <worldbody>
+    <!-- Airframe: freejoint, full 6-DOF -->
+    <body name="airframe" pos="0 0 0">
+      <freejoint name="root"/>
+      <inertial
+        pos="0 0 0"
+        mass="1.2961"
+        diaginertia="0.00839 0.00930 0.01485"/>
+      <geom type="box" size="0.21 0.21 0.05" pos="0 0 0.0262"
+            rgba="0.15 0.15 0.2 1" mass="0"/>
+    </body>
+  </worldbody>
+
+</mujoco>

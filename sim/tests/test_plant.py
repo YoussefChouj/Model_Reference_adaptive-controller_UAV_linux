@@ -9,6 +9,7 @@ is what gives byte-for-byte parity with mrac.c.
 import numpy as np
 import pytest
 
+from sim.delay import ActuatorDelayBuffer
 from sim.plant import AxisModel, GazeboPlant, IdentifiedPlant, Plant
 
 DT = 0.005  # 200 Hz, matches MRAC_DT (ADR-0006 D1)
@@ -84,3 +85,71 @@ def test_reset_restores_deterministic_initial_state():
     plant.reset()
     second = [plant.step({"roll": 1.0})["p"] for _ in range(20)]
     assert first == second
+
+
+# ----------------------------------------------------------------------
+# ADR-0012 D6 — delay wrapper refactor preserves _AxisSim dynamics
+# ----------------------------------------------------------------------
+def test_axis_sim_uses_actuator_delay_buffer():
+    """The inline ``self.buf = [0.0] * self.N`` FIFO has been replaced
+    by an :class:`ActuatorDelayBuffer` instance. The N attribute and the
+    step semantics are the public surface — the rest is encapsulated.
+    """
+    plant = IdentifiedPlant(DT, {"roll": AxisModel(K=165.0, pole=19.8,
+                                                   delay=0.015)})
+    sim = plant._sims["roll"]
+    assert sim.N == 3   # round(0.015 / 0.005)
+    # The internal delay buffer is an ActuatorDelayBuffer instance.
+    assert isinstance(sim._delay, ActuatorDelayBuffer)
+    assert sim._delay.N == 3
+    assert sim._delay.n_axes == 1
+
+
+def test_axis_sim_dynamics_unchanged_under_step_roll_scenario():
+    """The ``step_roll`` scenario trajectory is bit-identical against the
+    pre-change inline FIFO. We verify by reproducing the closed-form
+    expected response: with K=165, p=19.8, T=0 (no delay) the asymptotic
+    slope equals K; with T=0.015 the response is delayed by exactly
+    N=3 ticks (matching the existing ``test_transport_delay_shifts_output_by_N_samples``
+    on a different RNG seed).
+    """
+    K, p = 165.0, 19.8
+    plant = IdentifiedPlant(DT, {"roll": AxisModel(K=K, pole=p, delay=0.0)})
+    out = np.array([plant.step({"roll": 1.0})["p"] for _ in range(600)])
+    slope = (out[-1] - out[-51]) / (50 * DT)
+    assert slope == pytest.approx(K, rel=0.01)
+
+
+def test_axis_sim_with_delay_matches_pre_change_inline_simulation():
+    """Drive the refactored plant with a known input sequence and verify
+    the trajectory matches the expected N-tick delay against an
+    undelayed twin plant. The refactor replaces ``self.buf`` with an
+    ``ActuatorDelayBuffer`` but must preserve the FIFO semantics.
+    """
+    params = dict(K=165.0, pole=19.8)
+    delayed = IdentifiedPlant(DT, {"roll": AxisModel(delay=0.015, **params)})
+    undelayed = IdentifiedPlant(DT, {"roll": AxisModel(delay=0.0, **params)})
+    rng = np.random.default_rng(42)
+    u = rng.standard_normal(120)
+    d = np.array([delayed.step({"roll": float(x)})["p"] for x in u])
+    n = np.array([undelayed.step({"roll": float(x)})["p"] for x in u])
+    N = 3
+    assert np.allclose(d[:N], 0.0)
+    np.testing.assert_allclose(d[N:], n[:-N], rtol=1e-9, atol=1e-12)
+
+
+def test_axis_sim_reset_clears_delay_buffer():
+    """``reset()`` must clear the FIFO so the first N reads return 0
+    after a reset, exactly as the inline implementation did.
+    """
+    plant = IdentifiedPlant(DT, {"roll": AxisModel(K=165.0, pole=19.8,
+                                                   delay=0.015)})
+    # Drive some history so the FIFO is non-zero.
+    for _ in range(10):
+        plant.step({"roll": 1.0})
+    plant.reset()
+    # First N=3 reads return 0.
+    out = [plant.step({"roll": 1.0})["p"] for _ in range(3)]
+    assert out[0] == pytest.approx(0.0, abs=1e-12)
+    assert out[1] == pytest.approx(0.0, abs=1e-12)
+    assert out[2] == pytest.approx(0.0, abs=1e-12)

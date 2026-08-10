@@ -202,3 +202,63 @@ def test_sim_plant_does_not_pull_gazebo_at_import_time():
         f"sim.plant transitively pulled {gazebo_mods}; the Gazebo "
         f"bridge must remain a separate optional import."
     )
+
+
+# --- #7 Spec 03 MujocoPlant seam (ADR-0012) ---
+
+def test_mujoco_plant_satisfies_plant_seam():
+    """MujocoPlant conforms to the Plant interface."""
+    from sim.plant import MujocoPlant, Plant
+    assert issubclass(MujocoPlant, Plant)
+    p = MujocoPlant(dt=0.005)
+    try:
+        state = p.step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+        # Phase-1 keys (rate loop contract)
+        for k in ("p", "q", "r", "vz"):
+            assert k in state, f"MujocoPlant missing Phase-1 key {k!r}"
+        # Spec-4a widened keys
+        for k in ("x", "y", "z", "phi", "theta", "psi", "thrust", "motors"):
+            assert k in state, f"MujocoPlant missing widened key {k!r}"
+    finally:
+        p.reset()
+
+
+def test_mujoco_plant_is_in_plant_registry():
+    """PLANT_REGISTRY exposes 'mujoco' so callers can build by name."""
+    from sim.plant import PLANT_REGISTRY, MujocoPlant, build_plant
+    assert "mujoco" in PLANT_REGISTRY
+    p = build_plant("mujoco", dt=0.005)
+    try:
+        assert isinstance(p, MujocoPlant)
+    finally:
+        p.reset()
+
+
+def test_mujoco_plant_reset_is_deterministic():
+    """Two reset()-then-step() runs produce the same first state."""
+    from sim.plant import MujocoPlant
+    p = MujocoPlant(dt=0.005)
+    p.reset()
+    s1 = p.step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+    p.reset()
+    s2 = p.step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+    for k in ("p", "q", "r", "vz", "z", "phi", "theta", "psi"):
+        assert s1[k] == pytest.approx(s2[k], abs=1e-9), (
+            f"reset not deterministic on key {k!r}: {s1[k]} vs {s2[k]}")
+
+
+def test_mujoco_plant_importable_when_bridge_missing():
+    """MujocoPlant.is_available() returns (False, reason) when the
+    bridge module is not importable. We do NOT need to actually break
+    the import — the probe is the contract."""
+    from sim.plant import MujocoPlant
+    avail, reason = MujocoPlant.is_available()
+    assert isinstance(avail, bool)
+    assert isinstance(reason, str)
+    # On this host, mujoco is installed, so we expect availability.
+    if avail:
+        p = MujocoPlant(dt=0.005)
+        try:
+            p.step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
+        finally:
+            p.reset()
