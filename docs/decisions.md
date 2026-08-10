@@ -119,3 +119,32 @@
   `AxisAdaptiveConfig`. Bare construction bypasses the per-axis values and gets the
   all-zeros default; callers must use `for_axis()` to get parity. The `z` axis
   explicitly sets `What_lower_limit = [0.0] * 6` with a comment matching firmware.
+
+## 2026-08-05: ADR-0012 — Retire Gazebo; MuJoCo + the plant ladder (accepted)
+
+- **Topic:** Sim-to-real weight transfer needs *gain* fidelity, not visual/contact fidelity; MuJoCo replaces Gazebo behind the existing `Plant` seam (`MujocoPlant`), `RigidBodyPlant` is retained as the oracle, four-rung ladder (`IdentifiedPlant → MujocoPlant → RigPlant → free flight`).
+- **Full text:** [docs/adr/0012-retire-gazebo-mujoco-plant-ladder.md](adr/0012-retire-gazebo-mujoco-plant-ladder.md).
+- **Status:** Accepted. Amends ADR-0006 D6; supersedes Gazebo half of spec 4b/4c.
+
+## 2026-08-05: ADR-0013 — Scenario-conditioned adaptive priors (proposed)
+
+- **Topic:** Learn `Theta` priors per scenario in simulation, inject at runtime via three orthogonal channels (value / authority / envelope); the σ-mod attractor is the primary value channel; a soft-attention detector is the leading indexing candidate.
+- **Full text:** [docs/adr/0013-scenario-conditioned-adaptive-priors.md](adr/0013-scenario-conditioned-adaptive-priors.md).
+- **Status:** Proposed. Architecture accepted; mechanisms left open.
+
+## 2026-08-05: ADR-0014 — Dimensionless priors and declared regressor variants (proposed)
+
+- **Topic:** Redefine the prior as a dimensionless object `Theta_tilde` so scenarios — not airframes — are the unit of transfer; declare per-basis normalisation scales as data; randomise over an airframe ensemble; the headline experiment is cross-plant prior damage.
+- **Full text:** [docs/adr/0014-dimensionless-priors-and-declared-regressor-variants.md](adr/0014-dimensionless-priors-and-declared-regressor-variants.md).
+- **Status:** Proposed. Refines ADR-0012 D8.
+
+## 2026-08-10: prior-E-docs slice — HELD novelty-framing carve-out (ADR-0012 / 0013 / 0014)
+
+- **Scope:** This doc-integration slice (spec `prior-E-docs`) deliberately excludes the **novelty-framing claims** that the three ADRs marked "HELD, 2026-08-06" following the literature review.
+- **What is excluded from this slice:**
+  - The "no published analogue" claims for soft attention + σ-mod attractor + mismatched-prior damage (ADR-0013 Context / Open questions).
+  - The "no published analogue" claim for dimensionless transfer of MRAC weights (ADR-0014 Context).
+- **What is included:** every **engineering decision** in D1–D8 stands; the eight engineering decisions and their `Chosen fix` / `Constraints created` content are the project-of-record. Only the contribution claim (Context / Consequences framing) is held.
+- **Reason:** The author has not yet read the primary sources (Chowdhary ICRA 2013, Girard *Mathematics* 2024, Neural-Fly 2022, FAMLE IROS 2020, CDC 2010 + ICL 2019). Resolving framing requires a dedicated grilling session against those papers.
+- **Reading path to resolve the held claims:** [docs/literature-review-findings/SYNTHESIS.md §7](literature-review-findings/SYNTHESIS.md).
+- **Until resolved:** downstreams citing these ADRs should cite the **engineering decisions** (numbered D-numbers) and avoid the held contribution claims in their own write-ups.

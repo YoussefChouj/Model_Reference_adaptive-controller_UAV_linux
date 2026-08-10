@@ -56,6 +56,24 @@ Rung glossary:
 | RQ-030 | Hardware: trajectory-tracking RMSE ≤ 0.5 m on a 1 m/s circular path | TBD — first-baseline freeze | Hardware | post-flight replay |
 | RQ-031 | Free-flight log contains `of.lin_acc_x_mg` (EKF replay input) | byte present in frame A | Hardware | `ground_station.livewatch fields of.lin_acc_x_mg` |
 
+## Requirements of record for the sim-to-real prior transfer thesis claim
+
+The plant-ladder / scenario-conditioned-prior / dimensionless-prior thesis claim lives
+in three ADRs, not in RQ rows yet — those ADRs define the *requirements* (the plant
+ladder, the indexing and injection channels, the dimensionless storage form, the
+declaration of normalisation scales, the airframe ensemble, the cross-plant damage
+test) and the rows above will eventually pin their thresholds:
+
+- Plant ladder + MuJoCo swap + gain-matching gate:
+  [ADR-0012](adr/0012-retire-gazebo-mujoco-plant-ladder.md)
+- Indexing + three injection channels + σ_prior attractor:
+  [ADR-0013](adr/0013-scenario-conditioned-adaptive-priors.md)
+- Dimensionless prior `Θ̃`, declared basis scales, regressor variants,
+  cross-plant damage thesis:
+  [ADR-0014](adr/0014-dimensionless-priors-and-declared-regressor-variants.md)
+
+Use these as the requirement-of-record until the corresponding RQ rows land.
+
 ## Notes
 
 - **Baseline freezing.** Rows RQ-012 through RQ-017 are "do not get

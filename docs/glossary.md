@@ -42,6 +42,11 @@ free-flight model — a *different* plant.
 actuator input. Mandatory on any plant used for prior learning (ADR-0012 D6). Its absence
 makes a sim falsely stable and the resulting weights over-confident.
 
+**Delay wrapper** — the engineering synonym for *transport delay buffer*; the reusable
+actuator-input wrapper applied to every 6-DOF plant (ADR-0012 D6). Lifted out of the
+`_AxisSim` reference implementation so that `RigidBodyPlant`, `MujocoPlant`, and
+`RigPlant` all share one delay model.
+
 ---
 
 ## Priors and transfer
@@ -53,6 +58,11 @@ hyperparameter and not a gain: it lives in the same space and units as `What`.
 **Plant-tagged prior** — a prior recorded together with the plant identity and the
 `(K, p, T)` it was learned under (ADR-0012 D8). Applying a prior across plants without a
 stated scaling is a defect.
+
+**Plant tag** — the metadata block recording plant identity + `(K, p, T)` carried by
+every prior. In ADR-0014 D1–D2 the plant tag is rescaling metadata, not a transfer
+barrier: the dimensionless form `Θ̃` is the canonical stored prior; deployment on any
+target is `Θ = Θ̃ / K_target`.
 
 **Prior library** — the corpus of plant-tagged priors indexed by scenario, produced by the
 prior factory. The artefact the runtime detector indexes into.
@@ -99,6 +109,10 @@ and the `K` scenario centroids, yielding a convex blend of the `K` priors. Appro
 `0` = today's baseline, `∞` = hard initialisation, intermediate = soft target. Distinct
 from `σ_eff`, which is doing robustness duty and must not be repurposed.
 
+**σ_prior attractor** — the non-zero fixed point `Θ* = Θ_prior` introduced by the value
+channel `−σ_prior·(Θ − Θ_prior)`. UUB is preserved (Lyapunov argument carries over from
+σ-mod); the basin shifts from `‖Θ‖` to `‖Θ − Θ_prior‖`. See ADR-0013 D5.
+
 **Envelope** — the per-scenario bound set (`Γ`, `What_limit`, `e_deadzone`) that caps what
 the adaptation is permitted to do. A safety result, reportable independently of whether
 the value or authority channels improve tracking.
@@ -124,7 +138,7 @@ search procedure must be reproducible by a reader to be defensible.
 
 ## Dimensionless transfer (ADR-0014)
 
-**Dimensionless prior (`Θ̃`)** — the canonical stored form of a prior. Because the matching
+**Dimensionless prior (`Θ̃`, also written `Theta_tilde`)** — the canonical stored form of a prior. Because the matching
 condition `K·Θ*ᵀΦ = −Δ` puts a `1/K` in every weight, a raw `Θ` in firmware command units
 is plant-specific and cannot transfer. `Θ̃` divides the plant scales out; the raw `Θ` and
 the plant's `(K, p, T)` are stored **alongside** it, never instead. Deployment on any

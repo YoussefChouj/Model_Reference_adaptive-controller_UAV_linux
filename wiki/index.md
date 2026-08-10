@@ -40,6 +40,7 @@
 - [INDI Control](concepts/indi-control.md) — Incremental Nonlinear Dynamic Inversion: measured `ω̇` replaces the model. The method that beats adaptive control on racing (stub)
 - [Attention Mechanism (read as gain scheduling)](concepts/attention-mechanism.md) — Attention == Takagi-Sugeno/LPV interpolation; convex-hull safety bound, temperature, `1/√d_k`, time-blindness, M4 cost table, and the structural mapping onto `Theta`/`Phi` (2026-08-02)
 - [Adaptive Basis & Weight-Convergence Prior Art](concepts/adaptive-basis-prior-art.md) — Concurrent learning, composite adaptation, MMAC, GP-MRAC: what's already published vs what's still an original contribution (2026-08-02)
+- [Scenario Priors and Cross-Airframe Transfer](concepts/scenario-priors-and-transfer.md) — The prior as a dimensionless object (`Θ̃ = K·Θ`), the σ_prior attractor as the primary value channel, plant-tagged transfer rule, cross-plant damage test as the thesis headline (2026-08-10)
 
 ### Workflow & Recipes
 - [Tuning Workflow](concepts/tuning-workflow.md) — Step-by-step PID/MRAC tuning via dashboard and VOFA
