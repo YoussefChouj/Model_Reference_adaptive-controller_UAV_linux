@@ -88,3 +88,34 @@
   - `com_match_hints` filters the candidate set to known dongle-driver strings (CH340, CP210x, FTDI, USB-SERIAL). If no hint matches, all enumerated ports are probed (fallback).
   - Bridge firmware-side protocol is unchanged; this ADR is host-only.
   - Existing telemetry shows firmware reports `proto_version=13` while host expects 14 (pre-existing — see common-pitfalls drift). Not addressed by this ADR; will require separate firmware / bridge alignment work.
+
+## 2026-08-05: Sim↔Firmware Parity Drift on `What_lower_limit` (spec `prior-00b`)
+
+- **Problem:** `sim/adaptive_law.py` carried a stale comment and wrong default for
+  `What_lower_limit`. The module docstring said "firmware never sets it → 0", and
+  `AxisAdaptiveConfig.for_axis()` returned `[0.0] * 6` for all axes. The firmware
+  (`API/mrac.c:353-355`) had actually set slot 0 to `-What_limit[0]` for pitch/roll/yaw
+  in a partial asymmetric fix, but the comment and default were never updated. This
+  is the defect class ADR-0006 and `mbd_workflow/README.md` exist to prevent.
+- **Duration of drift:** Unknown — not dated, but the firmware fix dates from mid-2026
+  (comments reference 2026-06-18 SysID work); the sim comment predates it.
+- **Files affected:** `sim/adaptive_law.py` (`What_lower_limit` default and per-axis
+  values), `sim/tests/test_adaptive_law.py` (parity assertions), `sim/README.md`
+  (Phase-1 findings note).
+- **Evidence:** `prior-00-sign-gate` (spec) confirmed firmware state from source.
+  `prior-00b-sim-parity-fix` confirmed the sim was stale. Before/after re-run on
+  `disturbance_rejection` (roll/pitch/yaw) showed the bias weight correctly goes
+  negative in the new sim (θ₀ ≈ −0.002 roll/pitch, −0.004 yaw) vs pinned at 0
+  in the old sim, and RMSE improves ~2–3%. The effect is real but modest — `e_deadzone`
+  remains the dominant adaptation suppressor.
+- **Prevention:** New parity test `test_for_axis_matches_firmware_init_gains` asserts
+  the exact per-axis table from `mrac.c:353-355`. Any future drift on these values
+  will be caught by `pytest sim/tests/test_adaptive_law.py`.
+- **Chosen fix:** Restore correct firmware parity in `sim/adaptive_law.py` for_axis(),
+  correct the docstring, add the parity test. No firmware change (firmware is correct).
+  Slots 1–5 remain locked at 0 — unlocking them is the open Sweep A research question
+  and requires evidence plus a flight-safety argument.
+- **Constraints created:** `for_axis()` is now the only sanctioned constructor path for
+  `AxisAdaptiveConfig`. Bare construction bypasses the per-axis values and gets the
+  all-zeros default; callers must use `for_axis()` to get parity. The `z` axis
+  explicitly sets `What_lower_limit = [0.0] * 6` with a comment matching firmware.
