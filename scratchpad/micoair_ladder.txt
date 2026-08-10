@@ -1,0 +1,27 @@
+listening on UDP 14550 | module 192.168.4.1 | 130 s | rcvbuf 8388608 B
+UART wire limit 91304 B/s; ladder tops out at 90145 B/s = 98.7% of it
+
+FULL DUPLEX: uplink 128 B x 50.0/s = 6400 B/s running during the capture
+
+uplink sent 6509 datagrams, 833152 B -> 6401 B/s actual
+captured 4572280 B in 130.2 s -> 35126 B/s aggregate, in 10462 datagrams (avg 437 B)
+recovered 10473 labelled frames
+
+floats  frame B  act Hz   offered     delivered   wire%   LOSS %   intact% FCdrop  note
+----------------------------------------------------------------------------------------------------------------
+18      76       80.3     6102        6113        6.7     0.00     100.0   0       
+30      124      80.3     9956        9974        10.9    0.00     100.0   0       
+50      204      80.2     16365       16396       17.9    0.00     100.0   0       
+80      324      80.3     26009       26055       28.5    0.00     100.0   0       
+120     484      80.4     38914       38983       42.6    0.00     100.0   0       
+170     684      80.2     54884       54982       60.1    0.00     100.0   0       
+220     884      80.3     70942       71069       77.7    0.00     100.0   0       
+280     1124     80.3     90210       90371       98.8    0.00     100.0   0       
+
+========================================================================
+VERDICT
+  Highest CLEAN rung: 280 floats = 1124 B at 80.3 Hz -> 90371 B/s delivered
+  vs BLE module (6737 B/s): 13.4x
+  >>> CLEARS the 44000 B/s full-MRAC-state target.
+      280 floats at 80 Hz in ONE frame -- no round-robin needed.
+========================================================================
