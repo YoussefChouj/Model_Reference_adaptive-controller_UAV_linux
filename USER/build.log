@@ -1,0 +1,157 @@
+*** Using Compiler 'V5.06 update 3 (build 300)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
+Build target 'JX_FLY'
+compiling stm32f4xx_it.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\TASK\stm32f4xx_it.c: 3 warnings, 0 errors
+compiling RemoterTask.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\RemoterTask.c: 2 warnings, 0 errors
+compiling main.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+main.c: 2 warnings, 0 errors
+compiling AutoflyTask.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\AutoflyTask.c: 2 warnings, 0 errors
+compiling systemmonitor_task.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\systemmonitor_task.c: 2 warnings, 0 errors
+compiling StabilizerTask.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\TASK\StabilizerTask.c: 2 warnings, 0 errors
+compiling send_data.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\API\subscribe.h(261): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\TASK\send_data.c: 4 warnings, 0 errors
+compiling flight_fsm.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\flight_fsm.c: 2 warnings, 0 errors
+compiling pid.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\pid.c: 2 warnings, 0 errors
+compiling imu_update.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\imu_update.c: 2 warnings, 0 errors
+compiling sysid.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\sysid.c(163): warning:  #186-D: pointless comparison of unsigned integer with zero
+      if (axis < SYSID_AXIS_PITCH || axis > SYSID_AXIS_Z) return 0;
+..\API\sysid.c(66): warning:  #177-D: function "attitude_deg" was declared but never referenced
+  static float attitude_deg(SysID_Axis_e a)
+..\API\sysid.c: 4 warnings, 0 errors
+compiling bmi088_driver.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\bmi088_driver.c: 2 warnings, 0 errors
+compiling subscribe.c...
+..\API\subscribe.h(261): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\subscribe.c(698): warning:  #1-D: last line of file ends without a newline
+  }
+..\API\subscribe.c: 4 warnings, 0 errors
+compiling SINS.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\SINS.c: 2 warnings, 0 errors
+compiling Accel_Calibartion.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\Accel_Calibartion.c: 2 warnings, 0 errors
+compiling usart2.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart2.c: 2 warnings, 0 errors
+compiling BSP.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\rpm.h(87): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\BSP\BSP.c: 3 warnings, 0 errors
+compiling usart5.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\API\subscribe.h(261): warning:  #1-D: last line of file ends without a newline
+  #endif
+..\BSP\usart5.c: 3 warnings, 0 errors
+compiling spi.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\spi.c: 2 warnings, 0 errors
+compiling usart3.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart3.c: 2 warnings, 0 errors
+compiling usart4.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\BSP\usart4.c: 2 warnings, 0 errors
+compiling algorithm.c...
+..\Global_file\global_declare.h(294): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\global_declare.h(314): warning:  #1267-D: Implicit physical register R0 should be defined as a variable
+          __asm volatile("mov r0, r0\n" \
+..\Global_file\algorithm.c: 2 warnings, 0 errors
+linking...
+Program Size: Code=80908 RO-data=1492 RW-data=2384 ZI-data=112736  
+FromELF: creating hex file...
+"..\OBJ\JX_FLY.axf" - 0 Error(s), 53 Warning(s).
+Build Time Elapsed:  00:00:09

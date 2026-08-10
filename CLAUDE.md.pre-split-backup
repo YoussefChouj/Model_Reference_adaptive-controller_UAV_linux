@@ -1,0 +1,945 @@
+## MANDATORY: Knowledge Stack First
+
+**Before ANY investigation — no exceptions:**
+
+| Step | Command | When it answers your question — STOP here |
+| --- | --- | --- |
+| 1 | `ccc search "<query>"` | Exact code locations, symbol definitions |
+| 2 | Read `graphify-out/GRAPH_REPORT.md` | System-wide dependencies, which files own what |
+| 3 | Read `wiki/index.md` → navigate to entry | Architecture, design decisions, known gotchas |
+| 4 | Read `docs/decisions.md` | Why something was built a certain way |
+
+**Do NOT open Grep, Glob, or Read for exploration until steps 1–4 return nothing.**
+
+After consulting the stack, unlock raw search for this session:
+
+```
+python .agent_scripts/knowledge_gate.py --unlock
+```
+
+> This is enforced by the PreToolUse hook. Grep/Glob calls will be blocked until you unlock.
+
+---
+
+## Session State
+
+**Last Updated**: 2026-08-09
+**Goal**: MicoAir-WiFi-Link bring-up on USART3 + the USART3 TX ring rework — **BOTH DONE.
+90363 B/s at 0.00 % loss = 98.8 % of the UART wire. The bandwidth problem is closed.**
+
+### MicoAir WiFi Link — DONE 2026-08-09. Wire reached, link closed.
+
+**USART3 TX RING REWORK FLASHED + MEASURED.** `rebuild_and_flash --yes`, `Code=81908
+RO=1516 RW=2412 ZI=118316`, 0 errors, 75 pre-existing warnings, attempt 1, arm gate
+DisArmed (129 unanimous Frame A + 9 unanimous SWD reads), `OBJ/JX_FLY.axf` matches the
+running image. Ladder unchanged: `{18,30,50,80,120,170,220,280}` floats, divider 1.
+
+**RESULT — every rung 0.00 % loss, 100 % intact, FULL 80.2–80.4 Hz cadence, 0 ring drops:**
+
+| floats | frame B | act Hz | offered | delivered | wire % | loss |
+|---|---|---|---|---|---|---|
+| 18/30/50/80/120 | 76…484 | ~80.3 | 6100…38872 | 6111…38944 | 6.7…42.6 | 0.00 % |
+| 170 | 684 | 80.2 | 54886 | 54985 | 60.1 | 0.00 % |
+| 220 | 884 | **80.4** | 71035 | **71171** | 77.8 | 0.00 % |
+| **280** | **1124** | **80.3** | **90201** | **90363** | **98.8** | **0.00 %** |
+
+**MAX CLEAN = 90363 B/s = 98.8 % of the 91304 B/s UART wire = 13.4x the BLE module.**
+Versus the pre-rework run: 220 rung 42672 → 71171 (**+67 %**), 280 rung 54379 → 90363
+(**+66 %**), overall best 55116 → 90363 (**+64 %**). The cadence collapse to 48.3 Hz is
+**gone** — it was the skip-if-busy DMA guard, exactly as diagnosed.
+
+**The radio's knee was NEVER reached, at any rung, in any run.** Every limit this link
+ever hit was FC-side. **The wire is now the binding constraint and it is final**: 98.8 %
+utilised, and the module rejects every baud above 921600. No lever remains short of
+different hardware.
+
+**The "keep frames under ~700 B" rule is DEAD** — it described the guard, not the link.
+1124 B frames run clean at 80.3 Hz.
+
+**ROUND-ROBIN IS OBSOLETE.** Full MRAC state ≈ 110 floats = **444 B @ 80.2 Hz = 35.6 kB/s
+= 39 % of the wire**, i.e. 2.5x headroom in ONE frame per tick.
+
+**What changed in firmware** (`BSP/usart3.h`, `BSP/usart3.c`, `TASK/stm32f4xx_it.c`,
+`TASK/send_data.c`):
+- **4096 B TX ring** in `usart3.c`. `Usart3_Stream_TxSend()` copies and returns;
+  `Usart3_Tx_DmaIsr()` advances the tail and arms the next chunk immediately, so the line
+  stays saturated instead of one frame per `Send_Task` tick. `DMA1_Stream3_IRQHandler`
+  now just calls into the driver so the tail pointer stays private.
+- `usart3_send()`'s `if(DMA_GetCurrDataCounter(DMA1_Stream3)) return;` guard **deleted**;
+  it now queues. `str_USART` is a staging buffer the DMA never reads.
+- **A frame is queued whole or not at all** — a partial write would look like corruption
+  to the host, which is worse than loss.
+- `Usart3_Stream_Busy()` **changed meaning** to *backpressure* (ring over half full). Its
+  old sense is useless under continuous streaming — always true, would starve
+  `API/subscribe.c:701`.
+- New livewatch symbols `UA3TxFrames` / `UA3TxDrops` / `UA3TxPeak`; the ladder stamps
+  `UA3TxDrops` into **`float[3]`** so FC-side overflow is separable from air loss with no
+  probe. `scratchpad/micoair_ladder.py` decodes and reports it as an `FCdrop` column.
+
+**RING SIZING IS NOT ARBITRARY — 2048 would have overflowed.** Measured `UA3TxPeak =
+3968` of 4096 (within 127 B of full) with `UA3TxDrops = 0` across ~337 s. ~3.5 frames of
+backlog really does build at the 98.8 % rung: `Send_Task` is preempted by the 1 kHz IMU
+and 200 Hz control loops and its `vTaskDelayUntil` catch-up transiently offers 1124 B per
+10 ms = 112 kB/s against a 91 kB/s wire. Absorbing that is the ring's entire job. The real
+operating point (444 B, 39 % of wire) never comes close. ~10.3 kB of ZI left.
+
+**KNOWN LIMITATION, accepted deliberately — no TX-error recovery.** Only `DMA_IT_TC` is
+enabled on DMA1_Stream3, so if a transfer ever raised TE/FE the completion IRQ would never
+fire, `s_tx_active` would stay 1 and **USART3 would go permanently silent**. Not handled
+because a direct-mode mem→periph transfer out of SRAM has no realistic error path, and the
+old code had the identical exposure (`DMA_GetCurrDataCounter != 0` forever). **If USART3
+ever goes mute with the FC otherwise healthy, read `UA3TxFrames` (still climbing = producer
+fine) and `UA3TxPeak` (pinned near 4096 = ring not draining) — that pair identifies this
+instantly.** The fix would be enabling TEIE and re-arming from the error path.
+
+**Concurrency contract, do not break it**: single-producer/single-consumer — only task
+context advances `s_tx_head`, only the IRQ advances `s_tx_tail`. `tx_arm()` is reachable
+from both, hence the two ~10-instruction `__disable_irq()` windows in
+`Usart3_Stream_TxSend()`. The frame copy sits OUTSIDE them on purpose: the ISR can only
+advance tail, which only ever *increases* free space, so the space check stays valid.
+
+**Setup**: USB-C is POWER ONLY (enumerates nothing). PC side is **UDP 14550, not a COM
+port**. Web config `http://192.168.4.1`, AP `MicoAir_WiFi_Link_FD3D`/`12345678`, running
+**5 GHz ch36**, baud saved 921600 (matches `BSP/usart3.h`, no firmware change needed), BLE
+透传 unchecked. Module header `GND VCC RXD TXD` vs FC `GND RXD TXD VCC` — order differs and
+TX crosses to RX, so no 1:1 cable works; wired with female-female 杜邦线.
+
+**RX PATH PROVEN + FULL DUPLEX IS FREE.** No firmware change needed to prove it: the
+USART3 IRQ already counts IDLE-terminated frames into `UA3RxFrameCnt` (`BSP/usart3.c:19`,
+`TASK/stm32f4xx_it.c:139`), read over livewatch.
+- quiet: 500 datagrams → counter **6 → 506, exactly 1:1, zero loss**
+- during a full 130 s duplex ladder: 6508 sent → **506 → 7012 = 6506 registered, 99.97 %**
+- **re-confirmed after the ring rework, at 98.8 % wire utilisation**: uplink **6507 of
+  6512 = 99.92 %**, top rung **90371 B/s duplex vs 90363 quiet (+0.01 %)**, every rung
+  0.00 % loss, `UA3TxPeak` unchanged at 3968 → RX adds no TX backlog whatsoever
+→ Commanding over the radio costs telemetry NOTHING. The only blocker is the deliberate
+decision to leave USART3 command dispatch unwired — a decision, not a link limitation.
+**Uplink must share the capture's socket** (`micoair_ladder.py --uplink-bps N`): a separate
+process sends from an ephemeral port and the module may redirect the downlink to it.
+
+**BAUD > 921600 REJECTED — tested, do not retry.** POSTed 1000000 / 1500000 / 2000000
+straight to `/save`, bypassing the client-side `<select>`. All three **silently rejected**:
+answers `HTTP 200 "Saved Successfully! Device is rebooting..."`, reboots, still reads
+921600. Harness `<scratchpad>/micoair_set_baud.py` (re-reads the live form and replays every
+field unchanged except baud — a partial POST resets channel/SSID/port). **91304 B/s is a
+HARD WALL** — and as of the TX ring rework the link now sits at **98.8 % of it**, so this
+is the definitive ceiling. The firmware lever that was the only remaining option has been
+taken; nothing further is reachable without different hardware.
+
+**PROBE GOTCHA, hit again.** `UA3RxFrameCnt` read `3233, 3233, 506, 3233` — a counter
+apparently DECREASING. Two identical corrupt reads, so "it agreed twice" is NOT a vote.
+**`xTickCount` is the ground truth for a target reset**: 3041111 → 3042544, monotonic,
+~51 min uptime → no reboot → 3233 was corrupt, 506 real (= 6 + exactly 500 sent). Also
+2 of 4 reads died outright with pyOCD `TransferError`. Never diagnose a brownout from a
+counter alone.
+
+**CAVEAT — desk conditions only** (props off, stationary, ~1 m). Re-run the ladder in
+flight before trusting the thesis dataset to it.
+
+**PAUSED — com0com + UDP bridge.** com0com IS installed and `setupg.exe` shows **"use
+Ports class" ticked on both halves**, but the operator could not rename the pair to
+COM20/COM21 — both halves read `portname=COM#`, which means Windows auto-assigns the next
+free numbers. **So the ports very likely already exist under real COMxx names; enumerate
+them before trying to rename anything.** Then run
+`scratchpad/micoair_vcom_bridge.py <the B-side port>` and open the A-side in the tools.
+**Do NOT measure capacity through the bridge** — it adds a Python hop and a driver buffer;
+measure raw UDP, use the bridge for everyday logging.
+
+**Internet + module simultaneously is SOLVED**: phone USB-tether gives `Ethernet 3 =
+10.197.45.44` while Wi-Fi holds `192.168.4.2` on the module's AP. Both reachable at once,
+so tests can be driven directly rather than handed over. Module stays **AP mode on 5 GHz
+ch36** (no router dependency, identical at desk and field, off the RC's band) — STA mode
+was deliberately NOT adopted.
+
+**HARNESSES NOW LIVE IN THE REPO at `scratchpad/`** (untracked). They were written to the
+session scratchpad, which gets cleaned — that is why every `scratchpad/*.py` this file
+cites from earlier sessions (`goodput.py`, `air_loopback.py`, `packet_vs_byte.py`,
+`baud_hunt.py`, `set_brr.py`, …) **no longer exists**. Do not go looking for them.
+- `micoair_ladder.py [secs] [ip] [port] [--uplink-bps N] [--uplink-size N]` — THE
+  measurement. Binds UDP 14550, derives ACTUAL Hz from arrival timestamps so a cadence
+  collapse is reported as such instead of scored as loss; loss from consecutive `float[0]`
+  deltas WITHIN one contiguous rung; reads `float[3]` = `UA3TxDrops` into an `FCdrop`
+  column so FC ring overflow is separable from air loss without a probe; counts UDP
+  reorders separately (a serial stream cannot do that). `--uplink-bps` adds full-duplex
+  load on the SAME socket. **A full sweep needs ≥130 s** — 8 rungs × 7 s each; a 20 s run
+  only covers ~3 of them and prints "nothing survived" for the rest.
+- `micoair_set_baud.py <baud> [ip]` — re-reads the live form, replays every field unchanged
+  except baud, POSTs `/save`, waits out the reboot, reports what actually stuck.
+- `micoair_uplink.py [secs] [size] [rate]` — standalone uplink; pair with a livewatch read
+  of `UA3RxFrameCnt`. Prefer the ladder's `--uplink-bps` when measuring duplex.
+- `micoair_recon.py [ip]` — config-page dump + TCP/UDP port scan, writes a report file.
+- `micoair_vcom_bridge.py [com] [udp] [ip] [--uplink]` — UDP → com0com virtual COM.
+- `micoair_loopback.py` — TXD↔RXD jumper test, needs no FC. Never run (wires arrived).
+
+**Dashboard is CLOSED** and has stayed closed all session (the 2026-08-09 flash + every
+livewatch read succeeded, which they could not have with COM6 held). Relaunch when done:
+`Start-Process .venv\Scripts\python.exe ground_station\gui\dashboard.py`
+
+**FC state right now**: powered, disarmed, running `Code=81908` (TX ring + ladder),
+`OBJ/JX_FLY.axf` matches. PC holds BOTH `192.168.4.2` (module AP) and `10.197.45.44`
+(phone tether, internet) simultaneously — so the module is reachable and so is the net.
+
+**NEXT ACTION — in order**: (1) **Route the existing `0x21` subscribe stream over USART3**
+rather than building a new fixed frame. It already carries named variables + schema +
+CRC16 + source timestamps, and the variable set is edited in
+`ground_station/livewatch/log_frames.md` with NO reflash; requests go out on UART5, data
+returns on USART3, which is exactly the mandated split. Its budget guard at
+`API/subscribe.c:531` permits ~18 kB/s — dangerously optimistic at 4.7 kB/s, now
+*conservative* against a measured 90 kB/s, so **raise `SUBSCRIBE_BUDGET_PCT_USART3`**
+while you are in there. Note the guard sizes from `USART3_BAUD/10`, which is now the true
+ceiling, so the arithmetic is finally honest.
+(2) `stream_log.py` needs a UDP data path; its `:391` COM3 default and hardcoded 115200 at
+`:116`/`:291` are wrong, and there is no `--usart3-baud` flag.
+(3) **Re-measure the ladder IN FLIGHT** before trusting the thesis dataset — and watch
+`UA3TxDrops`/`UA3TxPeak`, since the ring runs at 97 % occupancy on the top rung and flight
+adds CPU contention. (Only relevant if you actually fly the 1124 B rung; the real 444 B
+operating point has 2.5x headroom.)
+(4) OPEN DECISION for the user: wire USART3 command dispatch or not — proven bidirectional
+at 99.9 % even with the downlink pinned to the wire, so the constraint is purely
+deliberate. His call.
+(5) com0com bridge, if the everyday-logging convenience is still wanted.
+
+**Rate-matching arithmetic** (the real answer to "maximum variables"): at the measured
+90.4 kB/s = **22600 floats/s** → **~280 floats @ 80 Hz**, or ~2260 @ 10 Hz, or any mix.
+The `0x21` path already supports 4 independent rates. User's caveat, accepted: with dense
+trajectories and a raised `gamma` some weights are genuinely fast, so do NOT assume 10 Hz
+suffices globally — per-variable rate choice is the point. Full MRAC state is ~110 floats,
+so the link now carries it **2.5x over** at full 80 Hz.
+
+**Uncommitted, TX ring rework**: `BSP/usart3.h`, `BSP/usart3.c`, `TASK/send_data.c`,
+`TASK/stm32f4xx_it.c`, plus untracked `scratchpad/`. **524 tests green.** Nothing committed.
+Also uncommitted and NOT part of this rework: the arm-gate hardening in
+`ground_station/flashtool/rebuild_and_flash.py` + its tests (voted SWD reads,
+`elf_matches_target`), and the pre-existing `SKILL.md` / `dashboard.py` /
+`docs/bench_characterization.md` / vofa-runtime edits. Commit in separate groups.
+
+---
+
+**Prior session (PAUSED, nothing committed)** — **Last Updated**: 2026-08-02
+**Goal**: Teaching session (`/grilling`, Socratic, layered) on the attention mechanism and its
+relevance to the MRAC thesis. Produced real firmware findings — see the block below. **No code
+edited, nothing flashed, nothing committed this session.** The 2026-07-31 radio work below is
+CLOSED (ticket-10 answered); it is kept for its measurements and hard constraints.
+
+### Attention → MRAC teaching session (2026-08-02) — ACTIVE, nothing committed
+
+**Format is mandatory here**: one layer per turn, physical/visual analogy, a check question,
+WAIT for the answer before advancing. LaTeX does not render for this user — plain ASCII in code
+blocks, worked numeric examples over symbols. See memories `feedback-teaching-style` and
+`feedback-planning-style`. Running analogy: **a bank of PID gain sets blended by flight
+condition** (attention = Takagi-Sugeno / LPV gain scheduling). Layers 1–8 delivered: soft lookup
+table → dot-product similarity → softmax as legaliser → temperature as a gain knob → `1/√d_k` →
+`W_Q/W_K/W_V` and asymmetry → time-blindness/causality → attention-as-adaptive-regressor.
+
+**FIRMWARE FINDINGS (real, none fixed, none committed):**
+1. **`API/mrac.c:73` comment is wrong.** `Phi[2] = x*tanhf(x)` is documented as *"bounded:
+   saturates at high rate"*. It is NOT bounded — `tanh` saturates at 1 so `x*tanh(x) → |x|`
+   (measured: x=17.5 → 17.5, still climbing). Design is fine (softened quadratic, grows slower
+   than `x*|x|`); only the word "bounded" is false. Fix the comment.
+2. **The learning path IS properly bounded** — `mrac.c:219-220` `denom = 1 + |Phi|²` and
+   `mrac.c:263` divides by it (Narendra normalization). Effective step `|Phi|²/(1+|Phi|²)` is
+   capped at 1. Without it the same error would teach **530× harder** at 17.5 rad/s than in
+   hover (|Phi|² 615 vs 1.16); with it the ratio is 1.86×. An earlier claim in this session that
+   the bounded-regressor hypothesis was violated was WRONG and has been corrected to the user.
+3. **`mrac.c:294` `u_ad = Theta·Phi` uses RAW `Phi`, not normalized** — so the OUTPUT path is
+   still unbounded in rate. Only the projection clamp on `Theta` (`What_limit`) bounds it.
+   A softmax/partition-of-unity basis would bound it structurally (`sum(w)=1` ⇒ `u_ad` inside
+   the convex hull of `Theta`), removing the need for the clamp.
+4. **Hover null-space drift, worked through with the user.** In hover `Phi ≈ [1,0,0,0,u_nom,0]`
+   → only `Phi[0]=1` and `Phi[4]=u_nom≈0.4` are live, and they are collinear. Every `Theta` on
+   the line `Theta[0] + 0.4*Theta[4] = 0.5` gives identical `u_ad`. Gradient is `-s*Phi`, exactly
+   PERPENDICULAR to that line, so it never pushes along it; noise walks `Theta` along it with no
+   restoring force. **`u_ad` stays correct while `Theta` slides — the drift is invisible in
+   telemetry.** It detonates when `Phi` changes shape: `(0.5,0.0)` and `(-0.3,2.0)` are identical
+   in hover but differ **3×** once `u_nom` swings 0.4→0.9. This is the classic **bursting**
+   phenomenon. `mrac.c:78`'s existing comment ("keep Phi[3] empty to prevent collinear drift")
+   shows the team already hit this once.
+   → Consequence for the thesis: **densely-excited reference trajectories are PROTECTIVE**; the
+   dangerous profile is long hover followed by abrupt aggression.
+
+**PRIOR ART given to the user** (he explicitly does not want to re-derive): **Concurrent Learning
+MRAC** (Chowdhary & Johnson, CDC 2010 — history stack of past `(Phi, response)` pairs, proves
+parameter convergence with NO persistent excitation, only a rank condition; two distinct `Phi`s
+turn the solution line into a point — this is the direct answer to the drift) — **start here, it
+is in thesis scope**; **Composite adaptation** (Slotine & Li 1989 = the user's own
+"closed-loop weights / prediction error" idea); **Multiple Model Adaptive Control** (Narendra &
+Balakrishnan 1997 = his bank-of-priors-per-maneuver idea); **GP-MRAC / RKHS-MRAC** (Chowdhary,
+Kingravi, How, Vela — centres added online by a novelty/linear-independence test, budgeted, least
+informative evicted; lineage Csató & Opper sparse online GP, Engel KRLS — VERIFY against papers).
+Motion-primitive libraries (Frazzoli/Dahleh/Feron) match his trajectory-decomposition idea but
+were flagged to him as a **scope expansion, a second thesis** — note and leave.
+
+**Where his contribution is still his**: concurrent learning's history stack IS a key/value memory;
+attention is a principled way to query it. Nobody in that literature frames it that way. Combined
+with the `sum(w)=1` structural bound on `u_ad` (replacing the projection clamp), that is a
+defensible contribution rather than a re-derivation.
+
+**Also noted**: `API/mrac.h:90-94` already has an unstructured **RBF** branch behind
+`USE_STRUCTURED_UNCERTAINTY == 0` (`MAX_NUM_BASIS = 2*NUM_BASIS + 2`) — the localized-basis path
+exists as a compile option. `mrac.c:286` `Whatf` already runs one first-order filter per weight at
+`gam_f` — the per-weight closed-loop structure the user described, currently wired to leakage
+rather than to a prediction error.
+
+**DRIFT SIM RUN (2026-08-02)** — 400 Hz, 600 s, `Phi=[1,0.4]`, `d=0.5`, real law incl. `denom`:
+**noiseless → `Theta` does not move at all** (`(0.500,0.000)` start and finish; the user's
+intuition was right for the clean case). **With 3% sensor noise → `(0.500,0.000)` drifts to
+`(0.455,0.109)`**, null coordinate `+0.186 → +0.068` and still moving at 600 s, while `u_ad`
+stayed inside 0.4975…0.5013 the whole time — invisible in telemetry. Burst when `u_nom` swings
+0.4→0.9: `0.455 + 0.9*0.109 = 0.553` vs 0.500 = **+10.6% command error**. Drift is **monotonic,
+not diffusive** (`Phi` noise correlates with error noise), so it does not self-correct.
+
+**WIKI INGESTED (2026-08-02)**: `wiki/concepts/attention-mechanism.md`,
+`wiki/concepts/parameter-drift-and-bursting.md`, `wiki/concepts/adaptive-basis-prior-art.md`;
+`wiki/index.md` + `wiki/log.md` updated; `sync_obsidian.py` run (75 pages). All untracked in git.
+
+**NEXT ACTION**: continue the layered teaching — Layer 9 is the concrete softmax-as-`Phi`
+construction (bounded regressor, localized learning, convex-hull bound on `u_ad`) and how
+concurrent learning's history stack maps onto keys/values.
+
+### New-radio bring-up (2026-07-31) — CLOSED, kept for evidence
+
+**RF LINK CONFIRMED.** `scratchpad/air_loopback.py COM8 COM7` (both modules on the desk,
+FC not involved): at **921600 both directions returned `CLEAN`** — the ASCII pattern crossed
+byte-exact each way. Every rate below 921600 returned *garbled* bytes, which is the host-vs-
+module baud mismatch signature and independently confirms **both module UARTs are at 921600**.
+(Received count is ~2× sent: late carry-over from the previous sweep step landing after the
+buffer flush — harness artefact, the head is contiguous and correct.)
+
+**What actually fixed it**: on the slave — 发射功率 → 4 → 设置, then 删除已配对列表; on the
+master at 921600 — 波特率 921600 → 设置, 发射功率 4 → 设置, 删除已配对列表, 扫描设备,
+then **配对设备 targeting `E149F116F5CD` selected from the earlier list**. The slave still
+never appeared in any 扫描设备 output, yet the bond took (`已配对数量: 1`) and traffic flows.
+**Lesson: a MAC absent from the scan list is not proof it cannot be bonded — pair by MAC
+explicitly.**
+
+Historical diagnosis (kept — it is what exonerated the FC). FC side proven over read-only SWD
+(majority-voted — the probe returns corrupted single reads, see gotcha below):
+- USART3 `CR1=0x201C` UE=1 TE=1, `CR3` DMAT=1; PC10/PC11 mode=ALT **AF7**; `RCC_AHB1ENR.GPIOCEN=1`
+- `DMA1_Stream3` `CR=0x08030451` EN=1 dir=mem→periph CHSEL=4, `PAR=0x40004804`(=USART3_DR),
+  **EN duty 71.9 %**, NDTR cycling 0..254 → 256 B frames streaming continuously
+- `MODER=0x02A105A0 PUPDR=0x0101A55A AFRH=0x00087700 OTYPER=0` (15/15 unanimous)
+- **PC10 (TX) high 44.9 %** of 1676 samples → the FC really is driving the line
+
+**WIRING IS CORRECT — do not swap again.** Operator swapped drone-side TX/RX on 2026-07-31;
+still dead, so the swap was not the fault. Decisive test (`scratchpad/rx_drive_test.py`):
+PC11 has `pull=NONE` yet reads high **100 % of 1131** samples, and **stays high 100 % of 1122
+samples against the STM32's internal ~40 kΩ pull-down**. A weak module pull-up would have
+collapsed; only a push-pull driver wins. → **PC11 is on the module's TX OUTPUT, which is
+powered and idling correctly.** (RMW touched only `PUPDR[23:22]`, restored to `0x0101A55A`,
+verified.)
+
+**Baud is conclusively NOT the fault.** `scratchpad/baud_hunt.py` swept `USART3->BRR` across
+**11 rates** — 1000000/921600/460800/256000/230400/128000/115200/57600/38400/19200/9600 —
+with readback verified at each step and the host listening on COM7. **0 bytes at every one.**
+Byte *presence* is baud-agnostic (a mismatched UART returns garbage, never silence), so a
+1-D sweep suffices: the dongle emits **nothing at all**, at any FC rate. BRR restored `0x016C`.
+
+**Both directions dead with the wiring right.** `scratchpad/bidir_test.py` with FC held at
+921600: downlink 0 B / 0 tails in 3 s; uplink 2560 B written to the dongle left
+`UA3RxFrameCnt` at **0** (it had been 97 pre-reboot — that was a *floating-line noise*
+artefact, not real traffic, so it is NOT evidence of a working uplink). USART3 `SR` over
+~550 samples showed only `TC`/`TXE`, **never `RXNE`/`FE`/`NE`/`ORE`** → literally zero start
+bits arrive on PC11. Conclusion: the drone module accepts UART but never transmits RF, and
+the dongle never receives RF. Fault is upstream of the FC — pairing/channel/address, RF power
+or antenna, or the dongle itself.
+
+**FC FULLY EXONERATED — the radios were unpaired.** Operator moved BOTH modules onto the PC
+(dongle direct-USB; drone-side module via a USB-TTL adapter), removing the FC entirely.
+The first `air_loopback.py` run (before pairing) crossed **0 bytes in both directions at all 9
+datasheet rates**. Two modules on one desk that cannot reach each other is not a firmware,
+wiring or baud fault — that is what localised the failure to the BLE bond.
+
+**TWO CH340s are enumerated — the earlier "COM7 is the only USB-serial device" note was WRONG:**
+- `COM7` = `USB\VID_1A86&PID_7523\5&1A3A044C&0&1` — **the BLE dongle (master)**, stable across sessions
+- the slave (drone-side, on the USB-TTL adapter) **renumbers with the USB socket** — `COM3`
+  (`...&0&3`) first, then `COM8` (`...&0&4`) after a replug. **Always re-enumerate before a
+  desk test**; do not hardcode it. It is not present at all once the module goes back to the FC.
+(COM4/COM5 are Bluetooth SPP, irrelevant.) This also means `stream_log.py:391`'s COM3 default
+is stale-but-once-correct, not an invented value — re-check before "fixing" it.
+
+**Seller's docs, `D:\Downloads\038 无线串口调试模块\`** (Yuanxi Technology / 上海远夕智能科技):
+- **It is a 2.4 GHz BLE SOC module** (GFSK, 2400–2483.5 MHz, −36…**+4 dBm**), **air cap
+  「最大速率 45KB/S」 ≈ 45000 B/s**. This — not 921600 baud — is the real ceiling for the
+  goodput ticket. 921600 UART = 92160 B/s, i.e. **2× what the air can carry**; the radio will
+  bind first. Still ~8× the old radio's measured 5413 B/s and ~4× UART5's 11520 B/s.
+- Device TTL is 3.3 V, **5 V tolerant**; device-side supply 3.3–12 V → the operator's 5 V is fine.
+- Ships **pre-paired at 115200**; **green LED lit = paired** (「绿灯亮，说明收发两边已配对」).
+- Only these bauds exist: 9600/14400/19200/38400/57600/115200/230400/460800/921600.
+- **Every config operation requires physically holding the module's tiny button** (pinhole in
+  the case; SIM-eject pin). Tool: `无线串口配置工具v1.0.2.exe`. Video: bilibili BV1jESLBFEhe.
+- Factory roles: **PC end = 主机 master, device end = 从机 slave.**
+- Tool buttons: 打开串口 / 连接设备 / 读取参数 / 扫描设备 / 配对设备 / 删除已配对列表 / 恢复出厂设置.
+
+**ROOT CAUSE (2026-07-31 21:1x) — the two modules had no BLE bond.** Both interrogated with
+`无线串口配置工具v1.0.2.exe` (hold the module's button for EVERY op):
+| | MAC | TX power (now) | UART baud (now) |
+|---|---|---|---|
+| master (dongle, COM7) | **C611912894D3** | 4 dBm | 921600 |
+| slave (drone-side) | **E149F116F5CD** | 4 dBm (was 0) | 921600 |
+
+The slave appeared in **none** of four 扫描设备 runs, including those taken with it powered —
+yet 配对设备 against its MAC still bonded. RSSI-differencing the scans was a dead end and
+produced a demonstrated false positive (`B4E7B31D4D4A`, later revealed as a neighbour's
+"EDIFIER BLE"); `76C79AB801E7` (−56 dBm) appeared once and never returned. **Do not pair by
+RSSI — pair by MAC.**
+
+**0 dBm vs 4 dBm was NOT the fault** (0 dBm = 1 mW; the 170 m spec figure is at +4 dBm, so
+0 dBm still reaches tens of metres). Raised to 4 for margin regardless.
+
+**`omega_u = 921600` costs −0.93 %**: APB1 is 42 MHz, so the closest divisor is `BRR=0x2E` →
+**913043 baud**. Within 8N1 tolerance; note it before committing 921600 to the header.
+
+**Host/firmware defects found, NOT yet fixed** (would break `--transport usart3` even once the
+wire is right):
+1. `ground_station/livewatch/stream_log.py:391` — usart3 data port defaults to **COM3**; the
+   dongle is **COM7**.
+2. `stream_log.py:116` and `:291` — data port opened at hardcoded **115200**, ignoring the
+   usart3 baud, so it would decode garbage at 921600.
+3. No `--usart3-baud` CLI flag, though `build_stream_request`/`stream_log_multi` take
+   `usart3_baud=115200`.
+4. `BSP/usart3.h:19` `USART3_BAUD 115200` feeds the link-budget cap at `API/subscribe.c:531`
+   → the firmware would still refuse subscriptions above 10368 B/s.
+
+## TICKET-10 ANSWERED 2026-07-31 ~22:5x — CAPACITY MEASURED, KNEE PINNED
+
+**MAX CLEAN SUSTAINED GOODPUT = 4170 B/s** (12 floats = 52 B frames at 80.2 Hz, 0.00 %
+loss over 960 frames, 100 % intact). Delivered peaks at ~4434 B/s but only at ~15 % loss.
+
+**The seller's 45 KB/s air figure is fiction for this pair — measured is 9.3 % of it.**
+Two auto-stepping frame-size ladders were flashed (firmware steps the rung itself and
+stamps it into `float[1]`, so ONE flash yields a whole curve):
+
+Coarse ladder {8,16,24,32,48,64,96,128,160,192,224} floats, 2.9→72 kB/s offered:
+| floats | frame B | offered | delivered | loss |
+|---|---|---|---|---|
+| 8 | 36 | 2887 | 2887 | 0.00 % |
+| 16 | 68 | 5454 | 4227 | 17.87 % |
+| 24 | 100 | 8020 | 2059 | 59.24 % |
+| 32 | 132 | 10586 | 235 | 80.57 % |
+| ≥64 | ≥260 | ≥20852 | nothing survives | |
+
+Fine ladder {8,10,12,14,16,18,20,24}:
+| floats | frame B | offered | delivered | loss | intact |
+|---|---|---|---|---|---|
+| 8 | 36 | 2887 | 2887 | 0.00 % | 100 % |
+| 10 | 44 | 3529 | 3529 | 0.00 % | 100 % |
+| **12** | **52** | **4170** | **4170** | **0.00 %** | **100 %** |
+| 14 | 60 | 4812 | 4375 | 7.85 % | 98.6 % |
+| 16 | 68 | 5454 | 4434 | 14.71 % | 95.3 % |
+| 18 | 76 | 6095 | 4353 | 21.09 % | 90.4 % |
+| 20 | 84 | 6737 | 3029 | 42.38 % | 77.9 % |
+| 24 | 100 | 8020 | 2903 | 47.07 % | 68.2 % |
+
+**CONGESTION COLLAPSE, not corruption**: past the knee, offering MORE delivers LESS
+(4434 → 3029 → 2903 → 235). The module burns airtime on fragments. Bytes that do arrive
+are bit-perfect.
+
+**THE NEW RADIO IS A 46 % REGRESSION.** The old 24RF's BEST configuration was **7718 B/s
+@ 0.08 % loss with 96 B frames** (memory `project_24rf_downlink_capacity`; the 5413 B/s
+often quoted was its *suboptimal* 112 B config, which skipped ticks). New BLE module:
+**4170 B/s @ 0.00 %**. The only real gain is that 921600 removes the UART ceiling; the
+radio underneath carries 46 % less. **The bandwidth plan must be rebuilt around
+~4.2 kB/s** — or around UART5, which carries more.
+
+**Ruled out as levers (do not retry):**
+- **Lowering UART baud to 460800** — the UART is only **4.5 % utilised** at 4170 B/s. It
+  stopped being the constraint when it was raised. Lowering it removes headroom, changes
+  nothing; the knee is a byte rate and the FC baud was constant across every rung.
+- **Lowering TX power 4 → −6 dBm** — power buys link MARGIN, not throughput. Already
+  0.00 % loss at desk range, so margin is not the limiter; cutting 10 dB can only add
+  errors, worst at flight distance. 4 dBm is the module max — keep it.
+
+**The actual constraint is the module's BLE connection parameters** (connection interval,
+packets per connection event, DLE, PHY). ~4.2 kB/s ≈ conservative defaults. The Windows
+tool exposes ONLY baud / TX power / pairing, so this is not reachable from our side.
+**Question for the seller**: 有没有办法设置连接间隔 / 提高空中吞吐率？45KB/S 实测只有 4.2KB/S.
+
+## ANSWERED 2026-07-31 ~23:2x — THE LIMIT IS PER-FRAME SIZE, NOT A BYTE RATE
+
+Flashed an **iso-byte-rate** ladder (`TASK/send_data.c`, `USART3_TEST_FLOAT_LADDER` /
+`USART3_TEST_DIV_LADDER`, rung advances on TICKS so dividers don't skew the hold time;
+`float[1]`=floats, `float[2]`=divider because frame sizes repeat across rungs).
+`Code=81592`, 0 errors, flashed attempt 1. Harness: `scratchpad/packet_vs_byte.py`.
+
+All five rungs below offer the SAME 4170 B/s; only the packaging differs:
+| floats | div | Hz | frame B | offered | delivered | air loss | intact |
+|---|---|---|---|---|---|---|---|
+| **12** | 1 | 80.2 | **52** | 4170 | **4114** | **0.81 %** | 99.5 % |
+| 25 | 2 | 40.1 | 104 | 4170 | 3721 | 9.09 % | 98.1 % |
+| 51 | 4 | 20.05 | 208 | 4170 | 2875 | 25.86 % | 92.8 % |
+| 103 | 8 | 10.03 | 416 | 4170 | 2841 | 22.96 % | 87.9 % |
+| 207 | 16 | 5.01 | 832 | 4170 | 2367 | 34.29 % | 84.0 % |
+
+Doubled-rate rungs (8341 B/s): 51/2 → 73.99 %, 103/4 → 88.31 %, 207/8 → 88.78 %.
+
+**An 832 B frame at 5 Hz loses 34 % while a 52 B frame at 80 Hz loses 0.81 % — identical
+bytes per second.** Slowing down does NOT rescue a large frame. Mechanism: frames bigger
+than one BLE connection event get fragmented, and one lost fragment kills the whole frame,
+so whole-frame loss climbs with size. **Neither byte-rate nor packet-rate limited — packet
+SIZE limited.**
+
+**Consequence for the "log more variables without real time" plan (user's goal): the
+big-slow-frame trade is DEAD, but the goal is still reachable by ROUND-ROBIN.** Keep frames
+at ~52 B and cycle the variable set across successive frames: 80.2 Hz x ~10 usable floats
+≈ **800 floats/s**, i.e. **100 variables at 8 Hz** or **200 at 4 Hz**. That is what the
+multi-slot `0x21` subscribe path already does, and it wants small frames anyway.
+**Do not build a wide-frame logger.**
+
+**Seller contact 2026-07-31 23:1x — they gave the WRONG knob.** Asked 有没有办法设置连接间隔;
+they replied with `AT+AINTVL=NUM\r\n` (20–10000 ms, write-only, 重启后生效) = **广播间隔,
+the ADVERTISING interval**. That governs pre-bond discovery only and has no effect on
+throughput once connected. (It plausibly explains why `E149F116F5CD` never appeared in any
+扫描设备 run — but the bond works, so there is nothing to fix.) **Do not send it.** They also
+said 不会这么低的 ("it shouldn't be that low"). Follow-up drafted, asking specifically for
+连接间隔 / MTU / DLE / 2M PHY, with the 52 B-vs-832 B iso-rate evidence attached.
+
+**Analysis trap, hit for real**: `float[0]` counts EVERY frame across ALL rungs, so
+diffing all rung-N frames in a long capture counts the other rungs as loss — v1 of
+`ladder_goodput.py` reported **85 % loss on a rung independently measured at 0.000 %**.
+Deltas must be taken only WITHIN a contiguous run of one rung. Fixed in the script.
+
+## RESOLVED 2026-07-31 ~22:2x — LINK WORKS, FLASHED, 0.000 % LOSS
+
+**Firmware edited, rebuilt and FLASHED** (`rebuild_and_flash --yes`, `Code=81484`, 0 errors,
+75 pre-existing warnings, ARM_Status=0, succeeded attempt 1, `OBJ/JX_FLY.axf` matches):
+- `BSP/usart3.h:19` `USART3_BAUD` **115200 → 921600** (+ rewritten comment; the old text
+  documented the retired 24RF pair). `API/tests/stubs/usart3.h:4` kept in sync.
+- `TASK/send_data.c` `USART3_TEST_FLOATS` **63 → 8** (256 B → 36 B frames) so the offered
+  load sits under the radio's measured air capacity.
+
+**Measured after flash — `goodput.py COM7 921600 10 8`:**
+| | |
+|---|---|
+| whole frames | **841**, stride histogram `[(36, 840)]` — every frame exactly 36 B |
+| byte integrity | **100.00 %** |
+| ramp corruption | **0 frames** |
+| sequence deltas | `[(1, 840)]` — all 840 transitions delta==1 |
+| **AIR LOSS** | **0.000 %** |
+| goodput | **2888 B/s @ 80.2 Hz** |
+
+**`Send_Task` runs at 80.2 Hz, not the assumed 100 Hz** — the 10 ms tick does not hold. All
+offered bytes were delivered, so this is the source cadence, not a radio limit.
+
+**The radio's real air capacity is ~4.7 kB/s, NOT the seller's 45 KB/s.** At 63 floats
+(25600 B/s offered) only ~4700 B/s arrived and framing never survived — but the bytes that
+did arrive were **bit-perfect** (full 59-float ramp verbatim, 92.5 % of words were ramp
+values, 256 distinct byte values). Overflow, not corruption: three identical-setting captures
+gave a 59-float run, then zero, then 2 tails. **The knee is between 2.9 and 4.7 kB/s** — still
+to be bracketed by stepping `USART3_TEST_FLOATS` up (12 → 52 B → 4170 B/s; 16 → 68 B →
+5454 B/s at 80.2 Hz). Each step needs a reflash.
+
+**Diagnostic sequence that got here (do not re-derive):**
+1. Dongle **USB replug** was required after the config tool was killed with COM7 open — before
+   that, 0 bytes; after, bytes immediately.
+2. `fc_baud_sweep.py` (host fixed at 921600, FC baud swept **against a live link**) —
+   the positive-control version of `baud_hunt.py`. Only FC 921600 gave `distinct=218`;
+   460800→31, 230400→13, 115200→2, everything below→1. Decisive.
+3. A **spurious `BRR` revert** 0x002E→0x016C was just the FC rebooting when the operator
+   power-cycled it to move the module — `brr_watch.py` proved no further reverts
+   (`xTickCount` monotonic 750044 → 999679, 0 reverts over 15 s).
+4. `chunk_analysis.py` separated corruption from overflow by searching for the fixed ramp
+   at every alignment — the technique to reuse, since it needs no frame sync.
+
+**NOTE — the subscribe link-budget guard is now optimistic.** `API/subscribe.c:531` sizes from
+`USART3_BAUD`, so raising it to 921600 lets the firmware accept ~18 kB/s subscriptions that
+the radio (~4.7 kB/s) cannot carry. Not touched: the correct cap is the knee, which is the
+next measurement. Flagged in the `BSP/usart3.h` comment.
+
+**Dashboard is CLOSED** (killed twice to free COM6 for SWD/flash; it was relaunched by the
+operator mid-session and had to be killed again). Relaunch when done:
+`Start-Process .venv\Scripts\python.exe ground_station\gui\dashboard.py`
+
+**Uncommitted**: `BSP/usart3.h`, `API/tests/stubs/usart3.h`, `TASK/send_data.c`.
+
+### Superseded — the dead-link investigation (kept for the evidence)
+
+**REGRESSION 2026-07-31 ~21:5x — link died again after the module was moved back to the FC.**
+Module reconnected to USART3; `set_brr.py 921600` wrote `BRR=0x002E` (913043 baud, −0.93 %),
+readback 9/9 unanimous, **left set** (that script deliberately does not restore, unlike the
+diagnostics). Dashboard PIDs and the config tool were killed first to free COM6/COM7.
+
+FC re-verified good after the move — nothing shifted:
+- `MODER=0x02A105A0 OTYPER=0 PUPDR=0x0101A55A AFRH=0x00087700`, all 15/15, PC10/PC11 ALT AF7
+- **PC10 high 44.8 %**, **PC11 high 100.0 % at `pull=NONE`** of 1795 samples (was 44.9/100.0
+  before the move — module powered, driving, orientation unchanged)
+- `bidir_test.py`: downlink **0 B / 0 tails in 3 s**; uplink 2560 B → `UA3RxFrameCnt` 0→0;
+  `SR` over 560 samples shows **only `TC`/`TXE`, never `RXNE`/`FE`/`NE`/`ORE`**
+- `goodput.py COM7 921600 {10,25} 63`: **0 B** both runs
+
+So the FC is exonerated a second time and the BLE bond that worked on the desk did not survive.
+Two candidate causes, in order: (a) the **slave power-cycled** when it moved from the USB-TTL
+adapter to the FC's 5 V and did not re-bond; (b) the **master was never power-cycled** after the
+config tool wrote 保存自动重连设置/开启自动重连, and the tool was killed with COM7 still open.
+
+**NEXT ACTION — operator, physical**: (1) report whether the **green LED** is lit on each
+module (绿灯亮 = 已配对 — this single observation separates "not bonded" from "bonded but not
+passing data"); (2) **unplug and replug the dongle's USB** for a cold start. Then re-run
+`goodput.py COM7 921600 10 63`. If still dead, put the slave back on the USB-TTL adapter and
+re-run `air_loopback.py <slave-COM> COM7` — if the desk test also fails now, the bond is being
+lost on every slave power cycle and the pairing must be re-done and re-verified after a
+deliberate power cycle.
+
+**Measurement harness, ready the moment RF works**:
+`.venv/Scripts/python.exe <scratchpad>/goodput.py COM7 921600 10 63` — measures goodput,
+frame rate, byte integrity and **air loss from consecutive seq deltas** (never max−min; that
+trap once reported 96 % loss against a true 0.14 %). Instrument needs no reflash: the flashed
+image already carries `USART3_THROUGHPUT_TEST=1`, `USART3_TEST_FLOATS=63` → 256 B JustFloat
+frames, `float[0]`=counter, `floats[4..]`=fixed ramp `i` for corruption detection
+(`TASK/send_data.c:346-402`). Then sweep frame size for the degradation knee, and confirm
+whether the 10 ms `Send_Task` tick or `usart3_send()`'s skip-if-busy DMA guard is the limiter
+rather than the air link.
+
+**Probe gotcha (new):** the wireless CMSIS-DAP returns **silently corrupted single reads** —
+one pass reported `GPIOCEN=0` and `PC11 high 0.0 %`, both false. 15× majority vote gave
+`AHB1ENR=0x0030000F` unanimously. Always vote repeated reads; never trust one.
+
+### Superseded this session — L1-NMPC grill (2026-07-31)
+
+### L1-NMPC Grill Session (2026-07-31) — ACTIVE, nothing committed
+
+**What was done**: fetched the missing PDF (`raw/papers/2026-07-21-Performance-Precision-and-Payloads-Adaptive-Nonlinear-MPC-for-Quadrotors.pdf`, 8 pp — the grab note had none), ingested to wiki, then a teaching session that produced real findings. `pypdf` installed to **scratchpad only** (`scratchpad/pylibs`, NOT `.venv`); extracted text at `scratchpad/l1nmpc.txt`.
+
+**Wiki files created** (all committed to disk, untracked in git): `wiki/sources/l1-nmpc-adaptive-nonlinear-mpc-quadrotors.md`, `wiki/literature/arxiv-2109.04210.md`, `wiki/concepts/{l1-adaptive-control,matched-unmatched-uncertainty,indi-control}.md`; `wiki/index.md` + `wiki/log.md` updated; `sync_obsidian.py` run (72 pages).
+
+**FINDING 1 — what the firmware actually has**:
+- `ENABLE_PERFORMANCE_RECOVERY = 1` (`API/mrac.h:65`) → first-order LPF on `u_ad` at `omega_u`, `API/mrac.c:297-303`. **Compile-time only, no runtime gate — it has been live on every MRAC flight.** `omega_u = 30.0f` roll/pitch (`mrac.c:364,380`), `20.0f` yaw/Z (`mrac.c:398,415`).
+- `mrac_flags.l1_filtering_on = 0` by default (`mrac.c:434`). It gates **`sigma_lf` low-frequency learning** (`mrac.c:260,274,285-287`), i.e. leakage toward `Whatf` (a `gam_f=16` rad/s ≈ 2.5 Hz filtered copy of `Theta`). `sigma_lf` 0.8 roll/pitch, 1.0 yaw.
+- **LABEL BUG, UNFIXED**: `ground_station/gui/dashboard.py:3703` and `API/mrac.h:227` both describe `l1_filtering_on` as "low-pass filter on u_ad". **Wrong** — that flag never touches `u_ad`.
+
+**FINDING 2 — `omega_u` is mis-set, and `docs/sysid_results.md` already proves it (no reflight needed)**:
+- Measured June 2026: roll `G(s)=165/(s(1+s/19.8))·e^(−0.015s)`, lag pole **p = 19.8 rad/s**, T = 15 ms, VAF 98.7 %, **7 runs, <0.3 % spread**. Pitch p ≈ 16–18, T ≈ 12 ms, K ≈ 185. Yaw = **pure integrator K≈37/s, no pole, no delay, relative degree 1**.
+- `omega_u = 30` sits **above** the plant's own pole (19.8) → the filter is **INERT, not dangerous** (earlier hypothesis of "too aggressive" was corrected against this data). Target `ω_co ≤ p/3…p/5` → **~4.0–6.6 rad/s for roll/pitch**. Phase lag at 30 rad/s = −82° (pole −56.6° + delay −25.8°); at 5 rad/s = −18.5°.
+- **Yaw needs its own derivation** — no plant pole means no free filtering; do not copy roll's number.
+- `p` and `T` are **mass-independent**; only `K` scales as `1/I`. → `omega_u` is settable at the desk from June data despite the battery/mass change.
+
+**FINDING 3 — MPC readiness audit**. Has: mass 1.2961 kg, `Ixx/Iyy/Izz = 0.00839/0.00930/0.01485` (±8 %/±8 %/±3 %), arm 0.200 m, CG offset 0.0262 m, static thrust curve. T/W = **2.63** (paper's drone 4.5). Missing: `c_tau` (yaw drag-torque constant), thrust curves for motors 1–3 (`ground_station/logs/bench/thrust_20260729_191924.csv` is **motor_id=4 only**, 308 pts, CCR 2000–4000, 0–8.34 N, `vbat` 16.427→14.514 V = 12 % sag, `rpm` empty, `settle_s` 3.5–39.3 s = **load-cell settling, NOT motor dynamics**), `C_d` (derivable from existing flight logs via `m·g·tan(θ) = C_d·v`), Z-axis SysID (never wired, ADR-0004 #1).
+
+**THESIS PIVOT (user-declared this session)**: abandoning NN-as-controller as unsafe. New direction = **the adaptive layer as a controller-agnostic augmentation**, demonstrated under the PID cascade *and* under an MPC. MPC's role changes from BC-data-generator to **baseline #2 in `sim/`** — never real-time, never ships to the STM32. This **contradicts memory `project_thesis`** (updated 2026-07-31). **`/distill-priorities` suggested but NOT yet run.**
+
+**User's own research idea, worth preserving**: leakage-to-a-prior. Root cause of `Theta` wandering is **lack of persistent excitation** (`e→0` does NOT imply `Θ→Θ*`; Θ drifts on a manifold). Fix: replace the `Whatf` target at `mrac.c:274` with a stored `Θ_prior` identified under PE, giving cross-flight repeatability + weight persistence (closes the "weights lost on power cycle" gap).
+
+**OPEN QUESTION posed to the user, UNANSWERED**: "Yaw has no plant pole and no delay — so what sets its `omega_u` ceiling?" My proposed answer: the **gyro noise floor**, measured props-off by `stream_log` PSD of `mrac_state.yaw.Phi[]`; floor = 3× densest trajectory's yaw-rate content from `sim/trajectories.py`. Asked whether the user instead thinks it should follow from yaw's 5×-weaker authority (`K≈37`).
+
+**Agreed next sequence — steps 1–4 need NO drone**:
+1. Set `omega_u` from p/T (roll/pitch ≈5 rad/s; yaw derived separately) — desk
+2. Fix `sim/plant.py` torque path from measured thrust + inertia (kills `dF_roll_unit=0.005`, `tau=diff*r*0.25`, incoherent `_YAW_TORQUE_PER_UNIT`) — desk
+3. Acceptance gate: sim must reproduce K≈165, p≈19.8 rad/s, T≈15 ms on roll and ≈37/s integrator on yaw — desk
+4. Raise `gamma`, validate in sim — desk
+5. Shadow-mode flight, confirm disturbance floor, **log `vbat`** (06-18 campaign had `id.vbat=0`) — FLIGHT
+6. Enable `sigma_lf` — FLIGHT
+7. Leakage-to-prior + weight persistence — later
+
+**Housekeeping noted, not done**: `raw/papers/` holds 4 duplicate notes of arXiv 2109.04210 and 2 of GatedLinear (`2026-07-29-*` stub superseded by `2026-07-30-*`+PDF). GatedLinear remains **un-ingested**.
+
+### Dashboard Garbage-Telemetry Session (2026-07-29) — fix verified on the drone; commit decision still open
+
+**Root cause (proved on the wire, NOT the flexible frame)**: `Send_Groundstation_Telemetry_UART4()` wrote the shared DMA buffer starting at `TASK/send_data.c:483` but waited for the previous DMA1_Stream7 transfer to drain ~586 lines later at old line 1069. Frame A (48 B, 4.2 ms) and the A+C burst (102 B, 8.9 ms) drain inside the ~18 ms tick and were never hurt. **Frame B is 305 B = 26.5 ms** — still in flight when the next tick rebuilt the buffer under it, so the wire got B's head + the new frame's bytes, then the new frame again in full.
+
+**Fix**: moved the drain-wait ABOVE the first buffer write in `TASK/send_data.c` (now right after the local decls, before `Buf_Telemetry_UART4[0] = 0xAA`). Pure reordering — the identical wait already existed later, so per-cycle blocking and the EKF cadence are unchanged.
+
+**Measured before → after** (3 s raw captures, scratchpad `frame_census.py` / `frame_headers.py` / `analyze_raw.py` / `align_check.py`):
+
+| | before | after |
+|---|---|---|
+| Frame B CRC valid | 1/34 | **49/49** |
+| Frame B on-wire size | 407 B (declared 305) — splice of +102 = A+C burst | **305 B exact** |
+| Frame A CRC | 153/156 | **195/195** |
+| Frame C CRC | 155/155 | **194/194** |
+| alignment anomalies | 54 | **0** |
+| rates | A 54 / C 50 / B 11.8 Hz | **A 65 / C 65 / B 16.3 Hz** |
+
+PID block now decodes to real values (`0.7787, -0, -11.95, -1.118, 0, 12.89`) at offset +128 → the **4-MRAC-axis layout is correct**; the "3 axes" comment in `_unpack_frame_b` is stale doc, not a bug.
+
+**FLASHED 2026-07-29** via `python -m ground_station.flashtool.rebuild_and_flash --yes`: `Code=81484`, 0 errors, ARM_Status=0 verified, succeeded attempt 1, `OBJ/JX_FLY.axf` now matches the running image. **This flash also shipped protocol v2** (stream source timestamps + CRC16) since it was in the tree — host and firmware are now BOTH v2, but v2 streaming is newly flashed and UNVERIFIED on hardware.
+
+**Host-side fixes (same session, 487 tests green)**:
+- `ground_station/gui/dashboard.py` `_sync_telemetry_from_bridge_if_local` — drops None-valued keys. The bridge nulls stale frames by design; consumers read via `k in a` / `a.get(k, 0.0)`, which raise `TypeError` on present-but-None and aborted the rest of `_frame()`, freezing every panel drawn after the raise.
+- `ground_station/comm/serial_bridge.py` `get_telemetry_snapshot` — per-frame staleness windows `STALE_A_S=0.5` / `STALE_B_S=1.5` (old single 0.5 s sat just above Frame B's real 0.42 s worst gap); return type corrected to `Optional[float]`.
+- `ground_station/gui/tests/test_stale_telemetry_none.py` — new, 4 regression tests.
+- `ground_station/comm/test_frame_a_v13_contract.py` — was genuinely failing; asserted through the staleness guard after a 0.5 s sleep. Now reads `_last_telemetry_*` directly. That dir is NOT in `pytest.ini` testpaths, so it never ran in the normal suite.
+
+**Environment**: `.venv` was EMPTY (that was the original "python.exe not recognized"). Rebuilt with **Python 3.13** — 3.11 cannot satisfy `requirements.txt` (`scipy==1.18.0` needs ≥3.12). The `-e git+...llmwiki` line has no checkout and nothing imports it; skip it. Memory `project_venv_python_version`.
+
+**Open question posed to the user, UNANSWERED**: "Want me to commit the race fix separately so it has its own clean history?" Nothing is committed — the firmware fix, both host fixes and the new tests sit in the working tree alongside the pre-existing streaming-session changes.
+
+**Next action**: await that answer. If yes: commit `TASK/send_data.c` alone with the before/after CRC table in the message, then the host fixes + tests as a second commit.
+
+**Still open, not urgent**: link remains ~101 % saturated (11677 B/s of 11520) — all useful now, but no headroom for a UART5 stream; `Uart5_Subscribe_TxSend` (`BSP/usart5.c:144`) busy-waits on DMA1_Stream7 with NO non-blocking guard, unlike the USART3 path in `API/subscribe.c:700-707` — will stall Send_Task once a UART5 stream runs; `serial_bridge._rx_loop` (~line 1341) does not skip payloads of unknown frame types (0x07/0x08/0x09-0x0C/0x7F), so it rescans them byte-by-byte and can false-sync — latent until streaming resumes.
+
+### Streaming Subscription Session (2026-07-29) — superseded above, still valid background
+
+**What it is**: CMD `0x21` subscribe on UART5 → `0x08` schema reply → `0x09+slot` data frames on the chosen transport. Range tuples `(address, size, count)`, schema sent once, values only in data frames. Wire layout pinned in `API/subscribe.h` (read its header comment first — it is the contract).
+
+**Shipped and verified ON THE DRONE (single-slot build, flashed 20:43)**:
+- 142 rows / 23 columns / **0 dropped, 0 gaps**, live `mrac_state.roll.Theta` visibly adapting
+- Control plane: 0x08 schema echo, 0x7F on over-budget, bad-CRC silently dropped, stop works
+- Costs ~4% of frame 0x01 and nothing else
+
+**Multi-rate slots — FLASHED AND VERIFIED ON THE DRONE (2026-07-29 07:45)**:
+- Default frame (20/10/5 Hz, 3 slots) over 30 s: **0 dropped, 0 malformed on every slot**; CSVs in `logs/multislot_final.slot{0,1,2}.csv`
+- `Code=81348 RW-data=2388 ZI-data=113356`. First flash attempt died with `Programming Failed!RDDI-DAP Error` (part erased, drone dark); a plain retry fixed it — see memory `project_headless_build_unreliable`
+- **Measured ceiling**: the firmware permits 2304 B/s on UART5 but only ~1600 B/s arrives intact. 2055 B/s was accepted and dropped 14 % on every slot; 1580 B/s ran clean. Single-slot runs never dropped, so it is bandwidth, not the scheduler. Memory `project_stream_frame_budget`
+- **New, all tested (466 green)**: `ground_station/flashtool/rebuild_and_flash.py` (one-command build+flash, per-stage exit codes, `--yes` required to flash, snapshots + restores the artifact triple, retries RDDI-DAP), `ground_station/flashtool/target_power.py` (listens for 0xAA 0xBB to decide powered/dark), `ground_station/livewatch/log_frames.md` (**the default frame — a Markdown table; editing it needs no rebuild**), `.claude/skills/stream-log/SKILL.md`
+- Its frontmatter `description:` is stale (still says power-sequencing hazard); the body is correct. Edits to that line were blocked by the tool-permission classifier — needs a human to fix, cosmetic only
+
+Original code-complete notes:
+- `API/subscribe.h` — `SUBSCRIBE_MAX_SLOTS 4`; request payload now `3 + N*8` (divider, transport, **slot**); schema payload `5 + N*8`; data frame type = `0x09 + slot`
+- `API/subscribe.c` — `s_streams[4]` + `s_rr` cursor; `Subscribe_StreamTick` marks due slots then serves **one per cycle round-robin**; `Subscribe_StreamBps()`; budget guard **sums all slots** via new `other_bps_uart5`/`other_bps_usart3` params
+- `BSP/usart5.c:197` — IRQ length check `(payload_len - 3) % 8`
+- `ground_station/livewatch/stream.py` — `MAX_SLOTS`, `MultiStreamDecoder`, `stream_bps`, `StreamSchema.slot/.data_frame_type`
+- `ground_station/livewatch/stream_log.py` — `--group "RATE:sym:N,sym:N"` (up to 4), one CSV per slot
+- **373 tests pass.** Plus `API/tests/test_subscribe_harness.c` — compiles the real firmware C with gcc `-m32` and asserts the scheduler: 80 ticks → exactly 10 slow-slot + 70 fast-slot frames, one per tick, gap-free per-slot sequences, busy-DMA skips cleanly. Run via `ground_station/livewatch/tests/test_subscribe_c.py`.
+
+**Protocol v2 — FLASHED 2026-07-29 (rode along with the DMA race fix above); NOT yet verified on hardware**: data frames now carry a 4-byte source timestamp (`xTaskGetTickCount`, ms) and a CRC16-CCITT trailer instead of CRC8 XOR. Frame overhead 7 → 12 B (`SUBSCRIBE_STREAM_FRAME_OVERHEAD`). CSV columns are now `t_src_ms, t_host_s, seq, ...`. Host `decode_schema` now REFUSES a schema echoing a range that was not requested — closes the inbound-CRC8 hole where a transposed address byte could log the wrong variable under the right column name. 472 tests green + gcc harness. `Code=81468`, 0 errors. Flashed 2026-07-29 as part of the `Code=81484` image; the drone now runs v2 and `stream_log` should decode correctly, but **no stream has been run against v2 firmware yet** — verify before trusting a log.
+
+**Rejected with evidence**: float16/int16 width reduction. Measured `mrac_state.pitch.Theta[2]` ≈ 8.4e-14 (float16 underflows to 0) and per-sample steps ~2e-5 relative (below float16's ~5e-4 resolution). Memory `project_stream_frame_budget`.
+
+**Not done, deliberately**: raising UART5 baud (42 sites / 18 files incl. the flight dashboard — its own change); delta+keyframes (hold until bandwidth actually binds); downsampling (decide from a flight log, not bench data).
+
+**Open question — RESOLVED**: no power-down needed. `rebuild_and_flash` neutralises `<pMon>` and was validated with the drone powered and streaming.
+
+**Next action (streaming only — the session's live Next action is in the Dashboard Garbage-Telemetry block above)**: to log, edit `ground_station/livewatch/log_frames.md` then
+`python -m ground_station.livewatch.stream_log --seconds 30 --out logs/run.csv`.
+Note the 80 Hz command previously planned here would be REFUSED (4300 B/s vs the 2304 the firmware allows) — 20 Hz is the working figure on UART5.
+
+**Uncommitted**: everything above. Nothing committed this session.
+
+**Optimizations recommended, none implemented** (ranked, user asked what real streaming protocols do):
+1. **Source timestamp in the frame (4 B)** — `t_s` in the CSV is currently *host arrival time*, smeared by USB/OS jitter. Wrong for system identification. Do this first.
+2. **float16 / int16-with-scale per range** — 2× bandwidth, stateless, no loss risk. MAVLink-style.
+3. **CRC-16-CCITT instead of CRC-8 XOR** — XOR misses byte transpositions; corrupt frames can land in the dataset looking plausible.
+4. **Delta + keyframes** — big win, but stateful and dangerous on a lossy link. Hold until the bandwidth wall is actually hit.
+
+**Hardware facts measured this session**: UART5 is **~101% saturated** (11677 B/s of an 11520 B/s cap). Frame rates AFTER the 2026-07-29 DMA race fix are 0x01≈65 Hz, 0x06≈65 Hz, 0x02≈16.3 Hz — the older 53/50/12 Hz figures were measured while ~97 % of Frame B was being corrupted and retransmitted, so they understate the real cadence. Not the 74% recorded before the `usart3_send()` busy-wait fix. Hence `SUBSCRIBE_BUDGET_PCT_UART5 = 20`. **USART3 is physically DISCONNECTED** — the operator cut the wire; COM3 silence is hardware, not firmware. Replacement BLE module (921600, +4 dBm) arrives ~2026-07-31 and is a drop-in for `--transport usart3`.
+
+**Gotcha**: `SymbolResolver` does NOT bounds-check array indices — `Theta[63]` resolves happily although `MAX_NUM_BASIS` is 6 (`API/mrac.h:85`, NUM_BASIS 4 + 2 control terms). Confirm array lengths from the header.
+
+### MBD Workflow Session (2026-07-28) — PAUSED, still unreviewed
+
+**Plan**: read `.agent_contracts/mbd_workflow/README.md` first — it holds the shared context, safety constraints and verified environment facts. Then `01-sil-gate.md`, `02-probe-free-build.md`, `03-build-budget-gate.md`, `04a-sixdof-trajectory.md`, `04b-gazebo-bringup.md`. Durable decisions are in memory `project_mbd_workflow_plan`.
+
+**Governing principle**: `sim/` is normative for the **algorithm**; firmware is normative for **integration**. A C↔Python mismatch is a suspected firmware bug, investigated every time.
+
+**Agent status at checkpoint** (all five ran in ONE shared worktree, branch `chore/agent-workflow-hardening` — no isolation):
+
+| Spec | Evidence on disk | State |
+|---|---|---|
+| 1 SIL gate | `sil_gate/` | ran |
+| 2 build/flash | `ground_station/flashtool/build_id.py`, `USER/build.log`, `USER/flash.log` | ran |
+| 3 budget gate | `ground_station/build_budget/` | ran |
+| 4a 6-DOF | `sim/plant.py` 137→663 lines, `sim/outer_loops.py`, `sim/trajectories.py` (new) | ran |
+| 4b Gazebo | none | **correctly refused** — 4a's deliverables were absent at 21:56; its report is right, though it wrongly claimed `docs/` doesn't exist (only `docs/requirements.md` is missing) |
+
+**REVIEW DONE (2026-07-29).** All 373 main-tree tests pass; alleged 4a "flaky" tests are seeded and stable (3× green — the earlier failures were mid-edit runs, not seed sensitivity). Verdicts:
+
+| Spec | Verdict | Blocking findings |
+|---|---|---|
+| 1 sil_gate | **ACCEPT** | none; C99 fallback + subprocess design sound, b6bd27b pinned & reachable |
+| 2 flashtool | **REWORK before use — scope: `safe_flash`'s `gate`/`build`/`all` subcommands and `build_id.py` ONLY. This does NOT apply to `python -m ground_station.flashtool.rebuild_and_flash`, which is the working pipeline (4 clean runs) and never calls the defective gate — it imports only `_pMon_neutralised` and `_run_uv4`, verified 2026-08-09.** | (a) `identity_from_elf` compares target `(magic,ctr,epoch,fp)` against `(magic,ctr,0,0)` → `check_identity` can NEVER pass on stamped firmware; (b) identity = `OBJ/.build_counter` file, not the ELF → build-without-flash + custody restore gives false refusal, counter tracks the dir not the ELF; (c) plain `gate` cmd now always fails until a stamped build is flashed (regression — current firmware has no `build_id` symbol); (d) `all` gate-fail path exits without `artifact_custody.restore` → stale-axf hazard it was built to close; (e) unreferenced `build_id[4]` may be stripped by armlink unused-section elimination — needs `--keep` or a reference. Fails **safe** (refuses), never unsafe. pMon neutralisation restores byte-exact; main-tree uvoptx verified intact (`CMSIS_AGDI.dll` still set). |
+| 3 build_budget | **ACCEPT w/ operator step** | baseline seeded from partial `.htm` tail (5 warning identities, Code=80908) — first honest run will fail; reseed from next verified clean build |
+| 4a 6-DOF | **REWORK torque path** | skeleton right (`ω×Iω` present, quaternion, Euler@dt=0.005, tensor once, metrics pure). But: **MRAC/rate loop absent from trajectory lane** — `run_trajectory` wires `OuterLoop→RigidBodyPlant` directly; plant "emulates" the inner loop via hand-tuned fudge constants (`dF_roll_unit=0.005` "slightly larger for clear response", `tau=diff*r*0.25` where comments derive 0.5, `_YAW_TORQUE_PER_UNIT` dimensionally incoherent, dead code: `motor_cmd`, `K_diff`, motor positions, `cg_below_arm_plane` never used). Spec said outer loops sit above `ControlLoop.tick`; trajectories not registered in `scenarios.py`. Thesis metrics from this lane measure a P/PD cascade around a fake rate response, NOT the MRAC drone. |
+| 4b Gazebo | **ACCEPT w/ 1 defect + integration debt** | URDF passes the stated CG trap (inertial origin 0, offset visual-only). NEW defect: motor links add 4×0.030 kg + own inertia at r=0.2 m on top of full measured mass/tensor in body link → Gazebo composite ≈1.416 kg, Izz ≈0.0245 (+65%). Motor masses must be 0 (or body de-massed). Work is UNCOMMITTED in worktree `C:\Users\Acer\Desktop\UAV_lab\wbw-4b-gazebo` (branch `spec/4b-gazebo-bringup`, 0 commits); its `plant.py`/`test_seams.py` = main-tree 4a + additive GazeboPlant probe (clean delta); `metrics.py` identical. |
+
+**COMMITTED (2026-07-29)** on `chore/agent-workflow-hardening`: 4a `bfb68c6` (caveats in message) → sil_gate `565ba5a` → flashtool `9279847` (marked NOT YET USABLE, findings a–e in message) → build_budget `0f947b5` → lane wiring `4d9b795` → 4b `0f65d60` (**motor-mass double-count FIXED**: motor inertials now epsilon 1e-6 kg, new `test_urdf_composite_mass_and_izz_match_measured` pins the lumped composite; jx_fly.urdf regenerated) → `1875706` fix: pytest.ini lacked `build_budget/tests` and tasks.py LANES lacked flashtool+budget (46+59 tests were invisible). **Full suite now 443 green in both runners.** 4b worktree + branch `spec/4b-gazebo-bringup` removed after integration. Working tree now holds ONLY the streaming-session files (subscribe/usart/stream, uvoptx, API/tests/, build/flash logs, scratch.py) — uncommitted, pending the multi-slot flash test. Remaining rework debt: flashtool findings a–e (confined to `safe_flash`'s gate/`build_id`; `rebuild_and_flash` is unaffected and works); 4a torque path (MRAC into trajectory lane); budget baseline reseed after next clean build. `/implement-spec` skill updated 2026-07-29: journal location for flat specs, commit-to-task-branch, uncommitted-prereq handling, flaky-test rule, journal-in-main-tree.
+
+**Done this session besides the specs**: headless Keil build proven working (`Start-Process -Wait -NoNewWindow`, no stdio capture; memory `project_headless_build_unreliable` corrected); `~/.cursor/skills/implement-spec/SKILL.md` gained repo-agnostic worktree isolation (§3a provision gitignored paths discovered via `git check-ignore`, link read-only / **copy** written) + exclusive-resource locking (§3b) + a dependency precondition check in §2.
+
+### Hard constraints still in effect
+
+*   **Flashing needs an explicit operator go-ahead in chat.** Logging runs and livewatch reads do not — see below.
+*   **livewatch stays read-only** — `connect_mode="attach"`, never `write_memory`/`halt`/`reset`.
+*   **livewatch is NOT restricted while the drone is armed or airborne — that is the entire point of it.** Operator policy, 2026-08-09. It has no write path, so it cannot affect flight; the value of this pipeline is a fast debug cycle that reads variables live to catch bugs and anomalies *as they happen*. Do not refuse a live read because the drone is armed. The arming restriction applies to **flashing**, which halts the core.
+*   **One process at a time owns the CMSIS-DAP interface.** SWD + UART5 VCP share one dongle. Concretely: the **running dashboard holds COM6 exclusively** — close it before any serial capture, livewatch attach, or flash, and relaunch it afterwards (`Start-Process .venv\Scripts\python.exe ground_station\gui\dashboard.py`; it spawns 2 PIDs).
+*   **Never invoke UV4 headlessly without neutralising `<pMon>` first** — a bare invocation with the drone powered halted the core on 2026-07-28 (LED off, ESCs beeping). Mechanism now CONFIRMED: `<pMon>BIN\CMSIS_AGDI.dll` claims the probe on project load. Always go through `python -m ground_station.flashtool.rebuild_and_flash`, which wraps `safe_flash._pMon_neutralised()` and was validated against the powered target on 2026-07-29. Do not hand-roll a UV4 launch.
+*   **`USER/flash.log` and `USER/build.log` are STALE — never read them as current state.** Both are untracked leftovers from the 2026-07-28 session, *before* the pipeline existed. `flash.log` ends in `Programming Failed!RDDI-DAP Error` and `build.log` shows `Code=80908`. An agent checking "did the last flash work?" there will wrongly conclude the pipeline is broken. Ground truth for flash results is this file's session log, not those artifacts.
+*   **`OBJ/JX_FLY.axf` must match the flashed image.** A rebuild moved `DroneStatus` 0x20016138→0x200161d8 (160 B). livewatch and the flashtool safety gate both resolve addresses from it — an unflashed rebuild makes the *safety gate itself* read garbage. Tree was restored to the flashed-matching triple; new build kept in the session scratchpad.
+*   **The arm gate is THE safety limit for flashing — do NOT ask the operator about props on every flash.** Operator policy, 2026-08-09: disarmed ⇒ flash; armed ⇒ stop. `rebuild_and_flash` enforces this itself (exit 6), so the check is programmatic, not conversational. Flashing still resets the target and motors can twitch, so props off stays the sensible default — but that is the operator's call, not a question to re-litigate per flash. **Never bypass or weaken the arm gate**; its two-oracle design is in memory `project_headless_build_unreliable`.
+*   **USART3 command dispatch stays UNWIRED — deliberate.** `0x21` requests are accepted on UART5 only. The radio carries the data plane and has no inbound parser, so promoting telemetry to it adds no attack surface. Do not "helpfully" add one.
+*   **`SUBSCRIBE_ADDR_SRAM_LO/HI` must never be defined in the firmware build.** The `#ifndef` guards in `API/subscribe.h` exist so the gcc harness can retarget the allowlist at host memory; defining them in `JX_FLY.uvprojx` would silently widen what a host can ask the drone to read. Guarded by `test_firmware_build_does_not_widen_the_address_allowlist`.
+
+### ADR-0011 Session (2026-07-23)
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Build fix: `USER/JX_FLY.uvprojx` — add `ekf.c` + `calib.c` to API file group | ✅ done → commit `3e1c828` |
+| 2 | Build fix: `TASK/StabilizerTask.c` — remove `static` from `s_cal_trim`/`s_cal_hot` (extern needed by `send_data.c`) | ✅ done → commit `3e1c828` |
+| 3 | Build green: uVision rebuild with 0 errors | ✅ done (69 warnings, all pre-existing) |
+| 4 | v14 free-flight validation | pending → produce flight log with `of.lin_acc_x_mg` for EKF replay tool |
+| 5 | EKF offline replay (`sim/tools/replay_ekf_flight.py`) against v14 flight log | pending |
+| 6 | ADR-0011 build-fix log + ADR status update | ✅ done → docs/adr/ADR-0011-auto-imu-calibration.md |
+
+### Sim Rebuild Session (closed) — 2026-06-23
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | `/grill-with-docs` — package design, plant fidelity, regressor alignment, 6-DOF seam | ✅ done → ADR-0006 + CONTEXT.md |
+| 2 | `/tdd` slice 1 — `plant.py` | ✅ done → 6 tests green (yaw integrator, roll ramp-slope=K, ZOH+N=3 delay, Plant seam, Gazebo stub) |
+| 3 | `/tdd` slice 2 — `reference_model.py` | ✅ done → 7 tests green (firmware-parity Euler recurrence, scalar P=1/2wn, passthrough/1st/2nd, bumpless reset, for_axis factory) |
+| 4 | `/tdd` slice 3 — `adaptive_law.py` + `regressor.py` | ✅ done → 17 tests green (regressor golden-vector parity mrac.c:65-91 + cross-coupling; adaptive law gradient/projection/freeze/deadzone/tanh-sat/perf-recovery LPF, lower-bound=0 firmware quirk, for_axis gains) |
+| 5 | `/tdd` slice 4 — closed-loop wiring (`baseline.py` + `scenarios.py` + `run.py`) | ✅ done → 14 tests green (RatePID parity pid.c ComputePID incl EMin conditional-integ/clamps/u_nom÷mrac_to_mixer; closed-loop runner mrac.c:424-485 unit chain rad/s↔deg/s↔Nm; per-run artifacts ADR-0006 D7). 44 tests total. |
+| 6 | `sim/README.md` + session-end distill | ✅ done → README (two scenarios, unit chain, findings); ADR-0006 D7 artifacts gitignored |
+
+### Sysid Session (closed) — 2026-06-16
+
+Audited firmware (MRAC/leakage/gyro_filter/bypass/FSM clean); fixed Z-axis no-op + OF self-reset; wrote `sysid_analysis.py`; added live FSM-state telemetry (0x03 frame 90→91 B, proto 3→4). See `docs/progress.md` / git history. Deferred: uVision build, SysID safety gates, full Z wiring.
+
+### Known Remaining Issues (future work)
+
+*   **Optical flow XY drift** — `locxPID.FB` / `locyPID.FB` drift ~50 cm over short flights; expected OF sensor behaviour.
+*   **MRAC adaptive weights lost on power cycle** — no EEPROM persistence yet. Future work.
+*   **SysID deferred safety gates (ADR-0004 #2/#3)** — `sysid_abort_condition()` still lacks battery-low, telemetry/OF-stale, and sustained-saturation aborts (no clean `bat_warn`/`of_valid` symbols exist — needs thresholds defined first). Green-zone **hard** boundary (±0.7 m → controlled descent) not implemented; only the soft ±0.5 m → RECOVERY exists. RC dead-man remains final authority. Do before output-injection-ON SysID flights.
+*   **SysID Z-axis not wired** — `SYSID_AXIS_Z` is rejected in `SysID_Start`; full Z excitation needs a `Z_ratePID.Des` injection site + its own altitude/ground-effect abort guards (ADR-0004 #1).
+*   **ADR-0004 doc drift** — dec.7 says 200 Hz (firmware emits the 0x03 ID frame at 100 Hz); no separate `PRECHECK` FSM state (gates run synchronously in `SysID_Start`); manual abort is CMD `0x14` idx6, not `0x0D`. Functionally fine; amend ADR when convenient.
+
+---
+
+## Free Model Routing
+
+When a subtask does not require Claude-level reasoning, offload it to save tokens:
+
+*   /free \[task\] — general purpose free model routing
+*   /free-review — code review via free coder model
+*   /free-translate — Chinese↔English translation
+*   /free-reason — control theory / math analysis
+*   /update-models — refresh the model registry (run weekly)
+
+Model registry: ~/.claude/openrouter\_models.json (auto-updated)  
+Rate limits: 20 req/min, 1000 req/day (with $10+ OpenRouter credits)
+
+---
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+
+*   Before answering architecture or codebase questions, read graphify-out/GRAPH\_REPORT.md for god nodes and community structure
+*   If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+*   After modifying code files in this session, run `python3 -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` to keep the graph current
+
+---
+
+## Multi-Agent Workflow
+
+This project uses a layered agent architecture:
+
+*   **Claude Code** (you): orchestrator, architect, final validator
+*   **Copilot**: execution layer with contract-based delegation to free models
+*   **Free OpenRouter models**: code generation only, no decision authority
+*   **Deterministic checker**: build/lint/test/scope gates, zero LLM cost
+
+### Key files
+
+*   `.agent_scripts/implementer.py` — calls free models with task contracts
+*   `.agent_scripts/checker.py` — deterministic validation gates
+*   `.agent_scripts/log_lesson.py` — structured learning log
+*   `.agent_memory/lessons.jsonl` — accumulated project lessons (read before planning)
+*   `.agent_memory/costs.jsonl` — token/latency tracking per model call
+*   `.agent_contracts/` — task contracts (one per atomic task)
+*   `.agent_reports/` — checker gate reports
+
+### When you receive a complex task
+
+Use the `/orchestrator` skill to decompose and delegate.
+
+### When verifying Copilot's work
+
+Read: contract + checker report + changed files. Verify architectural intent is preserved.
+
+---
+
+## Coding Behavior Guidelines
+
+Extracted from Karpathy's coding behavior principles (forrestchang/andrej-karpathy-skills).
+
+### 1\. Think Before Coding — Surface Confusion
+
+Don't assume. Don't hide confusion.
+
+Before implementing:
+
+*   State your assumptions explicitly. If uncertain, ask.
+*   If multiple interpretations exist, present them — don't pick silently.
+*   If a simpler approach exists, say so. Push back when warranted.
+*   If something is unclear, stop. Name what's confusing. Ask.
+
+### 2\. Simplicity First
+
+Minimum code that solves the problem. Nothing speculative.
+
+*   No features beyond what was asked.
+*   No abstractions for single-use code.
+*   No "flexibility" or "configurability" that wasn't requested.
+*   No error handling for impossible scenarios.
+*   If you write 200 lines and it could be 50, rewrite it.
+
+### 3\. Surgical Changes
+
+Touch only what you must. Clean up only your own mess.
+
+*   Don't "improve" adjacent code, comments, or formatting.
+*   Don't refactor things that aren't broken.
+*   Match existing style, even if you'd do it differently.
+*   If you notice unrelated dead code, mention it — don't delete it.
+*   Every changed line should trace directly to the user's request.
+
+### 4\. Goal-Driven Execution
+
+Define success criteria. Loop until verified.
+
+Transform tasks into verifiable goals. For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+```
+
+Strong success criteria allow independent looping. Weak criteria require constant clarification.
+
+### 5\. Manage the Context Window
+
+*   Read only the files you need for the current task.
+*   Don't re-read files you just wrote — the tool tracks state.
+*   Prefer targeted Grep/Glob over full directory reads.
+*   Summarize long outputs rather than quoting them wholesale.
+
+---
+
+## Knowledge Stack
+
+| Layer | Tool | Query method |
+| --- | --- | --- |
+| Code search | CocoIndex | `ccc search "query"` |
+| Code graph | Graphify | Read `graphify-out/GRAPH_REPORT.md` |
+| Knowledge wiki | LLM Wiki | `/wiki` or read `wiki/index.md` |
+| Project wiki | Project Wiki | `/project-wiki` for architecture questions |
+| Decisions | decisions.md | Read `docs/decisions.md` |
+| Interfaces | interfaces.md | Read `docs/interfaces.md` |
+| Lessons | lessons.jsonl | Read `.agent_memory/lessons.jsonl` |
+
+### Query priority
+
+```
+1. ccc search      → exact code locations ("where is X?")
+2. GRAPH_REPORT.md → system dependencies ("what depends on X?")
+3. wiki/           → conceptual understanding ("why was X designed this way?")
+4. docs/decisions.md → architectural choices ("what was decided about X?")
+5. docs/interfaces.md → cross-subsystem contracts
+6. .agent_memory/lessons.jsonl → past task learnings
+```
+
+### Adding knowledge
+
+Drop sources in `raw/`, then run `/wiki` to ingest.
+
+### After wiki updates
+
+Run `/free-graphify` to re-index wiki pages in the knowledge graph.  
+Sync to Obsidian: `python3 scripts/sync_obsidian.py`
+
+---
+
+## Wiki
+
+This project has an LLM wiki at `wiki/`. Consult `wiki/index.md` for questions about concepts, architecture, and design decisions. Keep the wiki updated when knowledge evolves.
