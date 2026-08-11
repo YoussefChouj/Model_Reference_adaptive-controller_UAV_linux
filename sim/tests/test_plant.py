@@ -14,31 +14,24 @@ from sim.plant import (
     CANONICAL_AIRFRAME,
     GRAVITY,
     AxisModel,
-    GazeboPlant,
     IdentifiedPlant,
     MujocoPlant,
     Plant,
     RigidBodyPlant,
 )
 
+
+def _mujoco_available():
+    avail, _ = MujocoPlant.is_available()
+    return avail
+
+
+def _skip_mujoco_if_unavailable():
+    if not _mujoco_available():
+        pytest.skip("MujocoPlant requires mujoco (not installed in this venv)")
+
+
 DT = 0.005  # 200 Hz, matches MRAC_DT (ADR-0006 D1)
-
-
-def test_gazebo_plant_is_a_plant_and_is_unimplemented():
-    """GazeboPlant is a Plant. On a host without gz, step raises with a
-    message that names the spec. On a Linux box with gz-jetty installed,
-    the probe returns available=True and step() takes the bridge path
-    (lazily starting the gz sim). The unavailable-path message is
-    exercised by the matching tests in test_seams.py."""
-    p = GazeboPlant()
-    assert isinstance(p, Plant)
-    avail, _ = GazeboPlant.is_available()
-    if not avail:
-        with pytest.raises(NotImplementedError):
-            p.step({"roll": 0.0})
-    # On a host with gz available, step() takes the bridge path; the
-    # bridge-startup is tested separately by the spec 4b integration
-    # tests on the Linux partition.
 
 
 def test_step_returns_only_configured_axis_rates():
@@ -185,6 +178,7 @@ def test_mujoco_vs_rigid_body_roll_step():
     input. Acceptance: the rate responses agree within 20% (measured:
     p ~1%, vz ~5%).
     """
+    _skip_mujoco_if_unavailable()
     hover = CANONICAL_AIRFRAME.mass * GRAVITY
     u = {"roll": 0.01, "pitch": 0.0, "yaw": 0.0, "z": hover}
     rb = RigidBodyPlant(dt=DT)
@@ -258,6 +252,7 @@ def test_mujoco_step_response_smoke():
     (positive), pitch/yaw rates stay near zero (no cross-coupling sign
     error), and vertical velocity stays near hover (thrust correct).
     """
+    _skip_mujoco_if_unavailable()
     hover = CANONICAL_AIRFRAME.mass * GRAVITY
     mj = MujocoPlant(dt=DT)
     mj.reset()

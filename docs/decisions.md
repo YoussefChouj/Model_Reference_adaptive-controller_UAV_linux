@@ -124,7 +124,7 @@
 
 - **Topic:** Sim-to-real weight transfer needs *gain* fidelity, not visual/contact fidelity; MuJoCo replaces Gazebo behind the existing `Plant` seam (`MujocoPlant`), `RigidBodyPlant` is retained as the oracle, four-rung ladder (`IdentifiedPlant → MujocoPlant → RigPlant → free flight`).
 - **Full text:** [docs/adr/0012-retire-gazebo-mujoco-plant-ladder.md](adr/0012-retire-gazebo-mujoco-plant-ladder.md).
-- **Status:** Accepted. Amends ADR-0006 D6; supersedes Gazebo half of spec 4b/4c.
+- **Status:** Accepted and **implemented (spec `prior-01-retire-gazebo`, 2026-08-11).** Amends ADR-0006 D6; supersedes Gazebo half of spec 4b/4c.
 
 ## 2026-08-05: ADR-0013 — Scenario-conditioned adaptive priors (proposed)
 

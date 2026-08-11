@@ -166,7 +166,6 @@ CANONICAL_AIRFRAME: Airframe = Airframe(
 # the front-right when looking down. Each motor produces thrust along
 # body +z and a reaction torque about body z. The planar torque arm
 # (roll/pitch) is the horizontal projection of the motor position.
-# This geometry is shared by the analytic and Gazebo plants (spec 4b).
 def motor_positions(airframe: Airframe) -> np.ndarray:
     """Body-frame (x,y,z) motor positions, metres. Shape (4, 3)."""
     r = airframe.r_motor
@@ -276,208 +275,6 @@ class IdentifiedPlant(Plant):
     def canonical(cls, dt: float) -> "IdentifiedPlant":
         """The documented roll/pitch/yaw best estimates (CANONICAL_MODELS)."""
         return cls(dt, dict(CANONICAL_MODELS))
-
-
-class GazeboPlant(Plant):
-    """Gazebo-backed 6-DOF rigid-body plant (spec 4b).
-
-    The :class:`Plant` seam is the contract (ADR-0006 D3/D6). The
-    contractual shape is fixed; the backend is the only thing this
-    spec fills in.
-
-    Bring-up status (2026-07-29): the airframe model is declared
-    (``sim/urdf.py`` emits the URDF from the same ``CANONICAL_AIRFRAME``
-    the analytic plant reads), and the import-time probe confirms
-    that ``sim.plant`` is consistently importable on Windows. The
-    actual bridge to a running Gazebo instance, the per-motor thrust
-    plugin, and the cross-check against the analytic plant run on
-    the developer's dual-boot Linux partition and are not part of
-    this Windows-side leg.
-
-    The probe (:meth:`is_available`) reports whether the simulator
-    is reachable. On Windows it returns ``(False, reason)`` with
-    a clear reason; on the Linux partition with a working Gazebo
-    install, it returns ``(True, "gazebo reachable")``.
-
-    ``step`` and ``reset`` raise ``NotImplementedError`` with a
-    message that points to the spec and the probe, so a caller
-    that mistakenly depends on either method gets a clear handoff
-    rather than a generic stub error.
-    """
-
-    @staticmethod
-    def _probe() -> tuple[bool, str]:
-        """Check whether the Gazebo backend is reachable.
-
-        Returns
-        -------
-        (available, reason)
-            ``available`` is True iff a Gazebo bridge can be imported
-            and a ``gz`` binary is on PATH. ``reason`` is a short
-            human-readable explanation, suitable for a log line or a
-            ``NotImplementedError`` message.
-        """
-        # 1. Working directory assertion: bring-up is destined for the
-        #    Linux partition. On Windows we report it explicitly so the
-        #    operator sees the message in the test log, not a
-        #    "command not found" mystery.
-        import platform
-        if platform.system() == "Windows":
-            return (False,
-                    "Gazebo bring-up is sequenced for the dual-boot "
-                    "Linux partition (spec 4b); no Gazebo install on "
-                    "this host. Importing sim.plant succeeds on Windows "
-                    "by design.")
-        # 2. Optional import of the Gazebo shim. The shim is a
-        #    separate module so its dependencies (e.g. gz-python or
-        #    ros_gz_bridge) are not required to import sim.plant.
-        try:
-            import sim.gazebo_bridge  # type: ignore  # noqa: F401
-        except ImportError as exc:
-            return (False,
-                    f"sim.gazebo_bridge not importable: {exc}. "
-                    f"Install it on the Linux partition.")
-        # 3. The `gz` binary is present on PATH.
-        import shutil
-        if shutil.which("gz") is None and shutil.which("gazebo") is None:
-            return (False,
-                    "Gazebo binaries not on PATH on the Linux side. "
-                    "Install gazebo (or gz) before running GazeboPlant.")
-        return (True, "gazebo reachable")
-
-    @classmethod
-    def is_available(cls) -> tuple[bool, str]:
-        """Public probe: ``(available, reason)``.
-
-        Callers should consult this before relying on
-        :meth:`step` or :meth:`reset`. If ``available`` is False,
-        both methods will raise ``NotImplementedError`` with a
-        message that includes ``reason``.
-        """
-        return cls._probe()
-
-    def __init__(self, dt: float = 0.005,
-                 airframe: Airframe | None = None):
-        # ``__init__`` is intentionally cheap: it does not start
-        # Gazebo, does not require the bridge to be installed, and
-        # does not raise on hosts without the simulator. The seam
-        # contract is that ``step`` returns a state dict; on a host
-        # without Gazebo, that step raises a clear error and the
-        # constructor is still safe to call (e.g. for type
-        # assertions, factory fall-throughs, conditional factory
-        # dispatch). The actual spawn happens on the Linux side.
-        self.dt = dt
-        self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
-        self._available, self._reason = self._probe()
-        # The bridge is lazily constructed on the first step() call so
-        # that the constructor remains cheap and safe on hosts without
-        # Gazebo (the probe path is the offline behaviour).
-        self._bridge: object | None = None
-
-    def step(self, u: dict) -> dict:
-        if not self._available:
-            raise NotImplementedError(
-                f"GazeboPlant.step: simulator unavailable ({self._reason}). "
-                f"See spec 4b in .agent_contracts/mbd_workflow/04b-gazebo-bringup.md."
-            )
-        # Convert per-axis mixer-unit commands to per-motor thrust in
-        # newtons, then forward to the bridge. The bridge returns a
-        # BridgeState; we render it as the state dict that the Plant
-        # seam contract specifies.
-        if self._bridge is None:
-            # Lazy import: keeps Windows import-time clean.
-            from sim.gazebo_bridge import GazeboBridge, GazeboBridgeError
-            try:
-                self._bridge = GazeboBridge()
-            except GazeboBridgeError as exc:
-                raise NotImplementedError(
-                    f"GazeboPlant.step: bridge failed to start ({exc}). "
-                    f"See spec 4b."
-                ) from exc
-        motor_thrusts_N = self._motor_thrusts_from_u(u)
-        state = self._bridge.step(motor_thrusts_N, self.dt)
-        return self._to_state_dict(state, u, motor_thrusts_N)
-
-    def reset(self) -> None:
-        if not self._available:
-            raise NotImplementedError(
-                f"GazeboPlant.reset: simulator unavailable ({self._reason}). "
-                f"Pair with GazeboPlant.step at the same controller tick. "
-                f"See spec 4b in .agent_contracts/mbd_workflow/04b-gazebo-bringup.md."
-            )
-        if self._bridge is not None:
-            self._bridge.reset()
-
-    def _motor_thrusts_from_u(self, u: dict) -> "np.ndarray":
-        """Convert per-axis mixer-unit commands to per-motor thrust (N).
-
-        Mirrors the analytic plant's mixing so the two engines see the
-        same per-motor commands and the cross-check between them is
-        apples-to-apples. The analytic plant's helpers are imported from
-        ``sim.plant`` here to avoid duplicating the mixing math.
-        """
-        # Import the analytic helpers lazily so the Gazebo backend can
-        # be present (gz-jetty installed) even on a host that has chosen
-        # not to pull in scipy. We only need the matrix work.
-        from sim.plant import (  # type: ignore
-            DEFAULT_MRAC_TO_MIXER, CANONICAL_AIRFRAME as _A
-        )
-        # The analytical plant's ``_motor_thrust_to_force_torque`` is
-        # the source of truth for the (mixer_units -> N) conversion. We
-        # use the same coefficient here: at hover, the four motors
-        # produce half the total weight (m*g/4)... in mixer units, the
-        # relationship is simpler. We use the analytic plant's
-        # canonical hover thrust per motor.
-        from sim.plant import _YAW_TORQUE_PER_UNIT  # type: ignore  # noqa: F401
-        thrust_per_motor_hover = _A.thrust_per_motor_hover
-        # Per-axis mixer-unit commands -> per-motor thrust (N).
-        # The analytic plant's ``_mixer_to_motor_commands`` returns
-        # mixer units; we multiply by the hover thrust per motor to
-        # get N. This is exact at hover and consistent at small
-        # deviations -- the same approximation the analytic plant's
-        # cross-check uses.
-        roll_u = float(u.get("roll", 0.0)) * DEFAULT_MRAC_TO_MIXER["roll"]
-        pitch_u = float(u.get("pitch", 0.0)) * DEFAULT_MRAC_TO_MIXER["pitch"]
-        yaw_u = float(u.get("yaw", 0.0)) * DEFAULT_MRAC_TO_MIXER["yaw"]
-        z_u = float(u.get("z", 0.0)) * DEFAULT_MRAC_TO_MIXER["z"]
-        thrust = z_u + thrust_per_motor_hover  # per-motor throttle baseline
-        # Quad-X mixing (matches firmware Compute_Motor).
-        m1 = thrust + roll_u - pitch_u - yaw_u
-        m2 = thrust - roll_u - pitch_u + yaw_u
-        m3 = thrust - roll_u + pitch_u - yaw_u
-        m4 = thrust + roll_u + pitch_u + yaw_u
-        # Translate mixer units -> N: proportional to hover thrust.
-        # The mixer-unit magnitude is bounded by the firmware's
-        # saturation, so the N value is bounded by the same physical
-        # constraint. Use the analytic plant's exact mapping if
-        # available; here we scale by the thrust per motor at hover.
-        # (This is intentionally simple: the cross-check compares the
-        # two engines **at hover** and the thrust coefficients match
-        # exactly. Aggressive regimes are out of scope for the first
-        # agreement test.)
-        import numpy as np
-        return np.array([m1, m2, m3, m4], dtype=float) * thrust_per_motor_hover
-
-    def _to_state_dict(self, state, u: dict, motor_thrusts_N) -> dict:
-        """Render the bridge's ``BridgeState`` into the ``Plant`` seam's
-        ``state_dict`` shape. Adds the mixer-unit command keys that the
-        controller expects to read back so the caller can compare what
-        it sent to what was applied."""
-        import numpy as np
-        return {
-            "x": state.x, "y": state.y, "z": state.z,
-            "vx": state.vx, "vy": state.vy, "vz": state.vz,
-            "phi": state.phi, "theta": state.theta, "psi": state.psi,
-            "q0": state.q0, "q1": state.q1, "q2": state.q2, "q3": state.q3,
-            "p": state.p, "q": state.q, "r": state.r,
-            "vz_body": state.vz_body,
-            "thrust": state.thrust,
-            "motors": np.array(motor_thrusts_N, dtype=float),
-            "U_roll": float(u.get("roll", 0.0)),
-            "U_pitch": float(u.get("pitch", 0.0)),
-            "U_yaw": float(u.get("yaw", 0.0)),
-            "U_z": float(u.get("z", 0.0)),
-        }
 
 
 # ----------------------------------------------------------------------
@@ -631,11 +428,6 @@ class RigidBodyPlant(Plant):
       I * dw/dt + w x (I w) = tau_body                              (rotational)
       q_dot = 0.5 * q * [0; w]                                      (quaternion)
 
-    The Gazebo seam (spec 4b) adds an explicit NED↔ENU adapter so the
-    firmware's NED convention and the analytic plant's ENU convention
-    meet at a single boundary; the analytic plant itself never
-    performs a sign flip internally.
-
     Integration: forward Euler at the controller tick (dt = 5 ms default
     so the controller seam is unchanged). A finer plant sub-step is not
     needed at hover-trim — the rotational dynamics are lightly damped
@@ -652,8 +444,8 @@ class RigidBodyPlant(Plant):
     flex are NOT modelled analytically here. They are named as gaps in
     docs/requirements.md (rows under "Known model gaps"). This is by
     design — the analytic plant is the **independent oracle** against
-    which Gazebo (spec 4b) is cross-checked; dragging in those effects
-    would collapse the comparison.
+    which ``MujocoPlant`` (spec 03) is cross-checked; dragging in those
+    effects would collapse the comparison.
     """
 
     def __init__(self, dt: float = 0.005,
@@ -942,18 +734,19 @@ class MujocoPlant(Plant):
     interchangeable at the seam.
 
     Default configuration matches the canonical airframe and the
-    identified motor time constant (25 ms). The transport delay
-    ``thrust_delay_s`` defaults to 0; ADR-0012 D6 requires it for any
-    plant used to learn priors — set it explicitly (e.g. 0.015 s for
-    roll, 0.012 s for pitch, 0 for yaw) when adapting the plant for
-    prior learning.
+    identified motor time constant (25 ms). The MJCF is generated
+    programmatically from the bridge config (no external file needed);
+    pass ``model_xml`` to load from file when prior-03 authors the
+    validated ``sim/models/jx_fly/jx_fly_mujoco.xml``. The transport
+    delay ``thrust_delay_s`` defaults to 0; ADR-0012 D6 requires it for
+    any plant used to learn priors — set it explicitly when adapting.
     """
 
     def __init__(self, dt: float = 0.005,
                  airframe: Optional[Airframe] = None,
                  thrust_delay_s: float = 0.0,
                  motor_tau: float = DEFAULT_MOTOR_TAU,
-                 model_xml: str = "sim/models/jx_fly/jx_fly_mujoco.xml"):
+                 model_xml: str | None = None):
         if not _HAS_MUJOCO_BRIDGE:
             raise RuntimeError(
                 "MujocoPlant: sim.mujoco_bridge is not importable.")

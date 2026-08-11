@@ -4,7 +4,6 @@ from __future__ import annotations
 import yaml
 import pytest
 
-from sim.runner import _command_at
 from sim.scenarios_yaml import (
     MagnitudeSpec,
     Scenario,
@@ -12,6 +11,28 @@ from sim.scenarios_yaml import (
     scenario_to_dict,
     validate_scenario,
 )
+
+
+def _command_at(scenario: Scenario, t: float, u_max: float = 1.0) -> dict:
+    """Evaluate a scenario's command + active disturbances at time t.
+
+    Mirrors the behaviour that ``sim/runner.py`` previously provided; inlined
+    here since the runner module was deleted (ADR-0012 D1).
+    """
+    raw = scenario.command(t) if callable(scenario.command) else dict(scenario.command)
+    command: dict[str, float] = {}
+    for axis, val in raw.items():
+        if isinstance(val, dict):
+            command[axis] = float(val.get("value", 0.0))
+        else:
+            command[axis] = float(val)
+    for disturbance in scenario.disturbances:
+        if t >= float(disturbance["start_s"]):
+            axis = str(disturbance["axis"])
+            mag = disturbance["magnitude"]
+            resolved = MagnitudeSpec(mag).resolve(u_max)
+            command[axis] = command.get(axis, 0.0) + resolved
+    return command
 
 
 @pytest.mark.parametrize("name", ["hover", "step_roll"])

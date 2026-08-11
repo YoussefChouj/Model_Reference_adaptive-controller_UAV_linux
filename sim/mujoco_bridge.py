@@ -1,10 +1,16 @@
-"""MuJoCo bridge — load MJCF, drive the model in-process, expose state.
+"""MuJoCo bridge — generate MJCF, drive the model in-process, expose state.
 
 This module is the lowest layer under :class:`sim.plant.MujocoPlant`.
 It owns the ``mujoco.MjModel`` / ``mujoco.MjData`` pair, converts
 firmware u-commands (per-axis body-rate setpoints + total thrust) into
 per-motor thrust forces, applies them at the correct body-frame
 motor positions, and steps the simulator.
+
+The MJCF is **generated programmatically** from the bridge config rather
+than loaded from a file. ``prior-03`` will author a validated
+``sim/models/jx_fly/jx_fly_mujoco.xml`` from physical measurement; when
+that lands, callers can pass ``model_xml="sim/models/jx_fly/jx_fly_mujoco.xml"``
+to override. Until then the self-contained programmatic MJCF is used.
 
 Design points (ADR-0012 D6/D7):
 
@@ -42,7 +48,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-import platform
 from typing import Optional
 
 import numpy as np
@@ -104,8 +109,58 @@ class MujocoBridgeConfig:
     # axes; the MujocoPlant applies it on per-motor thrust so the
     # delay budget is consistent across plants.
     thrust_delay_s: float = 0.0
-    # MJCF path (relative to repo root).
-    model_xml: str = "sim/models/jx_fly/jx_fly_mujoco.xml"
+    # MJCF path. Pass None (default) to generate MJCF programmatically.
+    # Pass a path to load from file when prior-03 authors the validated
+    # sim/models/jx_fly/jx_fly_mujoco.xml.
+    model_xml: str | None = None
+
+
+def _generate_mjcf(cfg: MujocoBridgeConfig) -> str:
+    """Build a minimal MJCF string from bridge config.
+
+    Generates a self-contained freejoint airframe with 4 motor bodies at
+    the X-frame positions. No external asset required; prior-03 will
+    replace this with the measured ``jx_fly_mujoco.xml`` once authored.
+    """
+    m = cfg.mass
+    Ixx, Iyy, Izz = cfg.Ixx, cfg.Iyy, cfg.Izz
+    r = cfg.r_motor
+    g = GRAVITY
+
+    # X-frame motor positions (body frame, metres).
+    # M1: front-right (+r, +r), M2: rear-right (-r, +r),
+    # M3: rear-left  (-r, -r), M4: front-left  (+r, -r).
+    motors = [
+        ( r,  r, 0.0, "m1"),
+        (-r,  r, 0.0, "m2"),
+        (-r, -r, 0.0, "m3"),
+        ( r, -r, 0.0, "m4"),
+    ]
+
+    motor_bodies = ""
+    for mx, my, mz, name in motors:
+        motor_bodies += f"""
+    <body name="{name}" pos="{mx} {my} {mz}">
+      <freejoint/>
+    </body>
+"""
+
+    return f"""<mujoco model="jx_fly_programmatic">
+  <option timestep="{cfg.dt}" integrator="Euler">
+    <flag gravity="enable"/>
+  </option>
+  <worldbody>
+    <light diffuse=".8 .8 .8" pos="0 0 3" dir="0 0 -1"/>
+    <body name="airframe" pos="0 0 0" mocap="true">
+      <freejoint/>
+      <inertial pos="0 0 0" mass="{m}" fullinertia="1 1 1 {Ixx} {Iyy} {Izz}"/>
+      <!-- CG below thrust plane: creates roll/pitch moment when tilted -->
+      <geom type="sphere" size="0.05" pos="0 0 {CG_BELOW_ARM_PLANE}" rgba=".2 .2 .8 .1" contype="0" conaffinity="0"/>
+{motor_bodies}
+    </body>
+  </worldbody>
+</mujoco>
+"""
 
 
 # ----------------------------------------------------------------------
@@ -169,22 +224,27 @@ class MujocoBridge:
                 "MujocoBridge: mujoco is not installed in this venv. "
                 "Install mujoco to use MujocoPlant.")
         self.cfg = cfg or MujocoBridgeConfig()
-        # Resolve the XML path relative to the repo root (cwd at run).
-        xml_path = self.cfg.model_xml
-        if not os.path.isabs(xml_path):
-            xml_path = os.path.abspath(xml_path)
-        if not os.path.exists(xml_path):
-            raise FileNotFoundError(
-                f"MujocoBridge: MJCF not found at {xml_path!r}. "
-                f"Expected sim/models/jx_fly/jx_fly_mujoco.xml.")
-        self.model = mujoco.MjModel.from_xml_path(xml_path)
+        # Load MJCF: from file if path given, else generate programmatically.
+        xml_arg: str
+        if self.cfg.model_xml is not None:
+            xml_path = self.cfg.model_xml
+            if not os.path.isabs(xml_path):
+                xml_path = os.path.abspath(xml_path)
+            if not os.path.exists(xml_path):
+                raise FileNotFoundError(
+                    f"MujocoBridge: MJCF not found at {xml_path!r}.")
+            with open(xml_path, "r", encoding="utf-8") as fh:
+                xml_arg = fh.read()
+        else:
+            xml_arg = _generate_mjcf(self.cfg)
+        self.model = mujoco.MjModel.from_xml_string(xml_arg)
         self.data = mujoco.MjData(self.model)
         # Per-motor delay buffer (D6).
         self._delay = _MotorDelayBuffer(self.cfg.thrust_delay_s, self.cfg.dt)
         # 1st-order motor LPF state (4-vector, N).
         self._motor_lpf = np.zeros(4)
         self._alpha = self.cfg.dt / (self.cfg.motor_tau + self.cfg.dt)
-        # Cached body id (airframe body is the only non-world body).
+        # Cached body ids.
         self._airframe_body = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_BODY, "airframe")
         if self._airframe_body < 0:

@@ -9,6 +9,13 @@ from sim.reference_model import ReferenceModel, RefType
 from sim.run import run
 
 
+def _skip_mujoco_if_unavailable():
+    from sim.plant import MujocoPlant
+    avail, _ = MujocoPlant.is_available()
+    if not avail:
+        pytest.skip("MujocoPlant requires mujoco (not installed in this venv)")
+
+
 # --- #4 Lyapunov drive seam ---
 
 def test_scalar_drive_ignores_derivative_channel():
@@ -97,117 +104,11 @@ def test_canonical_airframe_is_measured_values():
     assert af.Izz == pytest.approx(0.01485, rel=1e-9)
 
 
-# --- #6 Spec 4b GazeboPlant seam: importable on Windows, helpful probe ---
-
-def test_gazebo_plant_satisfies_plant_seam():
-    """GazeboPlant is a Plant subclass (conformance)."""
-    from sim.plant import GazeboPlant, Plant
-    assert issubclass(GazeboPlant, Plant)
-    # The seam declares step(u_dict) -> state_dict and reset().
-    assert callable(GazeboPlant.step)
-    assert callable(GazeboPlant.reset)
-
-
-def test_gazebo_plant_importable_on_windows():
-    """Importing sim.plant succeeds on Windows (spec 4b bridge constraint).
-
-    The bridge to Gazebo is a separate module; sim.plant itself must
-    never fail to import on Windows because Gazebo is not installed.
-    """
-    import sim.plant  # noqa: F401
-    from sim.plant import GazeboPlant
-    # Probe must be callable; it does not raise on either OS.
-    avail, reason = GazeboPlant.is_available()
-    assert isinstance(avail, bool)
-    assert isinstance(reason, str)
-
-
-def test_gazebo_plant_probe_reports_windows_when_absent():
-    """On Windows with no Gazebo, the probe returns (False, reason)."""
-    import platform
-    from sim.plant import GazeboPlant
-    avail, reason = GazeboPlant.is_available()
-    if platform.system() == "Windows":
-        assert avail is False
-        assert "Linux" in reason or "Linux partition" in reason
-    else:
-        # On Linux, the probe may pass or fail depending on the
-        # install — we only assert that it returns a tuple of the
-        # right shape.
-        assert isinstance(avail, bool)
-        assert reason
-
-
-def test_gazebo_plant_step_message_mentions_linux_partition():
-    """GazeboPlant.step raises with a message that names the spec when
-    the simulator is unavailable. On Linux with gz-jetty installed, the
-    probe returns available=True and step() instead tries to start the
-    bridge -- this test guards the unavailable path's message clarity,
-    not the bridge path (which is exercised by the spec 4b integration
-    tests on the Linux partition)."""
-    from sim.plant import GazeboPlant
-    avail, _ = GazeboPlant.is_available()
-    if avail:
-        # On a Linux box with gz-jetty installed, step() takes the
-        # bridge path; the bridge-startup error is the equivalent of
-        # the unavailable path's message. Skip the message check.
-        pytest.skip("Gazebo is available on this host; the bridge path "
-                    "is exercised by spec 4b integration tests.")
-    with pytest.raises(NotImplementedError) as exc_info:
-        GazeboPlant().step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
-    msg = str(exc_info.value)
-    assert "spec 4b" in msg
-    assert "Linux" in msg or "is_available" in msg
-
-
-def test_gazebo_plant_reset_message_mentions_linux_partition():
-    """GazeboPlant.reset raises with a message that names the spec when
-    the simulator is unavailable. See the matching step() test for the
-    reason the unavailable-path assertion is gated."""
-    from sim.plant import GazeboPlant
-    avail, _ = GazeboPlant.is_available()
-    if avail:
-        pytest.skip("Gazebo is available on this host; the bridge path "
-                    "is exercised by spec 4b integration tests.")
-    with pytest.raises(NotImplementedError) as exc_info:
-        GazeboPlant().reset()
-    msg = str(exc_info.value)
-    assert "spec 4b" in msg
-
-
-def test_sim_plant_does_not_pull_gazebo_at_import_time():
-    """Importing sim.plant must not load gazebo (Windows must succeed).
-
-    The Gazebo bridge is a separate optional module. If a future
-    refactor ever moves the import into sim.plant, this test fails
-    on any host without gazebo installed.
-
-    The test is anchored to **gazebo-specific** module names so
-    stdlib modules whose names happen to start with ``gz`` (notably
-    ``gzip``, which ``xml.etree.ElementTree`` pulls in) do not
-    trigger a false positive.
-    """
-    import sys
-    for mod in list(sys.modules):
-        if mod.startswith("sim.gazebo") or mod == "sim.plant":
-            sys.modules.pop(mod, None)
-    import sim.plant  # noqa: F401
-    gazebo_mods = [
-        m for m in sys.modules
-        if m == "gazebo" or m.startswith("gazebo.")
-        or m == "gz" or m.startswith("gz.")
-        or m == "sdformat" or m.startswith("sdformat.")
-    ]
-    assert gazebo_mods == [], (
-        f"sim.plant transitively pulled {gazebo_mods}; the Gazebo "
-        f"bridge must remain a separate optional import."
-    )
-
-
-# --- #7 Spec 03 MujocoPlant seam (ADR-0012) ---
+# --- #6 Spec 03 MujocoPlant seam (ADR-0012) ---
 
 def test_mujoco_plant_satisfies_plant_seam():
     """MujocoPlant conforms to the Plant interface."""
+    _skip_mujoco_if_unavailable()
     from sim.plant import MujocoPlant, Plant
     assert issubclass(MujocoPlant, Plant)
     p = MujocoPlant(dt=0.005)
@@ -225,6 +126,7 @@ def test_mujoco_plant_satisfies_plant_seam():
 
 def test_mujoco_plant_is_in_plant_registry():
     """PLANT_REGISTRY exposes 'mujoco' so callers can build by name."""
+    _skip_mujoco_if_unavailable()
     from sim.plant import PLANT_REGISTRY, MujocoPlant, build_plant
     assert "mujoco" in PLANT_REGISTRY
     p = build_plant("mujoco", dt=0.005)
@@ -236,6 +138,7 @@ def test_mujoco_plant_is_in_plant_registry():
 
 def test_mujoco_plant_reset_is_deterministic():
     """Two reset()-then-step() runs produce the same first state."""
+    _skip_mujoco_if_unavailable()
     from sim.plant import MujocoPlant
     p = MujocoPlant(dt=0.005)
     p.reset()

@@ -1,4 +1,4 @@
-"""YAML experiment scenarios for the Gazebo runner (spec 4c)."""
+"""YAML experiment scenarios for the plant-agnostic runner."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
