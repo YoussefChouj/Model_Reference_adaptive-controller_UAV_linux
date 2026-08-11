@@ -171,3 +171,35 @@ def test_reset_then_step_is_deterministic():
     s2 = b2.step({"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 12.71})
     for k in ("p", "q", "r", "vz", "x", "y", "z", "phi", "theta", "psi"):
         assert s1[k] == pytest.approx(s2[k], abs=1e-9)
+
+
+def test_plant_is_available_contract_unified():
+    """Every concrete ``Plant`` reports ``(bool, str)`` and matches the
+    documented contract; ``MujocoPlant`` delegates to ``MujocoBridge``.
+
+    This is the spec-4a contract: a caller holding a polymorphic
+    ``Plant`` reference can probe any subclass by name without knowing
+    whether the backend is optional. ``MujocoPlant`` skips when the
+    mujoco wheel is absent from the venv.
+    """
+    from sim.plant import IdentifiedPlant, MujocoPlant, Plant, RigidBodyPlant
+
+    # Plant ABC exposes is_available as an abstract static method.
+    assert "is_available" in Plant.__abstractmethods__, (
+        "Plant.is_available must be an abstract method on the seam"
+    )
+
+    # Always-available plants return their documented (True, reason) tuple.
+    assert IdentifiedPlant.is_available() == (True, "identified rate-loop model")
+    assert RigidBodyPlant.is_available() == (True, "analytic 6-DOF rigid body")
+
+    # Backend-dependent plant delegates to its backend probe.
+    bridge_avail, _ = MujocoBridge.is_available()
+    if bridge_avail:
+        assert MujocoPlant.is_available() == MujocoBridge.is_available()
+    else:
+        # mujoco missing in this venv — the thin delegate still returns a
+        # (bool, str) tuple with the documented unavailable reason.
+        avail, reason = MujocoPlant.is_available()
+        assert avail is False
+        assert isinstance(reason, str) and reason

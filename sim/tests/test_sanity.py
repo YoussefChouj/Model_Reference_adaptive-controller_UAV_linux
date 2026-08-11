@@ -36,6 +36,10 @@ class _StubPlant(Plant):
         out["vz"] = 2.0 * float(u.get("z", 0.0))
         return out
 
+    @staticmethod
+    def is_available() -> tuple[bool, str]:
+        return (True, "stub plant")
+
 
 def test_canonical_identified_plant_passes_within_tolerance():
     plant = IdentifiedPlant.canonical(DT)

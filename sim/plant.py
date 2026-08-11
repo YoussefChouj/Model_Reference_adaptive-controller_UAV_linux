@@ -40,11 +40,11 @@ try:  # the mujoco bridge is always present in this repo (mujoco 3.x wheel)
         MujocoBridge,
         MujocoBridgeConfig,
     )
-    _HAS_MUJOCO_BRIDGE = True
+    _HAS_MUJOCO_BRIDGE_IMPORT = True
 except Exception:  # pragma: no cover - bridge module is required, not optional
     MujocoBridge = None  # type: ignore
     MujocoBridgeConfig = None  # type: ignore
-    _HAS_MUJOCO_BRIDGE = False
+    _HAS_MUJOCO_BRIDGE_IMPORT = False
 
 # axis command key -> firmware body-rate output key
 _RATE_KEY = {"roll": "p", "pitch": "q", "yaw": "r", "z": "vz"}
@@ -190,6 +190,15 @@ class Plant(ABC):
     has. The widening is **not** a parallel seam — it is the same seam
     carrying more state, so swapping ``IdentifiedPlant`` for
     ``RigidBodyPlant`` is a one-line change at the runner.
+
+    Spec 4a also adds :meth:`is_available` as an abstract static probe
+    so a caller that polymorphically holds a ``Plant`` reference can
+    ask the concrete subclass whether its backend is usable (e.g. the
+    MuJoCo wheel is installed in this venv) without knowing the
+    subclass name. Always-available plants
+    (``IdentifiedPlant``, ``RigidBodyPlant``) report
+    ``(True, "<reason>")``; backend-dependent plants delegate to their
+    backend (e.g. ``MujocoPlant`` -> ``MujocoBridge.is_available()``).
     """
 
     @abstractmethod
@@ -207,6 +216,17 @@ class Plant(ABC):
     @abstractmethod
     def reset(self) -> None:
         """Restore deterministic initial state (zero state)."""
+
+    @staticmethod
+    @abstractmethod
+    def is_available() -> tuple[bool, str]:
+        """Return ``(available, reason)`` for this Plant's backend.
+
+        Every concrete :class:`Plant` implements this. Always-available
+        plants return ``(True, "<reason>")``; backend-dependent plants
+        (e.g. :class:`MujocoPlant`) delegate to the backend probe
+        (:meth:`MujocoBridge.is_available`).
+        """
 
 
 class _AxisSim:
@@ -275,6 +295,11 @@ class IdentifiedPlant(Plant):
     def canonical(cls, dt: float) -> "IdentifiedPlant":
         """The documented roll/pitch/yaw best estimates (CANONICAL_MODELS)."""
         return cls(dt, dict(CANONICAL_MODELS))
+
+    @staticmethod
+    def is_available() -> tuple[bool, str]:
+        """Pure-numpy linear plants have no external backend."""
+        return (True, "identified rate-loop model")
 
 
 # ----------------------------------------------------------------------
@@ -706,6 +731,11 @@ class RigidBodyPlant(Plant):
             "U_yaw": U_yaw, "U_z": U_z,
         }
 
+    @staticmethod
+    def is_available() -> tuple[bool, str]:
+        """Pure-numpy analytic dynamics; no external backend."""
+        return (True, "analytic 6-DOF rigid body")
+
 
 def _quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
     """Hamilton product of two scalar-first quaternions."""
@@ -747,7 +777,7 @@ class MujocoPlant(Plant):
                  thrust_delay_s: float = 0.0,
                  motor_tau: float = DEFAULT_MOTOR_TAU,
                  model_xml: str | None = None):
-        if not _HAS_MUJOCO_BRIDGE:
+        if not _HAS_MUJOCO_BRIDGE_IMPORT:
             raise RuntimeError(
                 "MujocoPlant: sim.mujoco_bridge is not importable.")
         self.dt = dt
@@ -774,13 +804,13 @@ class MujocoPlant(Plant):
     def is_available() -> tuple[bool, str]:
         """Probe whether the MuJoCo backend is reachable.
 
-        Returns ``(available, reason)``. Callers should consult this
-        before relying on :meth:`step`; on a host without ``mujoco``
-        installed, ``step`` raises a clear error.
+        Thin delegate to :meth:`MujocoBridge.is_available`. The single
+        error message ("mujoco is not installed in this venv") matches
+        the bridge's so a caller holding a :class:`Plant` reference gets
+        the same wording as a caller probing the bridge directly.
         """
-        if not _HAS_MUJOCO_BRIDGE:
-            return (False,
-                    "sim.mujoco_bridge is not importable (mujoco missing?)")
+        if not _HAS_MUJOCO_BRIDGE_IMPORT:
+            return (False, "mujoco is not installed in this venv")
         return MujocoBridge.is_available()
 
     def reset(self) -> None:

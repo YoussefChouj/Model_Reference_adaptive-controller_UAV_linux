@@ -280,3 +280,20 @@ def test_mujoco_step_response_smoke():
     assert max(abs(s["r"]) for s in step) < 1e-6
     # Thrust holds hover: vertical velocity stays near zero.
     assert max(abs(s["vz"]) for s in step) < 0.01
+
+
+def test_identified_and_rigid_body_plant_is_available_contract():
+    """The two always-available ``Plant`` implementations return their
+    documented (True, reason) tuples via the new ``Plant.is_available``
+    abstract contract (spec 4a widening).
+    """
+    assert IdentifiedPlant.is_available() == (True, "identified rate-loop model")
+    assert RigidBodyPlant.is_available() == (True, "analytic 6-DOF rigid body")
+
+
+def test_plant_abc_declares_is_available():
+    """The ``Plant`` seam makes ``is_available`` abstract so a caller
+    holding a polymorphic ``Plant`` reference can probe any subclass
+    without knowing the concrete type.
+    """
+    assert "is_available" in Plant.__abstractmethods__
