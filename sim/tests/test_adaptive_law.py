@@ -17,7 +17,7 @@ import math
 import numpy as np
 import pytest
 
-from sim.adaptive_law import AdaptiveLaw, AxisAdaptiveConfig, AdaptiveFlags
+from sim.adaptive_law import AdaptiveLaw, AxisAdaptiveConfig, AdaptiveFlags, NUM_BASIS
 
 DT = 0.005
 
@@ -272,3 +272,123 @@ def test_sigma_prior_flag_off_with_nonzero_sigma_prior_and_prior_array_is_bit_id
     np.testing.assert_allclose(law_off.Theta, np.zeros(6), atol=1e-12)
     # Flag on -> weights converge toward prior.
     assert abs(law_on.Theta[0] - prior[0]) < 0.01
+
+
+# ----------------------------------------------------------------------
+# spec-11: learning vs deployment envelope
+# ----------------------------------------------------------------------
+
+def test_for_deployment_is_default_envelope():
+    """``for_deployment()`` is the default; ``for_axis()`` must return the
+    same object so every existing call site is unchanged."""
+    for axis in ("pitch", "roll", "yaw", "z"):
+        dep = AxisAdaptiveConfig.for_deployment(axis)
+        old = AxisAdaptiveConfig.for_axis(axis)
+        assert dep.envelope == "deployment"
+        assert old.envelope == "deployment"
+        assert list(dep.gamma) == list(old.gamma)
+        assert list(dep.What_limit) == list(old.What_limit)
+        assert dep.e_deadzone == 0.05
+
+
+def test_for_learning_relaxes_deadzone_to_noise_floor():
+    """Learning envelope deadzone = 2*σ_noise = 0.01 rad/s, not zero.
+
+    The Ioannou & Sun bursting constraint forbids e_deadzone=0.
+    0.01 rad/s = 2× the measured ~0.005 rad/s gyro-noise RMS on the
+    identified plant — traceable to a measurement, not a tuned constant.
+    """
+    for axis in ("pitch", "roll", "yaw", "z"):
+        cfg = AxisAdaptiveConfig.for_learning(axis)
+        assert cfg.envelope == "learning"
+        assert cfg.e_deadzone == pytest.approx(
+            2.0 * AxisAdaptiveConfig._LEARNING_SIGMA_NOISE,
+            rel=0, abs=1e-12)
+        assert cfg.e_deadzone < 0.05   # meaningfully lower than deployment
+        assert cfg.e_deadzone > 0.0    # not zero (bursting constraint)
+
+
+def test_for_learning_widens_What_limits_5x():
+    """Learning envelope What_limit = 5× deployment, projection stays active."""
+    for axis in ("pitch", "roll"):
+        dep = AxisAdaptiveConfig.for_deployment(axis)
+        lrng = AxisAdaptiveConfig.for_learning(axis)
+        for i in range(NUM_BASIS):
+            assert lrng.What_limit[i] == pytest.approx(
+                dep.What_limit[i] * 5.0, rel=1e-9)
+            # Symmetric lower bound (deployment only unlocks slot 0)
+            assert lrng.What_lower_limit[i] == pytest.approx(
+                -lrng.What_limit[i], rel=1e-9)
+
+
+def test_for_learning_symmetric_lower_limits_on_all_slots():
+    """Deployment unlocks slot 0 only; learning unlocks all slots symmetrically.
+    This is what lets slots 1-5 explore in both directions during learning."""
+    for axis in ("pitch", "roll"):
+        dep = AxisAdaptiveConfig.for_deployment(axis)
+        lrng = AxisAdaptiveConfig.for_learning(axis)
+        # Deployment: slot 0 has a negative lower bound; slots 1-5 are at 0
+        assert dep.What_lower_limit[0] < 0.0
+        assert all(v == 0.0 for v in dep.What_lower_limit[1:])
+        # Learning: every slot has a symmetric negative bound
+        for i in range(NUM_BASIS):
+            assert lrng.What_lower_limit[i] == pytest.approx(
+                -lrng.What_limit[i], rel=1e-9)
+
+
+def test_deployment_manifest_records_envelope():
+    """Every deployment config carries its envelope name; the manifest requires it."""
+    cfg = AxisAdaptiveConfig.for_deployment("roll")
+    assert cfg.envelope == "deployment"
+    assert isinstance(cfg.theta_final, type(None))  # not yet run
+
+
+def test_learning_config_cannot_be_used_without_explicit_choice():
+    """``for_learning()`` must be called explicitly; there is no silent path to
+    the learning envelope — deployment is always the default."""
+    cfg = AxisAdaptiveConfig.for_axis("roll")
+    assert cfg.envelope == "deployment"
+    cfg_lrng = AxisAdaptiveConfig.for_learning("roll")
+    assert cfg_lrng.envelope == "learning"
+    # These are not the same object
+    assert cfg is not cfg_lrng
+
+
+def test_learning_deadzone_blocks_noise_but_not_small_signal():
+    """With e_deadzone = 0.01, a 0.005 rad/s error (below noise floor)
+    is blocked; a 0.015 rad/s error (above noise floor) is not."""
+    cfg_lrng = AxisAdaptiveConfig.for_learning("roll")
+    flags = AdaptiveFlags()
+    law = AdaptiveLaw(cfg_lrng, flags, dt=DT, perf_recovery=False)
+    phi = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    # Below noise floor: do_adapt is False, weights stay zero
+    law.update(e=0.005, P=1.0, phi=phi)
+    np.testing.assert_allclose(law.Theta, np.zeros(6), atol=1e-15)
+
+    # Above noise floor: weights update
+    law.reset()
+    law.update(e=0.015, P=1.0, phi=phi)
+    assert law.Theta[0] != 0.0
+
+
+def test_learning_envelope_allows_bidirectional_slot1_adaptation():
+    """Under deployment config, slot 1 cannot go negative (lower_limit=0).
+    Under learning config it can, since What_lower_limit is symmetric."""
+    dep_cfg = AxisAdaptiveConfig.for_deployment("roll")
+    lrng_cfg = AxisAdaptiveConfig.for_learning("roll")
+    flags = AdaptiveFlags(projection_on=True)
+    phi = np.array([0.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+
+    law_dep = AdaptiveLaw(dep_cfg, flags, dt=DT, perf_recovery=False)
+    law_lrng = AdaptiveLaw(lrng_cfg, flags, dt=DT, perf_recovery=False)
+
+    # Drive slot 1 negative (positive e -> negative grad -> negative update)
+    for _ in range(5000):
+        law_dep.update(e=1.0, P=1.0, phi=phi)
+        law_lrng.update(e=1.0, P=1.0, phi=phi)
+
+    # Deployment: slot 1 hits lower bound of 0 and stays there
+    assert law_dep.Theta[1] >= -1e-9
+    # Learning: slot 1 goes negative (symmetric lower bound)
+    assert law_lrng.Theta[1] < -0.01

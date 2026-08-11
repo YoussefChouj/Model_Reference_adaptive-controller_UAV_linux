@@ -148,3 +148,23 @@
 - **Reason:** The author has not yet read the primary sources (Chowdhary ICRA 2013, Girard *Mathematics* 2024, Neural-Fly 2022, FAMLE IROS 2020, CDC 2010 + ICL 2019). Resolving framing requires a dedicated grilling session against those papers.
 - **Reading path to resolve the held claims:** [docs/literature-review-findings/SYNTHESIS.md §7](literature-review-findings/SYNTHESIS.md).
 - **Until resolved:** downstreams citing these ADRs should cite the **engineering decisions** (numbered D-numbers) and avoid the held contribution claims in their own write-ups.
+
+## 2026-08-11: Separate the Learning Envelope from the Deployment Envelope (spec `prior-11`)
+
+- **Problem:** One adaptive configuration was doing both jobs — discovering Θ* in simulation and flying it in firmware — and the flight-safety job always won. With `e_deadzone = 0.05` against a well-tuned baseline, adaptation halts within ~0.2 s of disturbance onset. Correcting the bias-weight bounds moved RMSE by only 2–3 %. The envelope, not the bounds, was the limiter.
+- **Evidence:** `prior-00b` (sim parity fix) showed that slot-0 bias unlock improves RMSE ~2–3 % on `disturbance_rejection`, but `e_deadzone = 0.05` still halts adaptation for the rest of the run. Literature review verdict: the split is an engineering heuristic, not a named method. It survives with the explicit argument written in `sim/README.md`.
+- **Chosen fix:** `sim/adaptive_law.py` gets two named constructors:
+  - `for_deployment(axis)` — exact firmware parity, unchanged from `for_axis()`. The default everywhere.
+  - `for_learning(axis)` — permissive, simulation-only. Relaxations (each inline-commented in the source):
+    - `e_deadzone = 0.01 rad/s` = 2 × σ_noise, where σ_noise ≈ 0.005 rad/s is the *measured* gyro-noise RMS on the identified plant. Zero is forbidden by the Ioannou & Sun bursting constraint.
+    - `What_limit` = 5× deployment (projection stays active).
+    - `What_lower_limit` symmetric on all slots (deployment only unlocks slot 0; learning symmetrically unlocks all).
+    - `Γ` not raised — prior-02 (transport-delay wrapper) required first to bound Γ against the real 15 ms delay. A gain that is stable against a delay-free plant can be unstable against the real transport delay.
+- **Files changed:** `sim/adaptive_law.py` (named constructors, `envelope` field), `sim/tests/test_adaptive_law.py` (envelope tests), `sim/run.py` (records `theta_final` and `envelope` in manifest), `sim/experiments.py` (paired learn/deploy sweep + sensitivity sweep), `sim/README.md` (two-envelope paragraph).
+- **Constraints created:**
+  - `envelope` is recorded in every run manifest; a prior learned under the learning envelope and one learned under the deployment envelope are different objects and must never be silently compared.
+  - The learning envelope is simulation-only. It must never be proposed as a firmware config.
+  - `e_deadzone` may not be set below the measured noise floor in either direction. Bursting follows.
+  - `for_axis()` is aliased to `for_deployment()` for backward compatibility; every existing call site is unchanged.
+  - Projection stays on in both envelopes. Relaxing `What_limit` does not remove the operator.
+  - `prior-05` (prior factory + run logging) must record the envelope name alongside each prior.

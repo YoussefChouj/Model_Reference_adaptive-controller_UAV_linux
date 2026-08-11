@@ -16,6 +16,17 @@ Firmware quirk replicated for parity: What_lower_limit is never explicitly set f
 slots 1-5, so those slots default to 0 (weights clipped at 0). Slot 0 is unlocked
 to -What_limit[0] for pitch/roll/yaw to match the asymmetric fix in mrac.c:353-355;
 z keeps slot 0 at 0 to match firmware (z has no bias unlock).
+
+Two named envelopes (spec-11):
+  * Deployment envelope (default, ``for_deployment()``): exact firmware parity.
+    The learning envelope (below) is simulation-only and must never be proposed
+    as a firmware config.
+  * Learning envelope (``for_learning()``): widened What_limit (5×),
+    symmetric lower bounds (all slots unlocked), and a measured-noise-derived
+    deadzone (0.01 rad/s = 2×σ_noise on the identified plant). Gamma is kept
+    at deployment values; raising it against a delay-free plant produces a
+    gain that is unstable when it meets the real 15 ms transport delay.
+    prior-02 must land before any Gamma increase.
 """
 from __future__ import annotations
 
@@ -50,10 +61,18 @@ class AdaptiveFlags:
 
 @dataclass
 class AxisAdaptiveConfig:
-    """Mirrors the adaptive-relevant subset of MRAC_AxisConfig_t (mrac.c MRAC_Init)."""
-    gamma: Sequence[float]
-    What_limit: Sequence[float]
-    What_tol: Sequence[float]
+    """Mirrors the adaptive-relevant subset of MRAC_AxisConfig_t (mrac.c MRAC_Init).
+
+    ``envelope`` records which adaptive configuration produced the stored weights.
+    A prior learned under the learning envelope and one learned under the deployment
+    envelope are different objects and must never be silently compared (ADR-0014 D8).
+    The deployment envelope is the default; ``for_deployment()`` and
+    ``for_learning()`` are the named constructors.
+    """
+    envelope: str = "deployment"    # "deployment" | "learning"
+    gamma: Sequence[float] = field(default_factory=lambda: [1.0] * NUM_BASIS)
+    What_limit: Sequence[float] = field(default_factory=lambda: [0.1] * NUM_BASIS)
+    What_tol: Sequence[float] = field(default_factory=lambda: [0.02] * NUM_BASIS)
     What_lower_limit: Sequence[float] = field(
         default_factory=lambda: [0.0] * NUM_BASIS)  # firmware never sets it -> 0
     sigma: float = 0.01
@@ -69,6 +88,10 @@ class AxisAdaptiveConfig:
     # pre-existing call site bit-identical.
     sigma_prior: float = 0.0
     theta_prior: Optional[np.ndarray] = None
+    # Final learned weights from a completed run. Written by sim/run.py so that
+    # the same config object can be replayed under the deployment envelope.
+    # None until a run completes.
+    theta_final: Optional[np.ndarray] = None
 
     # per-axis firmware defaults (mrac.c:284-368)
     _PR_GAMMA = [1.5, 0.2, 0.05, 0.05, 0.1, 0.1]
@@ -78,33 +101,110 @@ class AxisAdaptiveConfig:
     _Z_WLIM = [1.00, 0.10, 0.05, 0.05, 0.20, 0.20]
     _Z_WTOL = [0.20, 0.02, 0.01, 0.01, 0.04, 0.04]
 
+    # Learning-envelope noise floor for the deadzone derivation.
+    # Measured gyro-noise RMS on the identified plant at hover: ~0.005 rad/s.
+    # k=2 in e_deadzone = k * sigma_noise gives a principled floor that
+    # excludes noise-driven updates without suppressing real error (Ioannou & Sun).
+    _LEARNING_SIGMA_NOISE = 0.005   # rad/s RMS gyro noise (measured)
+    _LEARNING_DEADZONE = 2.0 * _LEARNING_SIGMA_NOISE  # = 0.01 rad/s
+    # Symmetric What_lower_limit for learning (deployment only unlocks slot 0).
+    _LEARNING_WLIM_SCALE = 5.0     # widened bound; projection stays active
+
     @classmethod
-    def for_axis(cls, axis: str) -> "AxisAdaptiveConfig":
+    def for_deployment(cls, axis: str) -> "AxisAdaptiveConfig":
+        """Deployment envelope — exact firmware parity, no relaxation.
+
+        This is the default. A caller that does nothing special gets firmware
+        parity; relaxation is always explicit and visible in the manifest.
+        """
         if axis in ("pitch", "roll"):
             lower = [-cls._PR_WLIM[0]] + [0.0] * (NUM_BASIS - 1)  # slot 0 only (mrac.c:354)
-            return cls(gamma=list(cls._PR_GAMMA), What_limit=list(cls._PR_WLIM),
+            return cls(envelope="deployment",
+                       gamma=list(cls._PR_GAMMA), What_limit=list(cls._PR_WLIM),
                        What_tol=list(cls._PR_WTOL), What_lower_limit=lower,
                        sigma=0.01, sigma_lf=0.8, gam_f=16.0, omega_u=30.0,
                        e_deadzone=0.05, e_freeze=1.2, e_sat=0.5, k_e=0.05)
         if axis == "yaw":
             pr_wlim = cls._PR_WLIM
             lower = [-pr_wlim[0] * 0.6] + [0.0] * (NUM_BASIS - 1)  # slot 0 only (mrac.c:355)
-            return cls(gamma=[1.0, 0.1, 0.05, 0.05, 0.1, 0.1],
+            return cls(envelope="deployment",
+                       gamma=[1.0, 0.1, 0.05, 0.05, 0.1, 0.1],
                        What_limit=[v * 0.6 for v in pr_wlim],
                        What_tol=[v * 0.6 for v in cls._PR_WTOL],
                        What_lower_limit=lower,
                        sigma=0.01, sigma_lf=1.0, gam_f=16.0, omega_u=20.0,
                        e_deadzone=0.05, e_freeze=1.0, e_sat=0.7, k_e=0.05)
         if axis == "z":
-            # z has NO bias unlock in firmware (mrac.c:353-355 only covers pitch/roll/yaw).
-            # Explicitly set all slots to 0.0 to prevent a future reader from
-            # "fixing" this to match the other axes.
-            lower = [0.0] * 6
-            return cls(gamma=list(cls._Z_GAMMA), What_limit=list(cls._Z_WLIM),
+            lower = [0.0] * NUM_BASIS
+            return cls(envelope="deployment",
+                       gamma=list(cls._Z_GAMMA), What_limit=list(cls._Z_WLIM),
                        What_tol=list(cls._Z_WTOL), What_lower_limit=lower,
                        sigma=0.01, sigma_lf=0.0, gam_f=16.0, omega_u=20.0,
                        e_deadzone=0.05, e_freeze=1.2, e_sat=0.4, k_e=0.05)
         raise ValueError(f"unknown axis {axis!r}")
+
+    @classmethod
+    def for_learning(cls, axis: str) -> "AxisAdaptiveConfig":
+        """Learning envelope — permissive configuration for discovering Θ*.
+
+        RELAXATIONS FROM DEPLOYMENT (each carries an inline comment):
+        - e_deadzone: 0.01 rad/s = 2*σ_noise (Ioannou & Sun bursting constraint;
+          the noise floor is ~0.005 rad/s RMS on the identified plant).
+        - What_limit: 5× deployment (projection stays active; a clipped weight
+          is a censored observation, not a converged one).
+        - What_lower_limit: symmetric on all slots (deployment only unlocks slot 0;
+          symmetric bounds let all slots explore freely during learning).
+        - Gamma: kept at deployment values (prior-02 transport-delay wrapper
+          required to bound Gamma empirically against the real 15 ms delay;
+          raising Gamma on a delay-free plant produces a gain that is unstable
+          when it meets the real delay — do not raise without prior-02).
+
+        This envelope is simulation-only. It must never be proposed as a firmware
+        config, and nothing in spec-11 touches API/.
+        """
+        if axis in ("pitch", "roll"):
+            pr_wlim = cls._PR_WLIM
+            # Symmetric lower limit: all slots unlocked for bidirectional exploration
+            lower = [-v * cls._LEARNING_WLIM_SCALE for v in pr_wlim]
+            wlim = [v * cls._LEARNING_WLIM_SCALE for v in pr_wlim]
+            wtol = [v * cls._LEARNING_WLIM_SCALE for v in cls._PR_WTOL]
+            return cls(envelope="learning",
+                       gamma=list(cls._PR_GAMMA),  # not raised: prior-02 needed first
+                       What_limit=wlim, What_tol=wtol, What_lower_limit=lower,
+                       sigma=0.01, sigma_lf=0.8, gam_f=16.0, omega_u=30.0,
+                       # e_deadzone = 2*σ_noise: noise floor, not zero
+                       e_deadzone=cls._LEARNING_DEADZONE,
+                       e_freeze=1.2, e_sat=0.5, k_e=0.05)
+        if axis == "yaw":
+            pr_wlim = cls._PR_WLIM
+            scale = cls._LEARNING_WLIM_SCALE * 0.6
+            lower = [-v * scale for v in pr_wlim]
+            wlim = [v * scale for v in pr_wlim]
+            wtol = [v * scale for v in cls._PR_WTOL]
+            return cls(envelope="learning",
+                       gamma=[1.0, 0.1, 0.05, 0.05, 0.1, 0.1],
+                       What_limit=wlim, What_tol=wtol, What_lower_limit=lower,
+                       sigma=0.01, sigma_lf=1.0, gam_f=16.0, omega_u=20.0,
+                       e_deadzone=cls._LEARNING_DEADZONE,
+                       e_freeze=1.0, e_sat=0.7, k_e=0.05)
+        if axis == "z":
+            z_wlim = cls._Z_WLIM
+            lower = [-v * cls._LEARNING_WLIM_SCALE for v in z_wlim]
+            wlim = [v * cls._LEARNING_WLIM_SCALE for v in z_wlim]
+            wtol = [v * cls._LEARNING_WLIM_SCALE for v in cls._Z_WTOL]
+            return cls(envelope="learning",
+                       gamma=list(cls._Z_GAMMA), What_limit=wlim, What_tol=wtol,
+                       What_lower_limit=lower,
+                       sigma=0.01, sigma_lf=0.0, gam_f=16.0, omega_u=20.0,
+                       e_deadzone=cls._LEARNING_DEADZONE,
+                       e_freeze=1.2, e_sat=0.4, k_e=0.05)
+        raise ValueError(f"unknown axis {axis!r}")
+
+    @classmethod
+    def for_axis(cls, axis: str) -> "AxisAdaptiveConfig":
+        """Alias for ``for_deployment()`` — the original factory, preserved for
+        backward compatibility with every existing call site."""
+        return cls.for_deployment(axis)
 
 
 def _project_gradient(grad, theta, limit, tol, lower):

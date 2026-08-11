@@ -123,6 +123,40 @@ Reproduce the as-flown power-on default (passthrough): `run(sc, ref_model_type=0
   small by design here; the big adaptation wins come from larger plant mismatch
   (try `inertia_offset_*` with a smaller `factor`).
 
+## Two named envelopes: learning vs deployment (spec-11)
+
+A simulation cannot crash. The flight-safety constraints on adaptation do not apply there.
+
+Three mechanisms suppress learning in firmware, each with a flight-safety justification:
+
+| | Flight purpose | Cost when learning |
+|---|---|---|
+| `e_deadzone = 0.05` | stops drift when error is noise | adaptation halts ~0.2 s after onset |
+| `What_limit` | bounds authority | clipped weight = censored observation, not a converged one |
+| `Γ` | bounds aggressiveness | too low to converge inside a run |
+
+One configuration was doing both jobs, and the safety job wins. `for_deployment()`
+returns exact firmware parity (default everywhere). `for_learning()` relaxes:
+
+- `e_deadzone = 0.01 rad/s` — derived from the measured gyro-noise RMS of
+  ~0.005 rad/s on the identified plant (k=2 in `e_deadzone ≈ k·σ_noise`). Zero is
+  forbidden: Ioannou & Sun show that a zero deadzone causes **bursting** (parameter
+  error and tracking error cycle without converging).
+- `What_limit = 5× deployment` — projection stays on; a clipped weight is still
+  a censored observation, so widening the bound lets every slot explore.
+- `What_lower_limit` symmetric on all slots — deployment only unlocks slot 0;
+  learning symmetrically unlocks all slots so slots 1–5 can explore in both
+  directions.
+- `Γ` not raised — prior-02 (transport-delay wrapper) is required first.
+  A gain that is stable against a delay-free plant can be unstable against the
+  real 15 ms delay; raising Γ without prior-02 produces an over-confident prior.
+
+**The learning envelope is simulation-only.** It must never be proposed as a
+firmware config. Every prior is validated under the deployment envelope before it
+counts. The paired experiment (`python -m sim.experiments`) is the key deliverable:
+learn under learning → replay under deployment → report the gap. If the gap is zero,
+priors buy nothing and the programme needs rethinking.
+
 ## 2nd-order state-space matrix-P law (ADR-0007)
 
 For `ref_model_type = 2` (roll/pitch) the scalar `P = 1/(2·wn)` is replaced by the full

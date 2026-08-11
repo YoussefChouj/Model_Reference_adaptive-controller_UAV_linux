@@ -162,8 +162,17 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
         what_lower=config.What_lower_limit,
         e_deadzone=config.e_deadzone if flags.deadzone_on else None,
         e_freeze=config.e_freeze if flags.hard_freeze_on else None)
+
+    # spec-11: record final weights so the same config can be replayed
+    # under the deployment envelope (paired learn/deploy experiment).
+    # Write to the config object so callers get the weights without
+    # pulling them out of the result dict.
+    config.theta_final = theta_hist[-1].copy()
+
     result = {"scenario": scenario.name, "axis": axis, "injection": injection,
-              "dt": dt, "ref_model_type": int(ref.kind), "log": log,
+              "dt": dt, "ref_model_type": int(ref.kind),
+              "envelope": config.envelope,   # spec-11: which envelope produced this run
+              "log": log,
               "theta": theta_hist, "metrics": metrics,
               "acc_trim_b_a": acc_trim.b_a,
               "acc_trim_settled": acc_trim.settled,
@@ -279,6 +288,7 @@ def _report(out: Path, scenario, result: dict) -> None:
         f"- **Axis**: {scenario.axis}",
         f"- **Description**: {scenario.description}",
         f"- **Reference model**: {rt} (type {result.get('ref_model_type')})",
+        f"- **Adaptive envelope**: {result.get('envelope', 'unknown')} (spec-11)",
         f"- **MRAC injection**: {'ON' if result['injection'] else 'OFF (shadow)'}",
         f"- **dt**: {result['dt']} s ({1 / result['dt']:.0f} Hz)",
         f"- **Stable**: **{_fmt(m.get('stable'))}**", "",
