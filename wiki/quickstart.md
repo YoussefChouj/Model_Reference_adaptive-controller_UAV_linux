@@ -133,6 +133,19 @@ See [[SDK Arming State Machine]] and [[Virtual RC Authority]] for details.
 4. docs/interfaces.md → cross-subsystem contracts
 ```
 
+## External Research Tools
+
+When the knowledge stack returns nothing and the agent is looping, Apify MCP is the escape hatch. It gives live web access via thousands of Actors — including YouTube transcript extraction, web scraping, and documentation lookup.
+
+See [[External Research Tools (Apify MCP)]] for the full guide, Actor inventory, and workflow.
+
+Quick decision guide:
+- **Loop/looping/stuck** → run `rag-web-browser` with the question as the query
+- **YouTube video** → `starvibe/youtube-video-transcript`
+- **Fact-check / current data** → `rag-web-browser`
+- **Documentation** → `search-apify-docs` + `fetch-apify-docs`
+- **Need to find a scraper** → `search-actors` with platform name
+
 ## See Also
 
 - [[Project Overview]]

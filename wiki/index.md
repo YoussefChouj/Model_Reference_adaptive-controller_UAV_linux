@@ -48,6 +48,7 @@
 - [Common Pitfalls](concepts/common-pitfalls.md) — Troubleshooting guide for frequent issues
 - [Graphify Doc Extraction Pattern](concepts/graphify-doc-extraction-pattern.md) — Pattern-based extractor replacing copilot-agent; root cause of JSON errors
 - [Knowledge Gate Enforcement](concepts/knowledge-gate-enforcement.md) — PreToolUse hook (exit 2) forcing knowledge stack before Grep/Glob; context watch turn counter
+- [External Research Tools (Apify MCP)](concepts/external-research-tools.md) — Live web access via Apify Actors: when to use, which Actor, workflow, cost, gotchas
 
 ## Entities
 

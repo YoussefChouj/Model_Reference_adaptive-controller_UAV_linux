@@ -13,15 +13,18 @@ alwaysApply: false
 | Decisions | decisions.md | read `docs/decisions.md` | why something was built a certain way |
 | Interfaces | interfaces.md | read `docs/interfaces.md` | cross-subsystem contracts |
 | Lessons | lessons.jsonl | read `.agent_memory/lessons.jsonl` | past task learnings, mistakes to avoid |
+| External research | Apify MCP | `wiki/concepts/external-research-tools.md` | **looping, no local answer, fact-check, YouTube, web docs** |
 
 ## Query priority
+
 ```
-1. ccc search        → "where is X?"
-2. GRAPH_REPORT.md   → "what depends on X?"
-3. wiki/             → "why was X designed this way?"
-4. docs/decisions.md → "what was decided about X?"
-5. docs/interfaces.md→ cross-subsystem contracts
-6. lessons.jsonl     → past learnings
+1. ccc search         → "where is X?"
+2. GRAPH_REPORT.md    → "what depends on X?"
+3. wiki/              → "why was X designed this way?"
+4. docs/decisions.md  → "what was decided about X?"
+5. docs/interfaces.md → cross-subsystem contracts
+6. lessons.jsonl      → past learnings
+7. Apify MCP          → looping, no local answer, current data, YouTube, web docs
 ```
 
 ## When to use ccc vs grep
