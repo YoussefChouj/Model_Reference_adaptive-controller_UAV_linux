@@ -53,7 +53,10 @@ file wouldn't work, since appending the journal entry is mandatory there.
 1. **Plan + Spec** — `/uav-planner <TASK_ID>` (Agents Window) or skip if spec.md exists
 2. **Implement** — `/uav-implementer <TASK_ID>` (Agents Window)
 3. **Review** — `/uav-reviewer <TASK_ID>` (Agents Window, new tab)
-4. **Adjudicate** — handled by `/uav-conductor` if you used it; otherwise human reads journal
+4. **Digest** — main agent writes `sessions_summary/YYYY-MM-DD-digest.md` on completion
+5. **Validate** — operator reviews the digest; decides next goal or next session
+
+The digest is the handoff between implementation and operator review. See `sessions_summary/POLICY.md` §Digest protocol for template and meaning of `operator_review` field.
 
 Or one-shot:
 

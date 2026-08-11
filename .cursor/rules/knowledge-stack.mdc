@@ -15,16 +15,26 @@ alwaysApply: false
 | Lessons | lessons.jsonl | read `.agent_memory/lessons.jsonl` | past task learnings, mistakes to avoid |
 | External research | Apify MCP | `wiki/concepts/external-research-tools.md` | **looping, no local answer, fact-check, YouTube, web docs** |
 
-## Query priority
+## Three-layer knowledge hierarchy (see session-lifecycle.mdc)
+
+| Layer | Storage | Coyle's term | Scope |
+|---|---|---|---|
+| Permanent structural knowledge | `wiki/` | **Ontology** | Principles, architectures, domain facts — durable, queryable, shared across all agents and sessions |
+| Decision rationale | `docs/decisions.md`, `docs/adr/` | **Axioms** | Why something was built a certain way; constrains future choices |
+| Session digest | `sessions_summary/YYYY-MM-DD-digest.md` | **Ephemeral ledger** | One-session findings, decisions, unresolved questions; cross-session continuity only |
+
+The wiki is the **Ontology**. It holds the formal shared conceptualization — what entities exist, what relationships matter, what invariants must hold. It is queried before planning, consulted before assuming, and updated only by explicit operator confirmation.
+
+The knowledge-stack query order maps to these layers:
 
 ```
-1. ccc search         → "where is X?"
-2. GRAPH_REPORT.md    → "what depends on X?"
-3. wiki/              → "why was X designed this way?"
-4. docs/decisions.md  → "what was decided about X?"
-5. docs/interfaces.md → cross-subsystem contracts
-6. lessons.jsonl      → past learnings
-7. Apify MCP          → looping, no local answer, current data, YouTube, web docs
+1. ccc search         → code layer (exact locations)
+2. GRAPH_REPORT.md    → code layer (system-wide deps)
+3. wiki/              → Ontology layer (why, design, principles)
+4. docs/decisions.md  → Axioms layer (decision rationale)
+5. docs/interfaces.md → Axioms layer (cross-subsystem contracts)
+6. lessons.jsonl      → Axioms layer (past learnings)
+7. Apify MCP          → External loop (no local answer)
 ```
 
 ## When to use ccc vs grep

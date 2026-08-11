@@ -10,7 +10,81 @@ Read it once when the dispatcher or planner loads context. Cite it (do not resta
 
 ---
 
-## 1. Status taxonomy
+## Operator role — three phases
+
+| Phase | When | What you do |
+|---|---|---|
+| **Planning** | Before implementation starts | Define the goal, constraints, and acceptance criteria. The agent surfaces open decisions; you resolve them here. |
+| **Implementation / Internal review** | Agent's job | Hands-off. The agent executes, self-reviews, and writes its own digest. You are not consulted unless genuinely blocked. |
+| **Validation** | Agent signals done | Review the digest, verify the result, decide next actions or next goal. |
+
+**What "blocked" means during implementation:**
+- A constraint exists that you set but the agent doesn't know how to work within.
+- Two valid approaches with no technical winner — the agent picks one and logs it.
+- Something touches a safety-critical path — the agent stops and asks.
+- The agent's expertise ends — the agent stops and asks.
+
+**What "blocked" does NOT mean:** the agent asking for confirmation mid-implementation on routine choices the spec or surrounding code already answers. The agent picks one, logs it, continues.
+
+---
+
+## Three-layer knowledge hierarchy (Coyle framing)
+
+Every piece of knowledge belongs to exactly one layer:
+
+| Layer | Storage | Coyle's term | Scope |
+|---|---|---|---|
+| Permanent structural knowledge | `wiki/` | **Ontology** | Principles, architectures, domain facts — durable, queryable, shared across agents and sessions |
+| Decision rationale | `docs/decisions.md`, `docs/adr/` | **Axioms** | Why something was built a certain way; constrains future choices |
+| Session digest | `sessions_summary/YYYY-MM-DD-digest.md` | **Ephemeral ledger** | One-session findings, decisions, unresolved questions; cross-session continuity only |
+
+Rules:
+- Structural knowledge that reshapes the shared conceptualization → wiki with `#principle` tag.
+- One-session scaffolding → session digest.
+- `journal.md` (task-driven) is agent-loop state; it is **not** the digest. The digest is human-facing.
+- Never promote session findings to wiki without explicit operator confirmation.
+
+---
+
+## Digest protocol
+
+When implementation ends (done, blocked, or operator pulls the plug), the agent writes:
+
+`sessions_summary/YYYY-MM-DD-digest.md`
+
+Template:
+```markdown
+---
+title: Session Digest — <short title>
+date: YYYY-MM-DD
+parent_session: <uuid of this chat transcript>
+operator_review: pending | approved | actioned
+---
+
+## Goal
+One sentence.
+
+## What was done
+Bullet points, specific files and line references.
+
+## Decisions made (and why)
+- <choice>: <reason, citing the source that resolved it>
+
+## Unresolved
+- <question>: <what the agent couldn't answer, or what needs operator input>
+
+## Knowledge to promote?
+- [ ] `<proposed wiki entry>` — brief rationale
+
+## Next recommended
+<agent's proposal; operator decides>
+```
+
+The digest is the handoff document. The operator reviews it at their next session start. If `operator_review: pending`, the digest is not authoritative — treat it as agent draft until the operator approves or actioned.
+
+---
+
+## 8. Status taxonomy
 
 Every work block in this repo carries exactly one of these statuses. The status lives in the `CLAUDE.md` Session State entry for the active session, and in the front-matter of the corresponding `sessions_summary/YYYY-MM-DD-<topic>.md` file.
 
@@ -44,7 +118,7 @@ A newer session has invalidated the findings. Hardware was swapped. A protocol c
 
 ---
 
-## 2. The hybrid trigger — when to move content
+## 9. The hybrid trigger — when to move content
 
 The archive move fires on **either** of:
 
@@ -77,7 +151,7 @@ Status transitions are how the *operator* drives the system. The staleness cap i
 
 ---
 
-## 3. What goes where (decision table)
+## 10. What goes where (decision table)
 
 | Kind of content | Lives in |
 |---|---|
@@ -97,7 +171,7 @@ Status transitions are how the *operator* drives the system. The staleness cap i
 
 ---
 
-## 4. Rot protocol — keeping archives trustworthy
+## 11. Rot protocol — keeping archives trustworthy
 
 Archives go stale. The radio gets replaced. The protocol version bumps. A bug fix invalidates a measurement. The agent's job is to detect this *when it matters*, not maintain a permanent freshness guarantee.
 
@@ -140,7 +214,7 @@ Mechanical drift (the file moved, the function was renamed, the test now lives e
 
 ---
 
-## 5. How a fresh agent uses this policy
+## 12. How a fresh agent uses this policy
 
 A fresh agent in a fresh session reads, in order:
 
@@ -154,7 +228,7 @@ A fresh agent that finds itself needing an older archive (closed-session questio
 
 ---
 
-## 6. Worked example — applying this in practice
+## 13. Worked example — applying this in practice
 
 Suppose today's `CLAUDE.md` Session State points at `sessions_summary/2026-08-09-micoair-summary.md` and that file documents the MicoAir WiFi Link TX ring rework (status: `active`, because the in-flight re-measure is still pending).
 
@@ -176,7 +250,7 @@ Suppose today's `CLAUDE.md` Session State points at `sessions_summary/2026-08-09
 
 ---
 
-## 7. What this policy does NOT cover
+## 14. What this policy does NOT cover
 
 - **Task-driven work** (`.agent_contracts/<TASK_ID>/`). That has its own journal and spec; the dispatcher's `ROADMAP.md` is the source of truth for state. The archive here is for *sessions*, not *tasks*.
 - **Wiki concept pages**. Those have their own lifecycle (drop in `raw/`, run `/wiki ingest`). Different scale, different rules.

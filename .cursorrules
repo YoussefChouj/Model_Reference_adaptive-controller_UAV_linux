@@ -4,7 +4,7 @@ Cursor still loads this file on every turn, so it is intentionally kept thin.
 The real rules are now scoped `.mdc` files under `.cursor/rules/`:
 
 - `000-core.mdc`       — always-on protocol: knowledge-stack-first, think-before-coding,
-                         goal-driven loops, surgical changes, report format
+                          goal-driven loops, surgical changes, report format
 - `knowledge-stack.mdc`— full query-priority stack (ccc / graphify / wiki / decisions / interfaces / lessons)
 - `ccc-search.mdc`     — ccc/cocoindex daemon operational guide (agent-requested)
 - `prose-style.mdc`    — always-on prose principles: short, active, one-word-per-idea
@@ -19,14 +19,19 @@ Workflow altitude — pick the right one:
 - `/uav-planner` — one task → `spec.md`. **Interactive** — grills you first. Never delegated to a subagent.
 - `/uav-conductor` — implement → review → adjudicate, unattended, from an existing spec.
 
-Skills live in `~/.cursor/skills/` (global) and `.cursor/skills/` (project). Invoke by the
-`name:` in frontmatter, which for a few differs from the folder (`/ccc-search`,
-`/karpathy-wiki`, `/karpathy-llm-wiki`, `/karpathy-project-wiki`).
+Skills (invoke by `name:` in frontmatter):
+- Global: `~/.cursor/skills/` — goal-loop, decisions, next-decision, setup-help, git-worktree, anti-sleep
+- Project: `.cursor/skills/` — dispatcher, planner, implement-spec, review-spec, parallel-implement, commit
+- `.claude/skills/` — same skills, also available to Claude Code
 
 Live firmware reads: `/livewatch` — read ANY firmware variable off the running drone by name
 (read-only, no write path). ALWAYS `python -m ground_station.livewatch verify` first; a stale
 `OBJ/JX_FLY.axf` returns plausible garbage, not an error. See `.cursor/rules/hardware-safety.mdc`.
+
 Custom subagents: `.cursor/agents/` — `uav-conductor` (full pipeline orchestrator, Claude Opus 5
 High), `uav-planner` (Claude Opus 5 High), `uav-implementer` (Cursor Grok 4.5 High Fast), and
 `uav-reviewer` (GPT-5.6 Sol High, readonly). See `.cursor/agents/AGENTS.md` for the full index.
-Hooks: `.cursor/hooks.json` + `.cursor/hooks/knowledge-gate.js` (nudges toward ccc before raw grep).
+
+Safety hooks: `.cursor/hooks.json` runs two guards before every shell command:
+1. `knowledge-gate.js` — nudges toward ccc before raw grep
+2. `deny-dangerous.sh` (from `~/.agents/hooks/`) — blocks catastrophic commands (disk wipe, `git push --force`, `curl|sh`, fork bombs) before they run. See `~/.agents/hooks/dangerous-patterns.txt` to add patterns.

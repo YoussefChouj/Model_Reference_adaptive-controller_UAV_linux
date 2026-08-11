@@ -6,6 +6,11 @@
         "command": "node ./.cursor/hooks/knowledge-gate.js",
         "timeout": 10,
         "failClosed": false
+      },
+      {
+        "command": "/home/youssef/.agents/hooks/deny-dangerous.sh cursor",
+        "timeout": 10,
+        "failClosed": false
       }
     ]
   }

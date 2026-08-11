@@ -29,14 +29,15 @@ Otherwise, proceed to Step 1.
 Run these in order. Stop as soon as you have enough:
 
 1a. Check lessons from past tasks:
-```powershell
-if (Test-Path .agent_memory/lessons.jsonl) {
-    Get-Content .agent_memory/lessons.jsonl | Select-Object -Last 10
-}
+```bash
+# Linux
+tail -n 10 .agent_memory/lessons.jsonl 2>/dev/null || echo "No lessons yet"
+# Windows (PowerShell)
+# Get-Content .agent_memory/lessons.jsonl | Select-Object -Last 10
 ```
 
 1b. Semantic search (micro - exact implementation location):
-```powershell
+```bash
 ccc search "QUERY_HERE" --top 5
 ```
 
@@ -106,26 +107,35 @@ FUNCTION: function_name
 ## Step 3 - Create Pre-Patch Checkpoint
 
 Before invoking the implementer, always create a rollback point:
-```powershell
+```bash
 git stash push -m "pre-patch-TASK_YYYYMMDD_HHMMSS"
 ```
 
 ## Step 4 - Invoke the Free Implementer
 
-```powershell
-$env:PYTHONIOENCODING='utf-8'
+```bash
+# Linux
 python .agent_scripts/implementer.py --contract .agent_contracts/TASK_YYYYMMDD_HHMMSS.md
+
+# Windows (PowerShell)
+# python .agent_scripts/implementer.py --contract .agent_contracts/TASK_YYYYMMDD_HHMMSS.md
 ```
 
 For repair loops (max 2):
-```powershell
-python .agent_scripts/implementer.py --contract .agent_contracts/TASK_YYYYMMDD_HHMMSS.md --loop 2 --failure-context .agent_reports/TASK_YYYYMMDD_HHMMSS_loop1_checker.md --prev-patch .agent_patches/TASK_YYYYMMDD_HHMMSS_loop1.patch
+```bash
+python .agent_scripts/implementer.py \
+  --contract .agent_contracts/TASK_YYYYMMDD_HHMMSS.md \
+  --loop 2 \
+  --failure-context .agent_reports/TASK_YYYYMMDD_HHMMSS_loop1_checker.md \
+  --prev-patch .agent_patches/TASK_YYYYMMDD_HHMMSS_loop1.patch
 ```
 
 ## Step 5 - Run the Deterministic Checker
 
-```powershell
-python .agent_scripts/checker.py --contract .agent_contracts/TASK_YYYYMMDD_HHMMSS.md --patch .agent_patches/TASK_YYYYMMDD_HHMMSS_loop1.patch
+```bash
+python .agent_scripts/checker.py \
+  --contract .agent_contracts/TASK_YYYYMMDD_HHMMSS.md \
+  --patch .agent_patches/TASK_YYYYMMDD_HHMMSS_loop1.patch
 ```
 
 Output saved to: `.agent_reports/TASK_YYYYMMDD_HHMMSS_loop1_checker.md`
@@ -143,8 +153,11 @@ Decision matrix:
 ## Step 7 - Post-Task Learning
 
 After every completed task (success or failure), append one lesson:
-```powershell
-python .agent_scripts/log_lesson.py --task TASK_YYYYMMDD_HHMMSS --outcome success|failure --lesson "one line: what worked or what broke"
+```bash
+python .agent_scripts/log_lesson.py \
+  --task TASK_YYYYMMDD_HHMMSS \
+  --outcome success|failure \
+  --lesson "one line: what worked or what broke"
 ```
 
 ## Hard Rules
