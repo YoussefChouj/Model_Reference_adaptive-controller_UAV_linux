@@ -4,12 +4,6 @@
       "command": "ccc",
       "args": ["mcp"]
     },
-    "toolbox": {
-      "url": "https://mcp.smithery.ai/chajadineyouss",
-      "headers": {
-        "Authorization": "Bearer dd24e2b7-815d-407d-bc43-15a9eecbe3ea"
-      }
-    },
     "apify": {
       "url": "https://mcp.apify.com?tools=actors,docs,apify/rag-web-browser"
     }
