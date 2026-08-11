@@ -1,0 +1,55 @@
+---
+description: ALWAYS pin subagent model to the YAML frontmatter value. Never pass `model` to the Task tool unless the user explicitly overrides in the current message.
+globs:
+alwaysApply: true
+---
+
+# Subagent model pinning
+
+When dispatching subagents via the Task tool, always run them on the model specified in
+their YAML frontmatter (the `model:` field in `.cursor/agents/<name>.md`). Never pass a
+`model` parameter to the Task tool unless the user explicitly asks for an override in
+the current message.
+
+## Why this rule exists
+
+Cursor honors `model:` in subagent frontmatter, but the orchestrating agent can override
+it via the Task tool's `model` parameter. The override is silent — there is no log line,
+no warning, no opportunity for the user to catch it. The user sees a journal entry from
+"M3" when they expected `gpt-5.6-sol-high` and has no way to know whether the override was
+a Cursor fallback (plan limit) or an orchestrator decision.
+
+Family independence is what makes the review leg worth running at all. A wrong-family
+dispatch — even by Cursor's automatic fallback — defeats the check. The user needs to
+know.
+
+## What to do
+
+If a subagent fails to dispatch on its configured model (team-admin block, plan
+limitation, Max Mode disabled), **stop the dispatch and report**:
+
+- Which subagent was being dispatched
+- Its configured model id (from YAML frontmatter)
+- The actual model Cursor dispatched (from the error message or the subagent's return
+  header)
+
+Then wait for the user's decision. Do not silently fall back.
+
+## Configured models for this project
+
+| Subagent | Configured model | Why |
+|----------|------------------|-----|
+| `uav-conductor` | `claude-opus-5-high` | Planning + adjudication = top-tier reasoning |
+| `uav-planner` | `claude-opus-5-high` | Interactive grilling + spec writing |
+| `uav-implementer` | `cursor-grok-4.5-high-fast` | Token-heavy execution, cheap + fast |
+| `uav-reviewer` | `gpt-5.6-sol-high` | Must differ from implementer family for independence |
+
+`uav-implementer` and `uav-reviewer` run on different model families on purpose. If a
+journal entry's model id does not match the configured one, surface the mismatch in the
+next reply and ask the user before adjudicating.
+
+## Applies to built-ins too
+
+This rule covers the built-in `explore`, `bash`, and `browser` subagents too. The
+explore subagent normally uses a faster model — that is its configured model, so do not
+override it either.

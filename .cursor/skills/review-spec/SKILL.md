@@ -73,7 +73,7 @@ captures your return output and appends it for you. Output the block below as yo
 return, and the conductor will write it to `journal.md`.
 
 ```markdown
-## [reviewer] <model-id> — <YYYY-MM-DD HH:MM>
+## [reviewer] configured=gpt-5.6-sol-high actual=<your-model-id> — <YYYY-MM-DD HH:MM>
 
 ### Verdict
 ACCEPT | ACCEPT WITH FIXES | REJECT
@@ -95,6 +95,11 @@ What you could not verify, and why.
 
 The first line (`## [reviewer] <model-id> — <date>`) is the only header the conductor needs to
 parse. Output it *exactly* in that shape so the append lands correctly.
+
+**Print your model id verbatim.** The conductor checks the model id against the configured
+one (`gpt-5.6-sol-high`) and flags any mismatch to the user. If you are running on a
+different model because of a plan limit or team-admin block, the user needs to know before
+they trust your verdict.
 
 ## 5. Done
 

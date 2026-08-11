@@ -11,8 +11,9 @@ five legs can run from inside the Cursor Agents Window now — no Claude Code re
 | `uav-reviewer` | `gpt-5.6-sol-high` | **yes** | `/uav-reviewer <TASK_ID>` | `.cursor/skills/review-spec/SKILL.md` |
 
 **`uav-conductor`** is the one-stop entry point. Type `/uav-conductor <TASK_ID>` in the
-Agents Window and it chains planner → implementer → reviewer → adjudicate automatically via
-the Task tool. No manual intervention between legs.
+Agents Window and it chains planner → implementer → verify → review → adjudicate
+automatically via the Task tool. No manual intervention between legs. Full instructions
+are in `.cursor/skills/uav-conductor/SKILL.md`.
 
 Use the individual subagents directly when you want to run a single leg only — e.g.
 `/uav-planner` to think through a design without committing to implement yet, or
@@ -39,6 +40,41 @@ to be cheap because that's the token-heavy leg. If all three journal entries sho
 model id, Cursor fell back to a compatible model on this plan — pause and tell the user
 before adjudicating, since model-independence has collapsed.
 
+**Wrong family is also a failure.** If the implementer returns as anything other than
+`cursor-grok-4.5-high-fast`, or the reviewer returns as anything other than `gpt-5.6-sol-high`,
+the conductor stops and tells the user. The conductor runs the verification gate in
+parallel — it can catch the bug before the reviewer is even called. The user decides
+whether to re-dispatch with the correct model or accept the substitution.
+
+### Journal entry convention — `configured_model` + `actual_model`
+
+Every journal entry header now carries two model ids. The first is what the conductor
+configured for that leg (from `.cursor/agents/<name>.md` frontmatter). The second is what
+Cursor actually dispatched. They should match; if they don't, the entry is the audit
+trail of a fallback.
+
+```markdown
+## [implementer] configured=cursor-grok-4.5-high-fast actual=cursor-grok-4.5-high-fast — 2026-08-12 10:30
+## [reviewer]    configured=gpt-5.6-sol-high          actual=gpt-5.6-sol-high          — 2026-08-12 10:45
+```
+
+**Why both fields:** Cursor can override the configured model via the Task tool's `model`
+parameter, or fall back to a compatible model if the configured one is blocked. The
+override is silent; the audit needs both sides of the contract.
+
+The conductor's adjudication step (leg 5) runs an automated check: for every journal
+entry, `actual_model` must match `configured_model`. If not, the conductor surfaces the
+mismatch to the user before writing the verdict. The user can re-dispatch with the
+correct model, or explicitly accept the substitution with a one-line note in the
+adjudication entry.
+
+### The hard rule that backs this
+
+`.cursor/rules/subagent-model-pinning.mdc` is the always-on rule that enforces the
+configured-model discipline at dispatch time. The rule covers the built-in `explore`,
+`bash`, and `browser` subagents too — they get their configured model by default and the
+orchestrator must not silently override.
+
 ## Why `readonly: true` on the reviewer
 
 `readonly: true` blocks **state-changing** operations (file edits, destructive shell
@@ -52,9 +88,11 @@ file wouldn't work, since appending the journal entry is mandatory there.
 
 1. **Plan + Spec** — `/uav-planner <TASK_ID>` (Agents Window) or skip if spec.md exists
 2. **Implement** — `/uav-implementer <TASK_ID>` (Agents Window)
-3. **Review** — `/uav-reviewer <TASK_ID>` (Agents Window, new tab)
-4. **Digest** — main agent writes `sessions_summary/YYYY-MM-DD-digest.md` on completion
-5. **Validate** — operator reviews the digest; decides next goal or next session
+3. **Verify** — conductor runs the test suite + graph rebuild (NOT delegated)
+4. **Review** — `/uav-reviewer <TASK_ID>` (Agents Window, new tab)
+5. **Adjudicate** — conductor reads the journal and writes the verdict
+6. **Digest** — main agent writes `sessions_summary/YYYY-MM-DD-digest.md` on completion
+7. **Validate** — operator reviews the digest; decides next goal or next session
 
 The digest is the handoff between implementation and operator review. See `sessions_summary/POLICY.md` §Digest protocol for template and meaning of `operator_review` field.
 
