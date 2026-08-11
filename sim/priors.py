@@ -15,12 +15,14 @@ defeat the experiment.
 
 The ``RegressorVariant`` registry (D4) keeps the regressor design open: the
 current six-slot regressor is the pinned firmware baseline, and other
-variants are sim-only until promoted with their own parity test.
+variants are sim-only until promoted with their own parity test. Each variant
+carries its ``basis_declarations`` as data (ADR-0014 D3) so that future
+basis functions are declared the same way without hand-derived tables.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -44,6 +46,36 @@ def _validate_plant_tag(tag) -> None:
 
 
 @dataclass(frozen=True)
+class BasisDeclaration:
+    """Per-basis declaration (ADR-0014 D3).
+
+    Each basis function declares:
+      * ``name``        : identifier ("bias", "rate", "drag", ...)
+      * ``input``       : which regressor input the slot consumes
+      * ``dimension``   : physical dimension symbol (e.g. "1", "rad/s")
+      * ``normalise``   : characteristic scale that renders the slot O(1)
+      * ``normalise_via``: optional reference scale name ("u_max", "J_xx", ...)
+                          used to look up the value at run time (informational;
+                          resolution is a future decision, not implemented here)
+
+    The dimensionless form is computed mechanically from the declaration;
+    a future regressor with new basis slots declares them the same way.
+    """
+    name: str
+    input: str
+    dimension: str
+    normalise: float
+    normalise_via: Optional[str] = None
+
+
+# Module-level registry of named RegressorVariant instances. Keyed by
+# ``name``; populated by construction. Kept at module scope (not as a
+# dataclass field) to avoid frozen-dataclass instance-level state issues
+# and to give the registry a single, easy-to-clear location for tests.
+_VARIANT_REGISTRY: dict[str, "RegressorVariant"] = {}
+
+
+@dataclass(frozen=True)
 class RegressorVariant:
     """A declared regressor variant (ADR-0014 D4).
 
@@ -51,9 +83,21 @@ class RegressorVariant:
     always available as ``RegressorVariant.DEFAULT``. Other variants can be
     registered through ``RegressorVariant.register``; their outputs are
     sim-only until promoted with a parity test against firmware.
+
+    Each variant carries ``basis_declarations``: a tuple of
+    :class:`BasisDeclaration` objects defining the per-slot name, input,
+    dimension, and normalisation scale. The ``normalise`` field is the
+    multiplicative scale applied to that slot (ADR-0014 D3: scale by
+    ``1.0 / normalise`` so a unit at the characteristic scale maps to 1.0).
+
+    ``RegressorVariant.DEFAULT`` is instantiated without declarations; they are
+    attached by ``sim.regressor`` after ``BASIS_DEFAULT`` is defined, via
+    :meth:`set_basis_declarations`. Sim-only variants pass declarations at
+    construction time.
     """
     name: str
     num_basis: int
+    basis_declarations: Tuple[BasisDeclaration, ...] = ()
 
     def __post_init__(self) -> None:
         if self.name in _VARIANT_REGISTRY:
@@ -63,9 +107,12 @@ class RegressorVariant:
         _VARIANT_REGISTRY[self.name] = self
 
     @classmethod
-    def register(cls, name: str, num_basis: int) -> "RegressorVariant":
+    def register(cls, name: str, num_basis: int,
+                basis_declarations: Tuple[BasisDeclaration, ...] = ()
+                ) -> "RegressorVariant":
         """Create and register a new variant. Returns the new variant."""
-        return cls(name=name, num_basis=num_basis)
+        return cls(name=name, num_basis=num_basis,
+                   basis_declarations=basis_declarations)
 
     @classmethod
     def get(cls, name: str) -> "RegressorVariant":
@@ -77,20 +124,49 @@ class RegressorVariant:
         return _VARIANT_REGISTRY[name]
 
     @classmethod
-    def names(cls) -> list[str]:
+    def all(cls) -> list[str]:
+        """All registered variant names, sorted."""
         return sorted(_VARIANT_REGISTRY)
 
+    @classmethod
+    def set_basis_declarations(cls, name: str,
+                               declarations: Tuple[BasisDeclaration, ...]
+                               ) -> None:
+        """Attach basis declarations to an existing variant.
 
-# Module-level registry of named RegressorVariant instances. Keyed by
-# ``name``; populated by construction. Kept at module scope (not as a
-# dataclass field) to avoid frozen-dataclass instance-level state issues
-# and to give the registry a single, easy-to-clear location for tests.
-_VARIANT_REGISTRY: dict[str, "RegressorVariant"] = {}
+        Used to attach ``BASIS_DEFAULT`` to ``RegressorVariant.DEFAULT`` after
+        ``BASIS_DEFAULT`` is defined in ``sim.regressor`` (avoids a circular
+        import). The variant's ``basis_declarations`` are set in-place using
+        ``object.__setattr__`` (the frozen dataclass rejects normal assignment).
+        """
+        variant = cls.get(name)
+        if variant.basis_declarations:
+            raise ValueError(
+                f"RegressorVariant {name!r} already has basis_declarations; "
+                f"cannot overwrite"
+            )
+        # Mutate in-place so the existing singleton gets the declarations.
+        # The frozen dataclass blocks normal attribute assignment.
+        object.__setattr__(variant, "basis_declarations", declarations)
+
+    @property
+    def has_trivial_normalise(self) -> bool:
+        """True when every basis normalise is 1.0 (bit-identical to baseline)."""
+        return all(b.normalise == 1.0 for b in self.basis_declarations)
+
+    @property
+    def scale_vector(self) -> np.ndarray:
+        """Per-slot normalisation vector: slot i contributes ``1/normalise[i]``.
+
+        Used by :meth:`to_phi` to rescale a raw phi vector.
+        """
+        if not self.basis_declarations:
+            return np.ones(self.num_basis)
+        return np.array([1.0 / b.normalise for b in self.basis_declarations])
 
 
 # Pinned firmware baseline — six-slot structured regressor (mrac.c:65-91).
-# This is the golden-vector target of tests/test_regressor.py and must
-# remain bit-identical to the firmware.
+# basis_declarations are attached by sim.regressor after BASIS_DEFAULT is defined.
 RegressorVariant.DEFAULT = RegressorVariant(name="default", num_basis=6)
 
 
@@ -128,7 +204,7 @@ class Prior:
         except KeyError as exc:
             raise ValueError(
                 f"unknown regressor variant {self.regressor_variant_id!r}; "
-                f"registered: {RegressorVariant.names()}"
+                f"registered: {RegressorVariant.all()}"
             ) from exc
         if arr.shape[0] != variant.num_basis:
             raise ValueError(

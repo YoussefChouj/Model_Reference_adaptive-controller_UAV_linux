@@ -78,3 +78,37 @@ def test_golden_vector_full_pitch_axis():
     )
     expected = np.array([1.0, 0.4, 0.4 * math.tanh(0.4), 0.10, -0.6, 0.25])
     np.testing.assert_allclose(phi, expected, rtol=1e-12, atol=1e-15)
+
+
+# ------------------------------------------------------------------
+# ADR-0014 D3/D4 — variant seam
+# ------------------------------------------------------------------
+def test_default_variant_bit_identical_to_no_variant():
+    """structured_regressor(variant=DEFAULT) == no variant argument."""
+    from sim.priors import RegressorVariant
+    phi_no_var = structured_regressor(
+        "pitch", x=0.4, u_nom=-0.6, xm=0.25, cross=0.10,
+    )
+    phi_var = structured_regressor(
+        "pitch", x=0.4, u_nom=-0.6, xm=0.25, cross=0.10,
+        variant=RegressorVariant.DEFAULT,
+    )
+    np.testing.assert_allclose(phi_var, phi_no_var, atol=1e-15)
+
+
+def test_inertia_scaled_variance_rescales_slots():
+    """inertia_scaled divides rate/drag/cross/xm by ref_eff=20.0."""
+    from sim.priors import RegressorVariant
+    v = RegressorVariant.get("inertia_scaled")
+    x, u_nom, xm = 1.0, 0.5, 0.8
+    cross = 0.04
+    phi_raw = structured_regressor("pitch", x=x, u_nom=u_nom, xm=xm, cross=cross)
+    phi_scaled = structured_regressor("pitch", x=x, u_nom=u_nom, xm=xm, cross=cross,
+                                     variant=v)
+    ref = 20.0
+    np.testing.assert_allclose(phi_scaled[1], phi_raw[1] / ref, atol=1e-15)
+    np.testing.assert_allclose(phi_scaled[5], phi_raw[5] / ref, atol=1e-15)
+    np.testing.assert_allclose(phi_scaled[3], cross / (ref * ref), atol=1e-15)
+    # bias and u_nom unchanged
+    assert phi_scaled[0] == phi_raw[0]  # = 1.0
+    assert phi_scaled[4] == phi_raw[4]  # = u_nom

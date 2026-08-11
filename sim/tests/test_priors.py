@@ -143,7 +143,7 @@ def test_convert_to_cross_variant_rejected():
     # module's lifetime (the registry persists across tests, so the name
     # must be unique to avoid collisions).
     test_variant_name = "_test_alternate"
-    if test_variant_name not in RegressorVariant.names():
+    if test_variant_name not in RegressorVariant.all():
         RegressorVariant.register(name=test_variant_name, num_basis=6)
     p = Prior(theta_tilde=np.zeros(6), plant_tag=_default_tag(),
               regressor_variant_id="default", source_scenario="x")
@@ -156,7 +156,7 @@ def test_convert_to_cross_variant_rejected():
 # ----------------------------------------------------------------------
 def test_registry_get_default_and_names():
     assert RegressorVariant.get("default") is RegressorVariant.DEFAULT
-    assert "default" in RegressorVariant.names()
+    assert "default" in RegressorVariant.all()
 
 
 def test_registry_rejects_duplicate_name():
@@ -167,6 +167,30 @@ def test_registry_rejects_duplicate_name():
 def test_registry_unknown_raises():
     with pytest.raises(KeyError):
         RegressorVariant.get("definitely_not_a_real_variant")
+
+
+def test_default_has_basis_declarations():
+    """RegressorVariant.DEFAULT carries BASIS_DEFAULT (ADR-0014 D3)."""
+    from sim.regressor import BASIS_DEFAULT
+    decls = RegressorVariant.DEFAULT.basis_declarations
+    assert len(decls) == 6
+    assert tuple(decls) == BASIS_DEFAULT
+
+
+def test_default_has_trivial_normalise():
+    assert RegressorVariant.DEFAULT.has_trivial_normalise is True
+    assert RegressorVariant.get("inertia_scaled").has_trivial_normalise is False
+
+
+def test_inertia_scaled_has_non_trivial_normalise():
+    v = RegressorVariant.get("inertia_scaled")
+    assert v.has_trivial_normalise is False
+    # scale_vector reflects the non-unity normalisation
+    sv = v.scale_vector
+    assert sv[0] == 1.0      # bias: normalise=1.0
+    assert sv[1] == 0.05      # rate: normalise=20.0 -> 1/20
+    assert sv[5] == 0.05      # xm: normalise=20.0 -> 1/20
+    assert sv[4] == 1.0      # u_nom: normalise=1.0
 
 
 # ----------------------------------------------------------------------

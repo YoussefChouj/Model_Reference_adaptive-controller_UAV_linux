@@ -132,11 +132,11 @@
 - **Full text:** [docs/adr/0013-scenario-conditioned-adaptive-priors.md](adr/0013-scenario-conditioned-adaptive-priors.md).
 - **Status:** Proposed. Architecture accepted; mechanisms left open.
 
-## 2026-08-05: ADR-0014 — Dimensionless priors and declared regressor variants (proposed)
+## 2026-08-05: ADR-0014 — Dimensionless priors and declared regressor variants (accepted)
 
 - **Topic:** Redefine the prior as a dimensionless object `Theta_tilde` so scenarios — not airframes — are the unit of transfer; declare per-basis normalisation scales as data; randomise over an airframe ensemble; the headline experiment is cross-plant prior damage.
 - **Full text:** [docs/adr/0014-dimensionless-priors-and-declared-regressor-variants.md](adr/0014-dimensionless-priors-and-declared-regressor-variants.md).
-- **Status:** Proposed. Refines ADR-0012 D8.
+- **Status:** Accepted and **implemented (spec `prior-08-declared-basis-dimensions`, 2026-08-11).** Refines ADR-0012 D8.
 
 ## 2026-08-10: prior-E-docs slice — HELD novelty-framing carve-out (ADR-0012 / 0013 / 0014)
 

@@ -22,13 +22,14 @@
 |---|------|-----------|--------|
 | 00 | `What_lower_limit` sign-constraint gate | — | ✅ done |
 | 00b | Restore sim↔firmware parity | 00 | ✅ done — 2–3% RMSE improvement |
-| 01 | Retire Gazebo (2,049 LOC + 27 MB) | 00 | ⬜ needs user approval for commit **and** deletion |
-| 08 | Declared basis dimensions + regressor variant registry | 01 | ⬜ next |
+| 01 | Retire Gazebo (2,049 LOC + 27 MB) | 00 | ✅ done |
+| 08 | Declared basis dimensions + regressor variant registry | 01 | ✅ done — 2026-08-11 |
+| 11 | Learning envelope vs deployment envelope | 00b | ⬜ unblocked — next after 05 |
 | 11 | Learning envelope vs deployment envelope | 00b | ⬜ after 08 |
 | 02 | Transport-delay wrapper on 6-DOF plants | 01 | ⬜ after 01 |
 | 03 | `MujocoPlant` behind `Plant` seam | 01 | ⬜ after 01 |
 | 04 | SysID calibration gate for simulated plants | 02, 03 | ⬜ wave 3 |
-| 05 | Prior factory + run logging | 00b, 08 | ⬜ after 08 |
+| 05 | Prior factory + run logging | 00b, 08 | ⬜ unblocked — next after 11 |
 | 06 | Prior injection seam (3 channels) | 05 | ⬜ after 05 |
 | 07 | `RigPlant` + rig SysID incl. Z axis | 00 | ⬜ Phase A in-pipeline; B/C human operator |
 | 09 | Cross-airframe prior invariance sweep | 03, 05, 06, 08 | ⬜ wave 4 |

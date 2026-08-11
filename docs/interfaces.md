@@ -107,3 +107,35 @@
 | 9 | kill switch | ch10: ≤500 → DANGEROUS_STOP (unconditional) |
 
 - **Sync constraints:** ch10 kill switch check is independent of `drone_mode` and `s_authority`. It always fires regardless of SDK state.
+
+## IF-10: RegressorVariant + BasisDeclaration (sim-only, ADR-0014 D3/D4)
+
+- **Defines (owner):** `sim/priors.py` (`RegressorVariant`, `BasisDeclaration`), `sim/regressor.py` (`BASIS_DEFAULT`).
+- **Consumes (readers):** `sim/regressor.py` (`structured_regressor`), `sim/priors.py` (`Prior`).
+
+The regressor variant system (ADR-0014 D3/D4) has three load-bearing objects:
+
+| Object | File | Role |
+|---|---|---|
+| `RegressorVariant` | `sim/priors.py` | Named registry entry: `name`, `num_basis`, `basis_declarations` |
+| `BasisDeclaration` | `sim/priors.py` | Per-slot declaration: `name`, `input`, `dimension`, `normalise`, `normalise_via` |
+| `BASIS_DEFAULT` | `sim/regressor.py` | Pinned firmware baseline: 6 slots, all `normalise=1.0` |
+
+**Variant registry contract:**
+
+- `RegressorVariant.DEFAULT` is the pinned firmware baseline. It is created without `basis_declarations` in `sim/priors.py`; `BASIS_DEFAULT` is attached via `RegressorVariant.set_basis_declarations("default", BASIS_DEFAULT)` at the bottom of `sim/regressor.py` (avoids circular import).
+- `RegressorVariant.register(name, num_basis, basis_declarations)` creates and registers a new sim-only variant.
+- `RegressorVariant.get(name)` raises `KeyError` on miss.
+- `RegressorVariant.all()` returns sorted list of all registered names.
+- `RegressorVariant.has_trivial_normalise` is `True` when all `normalise==1.0` (the baseline).
+- `RegressorVariant.scale_vector` is a `np.ndarray` of `1.0 / normalise[i]` per slot.
+
+**Cross-variant guard (ADR-0014 D4):**
+
+- `Prior` construction validates `regressor_variant_id` against the registry.
+- `Prior.convert_to(target_tag, target_variant_id=...)` raises `ValueError` if `target_variant_id` differs from the prior's `regressor_variant_id`.
+
+**Scale resolution (ADR-0014 D3 — open):**
+
+- `BasisDeclaration.normalise_via` is an informational string (`"e_sat"`, `"u_max"`, `"J_xx"`, etc.) naming the reference scale.
+- Automatic resolution at scenario authoring or run time is a future decision; the field is declared but not yet consumed by any call site.

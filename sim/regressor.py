@@ -10,19 +10,22 @@ is the gyroscopic coupling for pitch/roll and deliberately 0 for yaw/z (u_nom
 already occupies slot 4, so a non-zero slot 3 would be collinear and drift).
 
 ADR-0014 D3 promotes each basis function from a hand-derived slot to a
-declared object carrying (input, dimension, normalising scale). The current
+declared object carrying (input, dimension, normalise, normalise_via). The current
 six-slot regressor is the pinned baseline (``BASIS_DEFAULT``); new variants
-register their own basis lists via :class:`BasisDeclaration`.
+register their own basis lists via :class:`RegressorVariant`.
+
+The module initialises ``RegressorVariant.DEFAULT`` with ``BASIS_DEFAULT`` after
+both are defined (avoids circular import). ``RegressorVariant`` is defined in
+``sim.priors`` and re-exported here for convenience.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Sequence
 
 import numpy as np
 
-from sim.priors import RegressorVariant
+from sim.priors import BasisDeclaration, RegressorVariant
 
 NUM_BASIS = 6  # MAX_NUM_BASIS with STRUCTURED + INCLUDE_CONTROL (mrac.h:80-96)
 
@@ -30,50 +33,46 @@ NUM_BASIS = 6  # MAX_NUM_BASIS with STRUCTURED + INCLUDE_CONTROL (mrac.h:80-96)
 _CROSS_AXES = ("pitch", "roll")
 
 
-@dataclass(frozen=True)
-class BasisDeclaration:
-    """Per-basis declaration (ADR-0014 D3).
-
-    Each basis function declares:
-      * ``name``        : identifier ("bias", "rate", "drag", ...)
-      * ``input``       : which regressor input the slot consumes
-      * ``dimension``   : physical dimension symbol (e.g. "1", "rad/s")
-      * ``normalise``   : characteristic scale that renders the slot O(1)
-
-    The dimensionless form is computed mechanically from the declaration;
-    a future regressor with new basis slots declares them the same way.
-    """
-    name: str
-    input: str
-    dimension: str
-    normalise: float
-
-
 # Pinned firmware baseline (mrac.c:65-91). Slot order is load-bearing — the
 # golden-vector test in tests/test_regressor.py and the parity test against
 # MRAC_GenerateStructuredBasis both index by position. Do not reorder.
+#
+# normalise_via is informational (ADR-0014 D3 open question: which reference
+# scale to use at run time). The normalised value is stored here as `normalise`.
+# For the "default" variant all normalise=1.0 so no rescaling is applied.
 BASIS_DEFAULT: tuple[BasisDeclaration, ...] = (
-    BasisDeclaration(name="bias", input="const", dimension="1", normalise=1.0),
-    BasisDeclaration(name="rate", input="x", dimension="rad/s", normalise=1.0),
-    BasisDeclaration(name="drag", input="x", dimension="1", normalise=1.0),
+    BasisDeclaration(name="bias", input="const", dimension="1", normalise=1.0,
+                    normalise_via=None),
+    BasisDeclaration(name="rate", input="x", dimension="rad/s", normalise=1.0,
+                    normalise_via="e_sat"),
+    BasisDeclaration(name="drag", input="x", dimension="1", normalise=1.0,
+                    normalise_via="e_sat"),
     BasisDeclaration(name="cross", input="cross", dimension="rad^2/s^2",
-                      normalise=1.0),
-    BasisDeclaration(name="u_nom", input="u_nom", dimension="Nm", normalise=1.0),
-    BasisDeclaration(name="xm", input="xm", dimension="rad/s", normalise=1.0),
+                    normalise=1.0, normalise_via=None),
+    BasisDeclaration(name="u_nom", input="u_nom", dimension="Nm", normalise=1.0,
+                    normalise_via="u_max"),
+    BasisDeclaration(name="xm", input="xm", dimension="rad/s", normalise=1.0,
+                    normalise_via="e_sat"),
 )
 assert len(BASIS_DEFAULT) == NUM_BASIS
 
+# Attach declarations to the pre-created DEFAULT singleton.
+RegressorVariant.set_basis_declarations("default", BASIS_DEFAULT)
 
-def _scale_phi(phi: np.ndarray, bases: Sequence[BasisDeclaration]) -> np.ndarray:
-    """Affine-rescale a regressor vector against each basis's normalise scale.
 
-    Slot ``i`` is multiplied by ``1.0 / bases[i].normalise`` so a unit
-    magnitude at the declared characteristic scale maps to ``1.0`` in
-    the dimensionless space. When all normalise scales are ``1.0`` this is
-    the identity, preserving bit-identical parity with the firmware baseline.
+def _apply_variant_scale(
+    phi: np.ndarray,
+    declarations: Sequence[BasisDeclaration],
+) -> np.ndarray:
+    """Rescale a regressor vector against each basis's normalise scale.
+
+    Slot ``i`` is multiplied by ``1.0 / declarations[i].normalise`` so a unit
+    magnitude at the declared characteristic scale maps to ``1.0`` in the
+    dimensionless space. When all normalise are ``1.0`` this is the identity,
+    preserving bit-identical parity with the firmware baseline.
     """
     out = np.empty_like(phi)
-    for i, b in enumerate(bases):
+    for i, b in enumerate(declarations):
         if b.normalise == 1.0:
             out[i] = phi[i]
         else:
@@ -89,7 +88,7 @@ def structured_regressor(axis: str, *, x: float, u_nom: float, xm: float,
 
     ``cross`` is used only for pitch/roll; it is ignored for yaw/z (slot 3 = 0).
     ``variant`` selects a declared regressor variant (ADR-0014 D4). The default
-    is the pinned firmware baseline; variants with non-trivial normalise scales
+    is the pinned firmware baseline; variants with non-trivial normalisation scales
     produce rescaled outputs that are sim-only until promoted with a parity test.
     """
     phi = np.empty(NUM_BASIS)
@@ -99,14 +98,13 @@ def structured_regressor(axis: str, *, x: float, u_nom: float, xm: float,
     phi[3] = cross if axis in _CROSS_AXES else 0.0
     phi[4] = u_nom               # control scaling
     phi[5] = xm                  # reference feedforward
-    if variant is None or variant.name == "default":
+    if variant is None:
         return phi
-    if variant.num_basis != NUM_BASIS:
-        raise ValueError(
-            f"variant {variant.name!r} expects num_basis={variant.num_basis}, "
-            f"structured_regressor returns {NUM_BASIS}"
-        )
-    return _scale_phi(phi, BASIS_DEFAULT)
+    # "default" has trivial normalisation (all 1.0) — fast path.
+    if variant.name == "default":
+        return phi
+    # Apply the variant's per-slot normalisation scale.
+    return _apply_variant_scale(phi, variant.basis_declarations)
 
 
 def cross_coupling(axis: str, *, pitch_rate: float, roll_rate: float,
@@ -132,22 +130,28 @@ def cross_coupling(axis: str, *, pitch_rate: float, roll_rate: float,
 _INERTIA_SCALED_REF = 20.0  # rad/s, rough closed-loop inner-rate bandwidth
 
 BASIS_INERTIA_SCALED: tuple[BasisDeclaration, ...] = (
-    BasisDeclaration(name="bias", input="const", dimension="1", normalise=1.0),
+    BasisDeclaration(name="bias", input="const", dimension="1", normalise=1.0,
+                    normalise_via=None),
     BasisDeclaration(name="rate", input="x", dimension="rad/s",
-                      normalise=_INERTIA_SCALED_REF),
+                    normalise=_INERTIA_SCALED_REF,
+                    normalise_via="e_sat"),
     BasisDeclaration(name="drag", input="x", dimension="1",
-                      normalise=_INERTIA_SCALED_REF),
+                    normalise=_INERTIA_SCALED_REF,
+                    normalise_via="e_sat"),
     BasisDeclaration(name="cross", input="cross", dimension="rad^2/s^2",
-                      normalise=_INERTIA_SCALED_REF * _INERTIA_SCALED_REF),
-    BasisDeclaration(name="u_nom", input="u_nom", dimension="Nm", normalise=1.0),
+                    normalise=_INERTIA_SCALED_REF * _INERTIA_SCALED_REF,
+                    normalise_via=None),
+    BasisDeclaration(name="u_nom", input="u_nom", dimension="Nm", normalise=1.0,
+                    normalise_via="u_max"),
     BasisDeclaration(name="xm", input="xm", dimension="rad/s",
-                      normalise=_INERTIA_SCALED_REF),
+                    normalise=_INERTIA_SCALED_REF,
+                    normalise_via="e_sat"),
 )
 
-# Register the inertia-scaled variant. The pinned baseline is registered
-# from sim.priors at import time as "default".
+# Register the inertia-scaled variant with its declarations.
 RegressorVariant.register(name="inertia_scaled",
-                          num_basis=len(BASIS_INERTIA_SCALED))
+                          num_basis=len(BASIS_INERTIA_SCALED),
+                          basis_declarations=BASIS_INERTIA_SCALED)
 
 
 def regressor_inertia_scaled(axis: str, *, x: float, u_nom: float,
@@ -158,8 +162,6 @@ def regressor_inertia_scaled(axis: str, *, x: float, u_nom: float,
     Slot 1, 2, 3, 5 are rescaled by ``ref_eff`` so a typical 20 rad/s
     response maps to slot magnitudes near 1. Sim-only.
     """
-    phi = structured_regressor(axis, x=x, u_nom=u_nom, xm=xm, cross=cross)
-    scales = np.array([
-        1.0, ref_eff, ref_eff, ref_eff * ref_eff, 1.0, ref_eff,
-    ])
-    return phi / scales
+    variant = RegressorVariant.get("inertia_scaled")
+    return structured_regressor(axis, x=x, u_nom=u_nom, xm=xm,
+                                cross=cross, variant=variant)
