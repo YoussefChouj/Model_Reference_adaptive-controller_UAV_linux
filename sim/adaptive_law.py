@@ -88,6 +88,12 @@ class AxisAdaptiveConfig:
     # pre-existing call site bit-identical.
     sigma_prior: float = 0.0
     theta_prior: Optional[np.ndarray] = None
+    # sim-arch-03 will use this field to replace ``sim.experiments._seeded_deploy``'s
+    # direct ``law.Theta[:] = theta_seed`` mutation by passing the seed through the
+    # config object. For sim-arch-02 the field is **declared but unused** —
+    # ``AdaptiveLaw`` does not read it yet. Do not add a ``K`` companion field here;
+    # ``K`` belongs to sim-arch-01 (separate scope).
+    theta_seed: Optional[np.ndarray] = None
     # Final learned weights from a completed run. Written by sim/run.py so that
     # the same config object can be replayed under the deployment envelope.
     # None until a run completes.
