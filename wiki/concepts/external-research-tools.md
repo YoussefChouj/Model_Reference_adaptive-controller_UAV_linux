@@ -43,7 +43,7 @@ Use Apify when any of these is true:
 
 - Queries Google Search and scrapes top N pages in clean Markdown
 - Input: `query` (Google keywords or URL), `maxResults` (1–10), `outputFormats` (markdown/text/html)
-- Cost: ~0.005 CU/run on free tier
+- Cost: ~0.005 CU/run (~0.01 USD/run on paid credits; confirm current rate via `fetch-actor-details`)
 - Best for: broad research, fact-checking, reading current docs
 - Tool name on this workspace: `apify--rag-web-browser` (single dedicated tool)
 
@@ -223,15 +223,27 @@ If a tool call fails, check why before assuming a config bug:
 
 ## Cost and limits
 
-| Actor | Cost | Notes |
-|-------|------|-------|
+This workspace's Apify account is on **prepaid credits** (~$5 confirmed by
+the user on 2026-08-12). Apify charges in USD against that balance, not via
+a separate "free tier" allotment. The estimates below assume standard paid
+rates from Apify Store listings as of 2026-08-12 — always re-confirm via
+`fetch-actor-details` before any non-trivial call, since pricing changes
+without notice.
+
+| Actor | Approx cost | Notes |
+|-------|-------------|-------|
 | `apify/rag-web-browser` | ~0.005 CU/run | 1 request = 1 page scraped |
 | `starvibe/youtube-video-transcript` | $0.005/video | Fast, reliable |
 | `search-actors` | free | Discovery only |
 | `search-apify-docs` | free | Apify docs only |
+| `fetch-actor-details` | free | Schema lookup, no Actor run |
+| `fetch-apify-docs` | free | Apify docs only |
 
-Free tier compute units reset monthly. `apify/rag-web-browser` at 0.005 CU/run
-gives ~200 scrapes/month on the free tier.
+**Budget guideline:** with ~$5 in credits, `apify/rag-web-browser` at
+~$0.005/run is roughly 1000 scrapes; `starvibe/youtube-video-transcript` at
+$0.005/video is roughly 1000 transcripts. Paid-per-event Actors (Instagram,
+TikTok, Google Maps) can burn a run in seconds — always check
+`fetch-actor-details` with `output: { pricing: true }` first.
 
 **Datasets expire after ~7 days.** Retrieve and persist important results
 promptly (write to `wiki/literature/`, `docs/`, or `raw/`).
@@ -240,7 +252,7 @@ promptly (write to `wiki/literature/`, `docs/`, or `raw/`).
 
 - **`apify--rag-web-browser` on YouTube:** hits YouTube's landing page, not video content. Use `starvibe/youtube-video-transcript` for video transcripts.
 - **`apify--rag-web-browser` on arXiv:** arXiv HTML pages are messy — prefer a PDF URL (Google-search returns the PDF link) or use `codepoetry/youtube-transcript-ai-scraper` with Whisper disabled.
-- **Actor not found:** Apify free tier may not include all paid Actors. Check pricing in `fetch-actor-details` before running.
+- **Pricing not visible until you check it.** Apify Store shows headline pricing per event but real cost depends on input size and add-ons. Run `fetch-actor-details` with `output: { pricing: true }` before any non-trivial Actor call to see the full table — especially for paid-per-event Actors where a long input can run unexpectedly high.
 - **Empty dataset:** Actor may have returned 0 items — check `run.status` and `storages.datasets.default.itemCount` in `get-actor-run`.
 - **`fetch-actor-details` is your first stop** before `call-actor`. The Actor's `input` schema may have required fields you don't expect.
 - **`waitSecs` cap is 45.** For long Actors, start with `waitSecs: 0` (fire-and-forget) and poll with `get-actor-run`.
