@@ -1,0 +1,69 @@
+# Lab session protocol — when the bench is live
+
+This rule governs what an agent may do when the user says "I have the drone
+powered on and the probe attached." Read this every time before acting in
+that context.
+
+The full procedure is `docs/lab-runbook.md`. **Skim that file before any
+hardware-touching action.**
+
+## Authorization gate
+
+The user must give an explicit authorization sentence of the form:
+
+> "You are authorized to modify code, rebuild, flash, and live-probe the
+> running firmware. The drone is disarmed, props are off, and the bench is
+> safe. Proceed."
+
+Without that sentence, do not run any write path. Read-only `livewatch read`
+becomes available after `tasks.py doctor` is green. Otherwise: stay offline.
+
+Once authorized, the user steps back and the agent decides what to do based
+on the task at hand — bug hunting, acceptance testing, calibration sweeps.
+
+## Mandatory pre-flash sequence
+
+Before `tasks.py flash`, run all four checks in order. Any failure → abort.
+
+```bash
+.venv/bin/python tasks.py doctor                              # toolchain + probe
+.venv/bin/python -m ground_station.livewatch verify           # ELF on disk = on target
+.venv/bin/python -m ground_station.livewatch freshness s_ekf.x[3] \
+    --samples 5 --delay-ms 20 --require-monotonic             # bridge is fresh
+.venv/bin/python -m ground_station.livewatch read DroneStatus.ARM_Status  # DISARMED
+```
+
+ARM_Status must equal DISARMED. Any other value (ARMED, FAULT, INIT) is a
+hard abort. The user disarms via RC; the agent does not bypass this check.
+
+## Wireless-bridge caveat
+
+If the CMSIS-DAP is wireless (J-Link WiFi, AIRLink, etc.), runs of the same
+read can return stale cached values. `livewatch verify` catches stale ELF;
+`livewatch freshness` catches stale runtime reads. Re-run freshness after
+any long pause and after any value that looks too clean.
+
+The Linux pipeline you built is no different from the Windows one at the
+SWD wire layer; both go through pyocd. Wireless vs wired is a probe
+hardware choice, not a software one.
+
+## End-of-session report
+
+Before stopping, tell the user:
+
+- what was changed in source
+- what was flashed to the target (commit SHA + ELF sha256-16)
+- whether the drone is still disarmed (re-read ARM_Status)
+- where the new image lives (`firmware/build/JX_FLY.{elf,hex,bin}`)
+
+## Scope discipline (still applies)
+
+Even when authorized to flash, the agent does not:
+
+- arm the vehicle
+- spin motors
+- write to RAM, peripherals, or registers via livewatch
+- bypass the DISARMED check under any pressure
+
+Hardware-safety rules in `.cursor/rules/hardware-safety.mdc` are stricter
+than this rule. Where they conflict, the hardware-safety rule wins.

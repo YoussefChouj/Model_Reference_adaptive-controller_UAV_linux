@@ -129,6 +129,56 @@ def cmd_verify(args):
     return 0 if res.ok else 2
 
 
+def cmd_freshness(args):
+    """Read a field twice with a small delay; report whether the value advanced.
+
+    Catches wireless-bridge staleness. With a USB-wired CMSIS-DAP, every
+    monotonically-advancing field (a tick counter, a millisecond clock) will
+    change between two reads separated by ~10 ms. With a wireless bridge under
+    load, the host may see a cached/stale value and the test fails.
+
+    Exits 0 on fresh, 3 on stale.
+    """
+    import time
+    from .reader import LiveReader
+
+    name = args.field
+    delay_ms = args.delay_ms
+    n = args.samples
+    if n < 2:
+        raise SystemExit("freshness needs --samples >= 2")
+
+    with LiveReader(args.elf, transport=_transport(args)) as lr:
+        plan = lr.plan([name])
+        last = None
+        rows = []
+        t0 = time.perf_counter()
+        for i in range(n):
+            sample = lr.sample(plan)[name]
+            t = time.perf_counter() - t0
+            rows.append((t, sample))
+            if i < n - 1:
+                time.sleep(delay_ms / 1000.0)
+        elapsed = rows[-1][0] - rows[0][0]
+
+    # Report
+    print(f"# field={name}  samples={n}  delay_ms={delay_ms}  elapsed={elapsed*1000:.1f} ms")
+    for t, v in rows:
+        print(f"  t={t*1000:7.1f} ms   value={_fmt(v)}")
+
+    # Freshness test: at least one value must differ across the window
+    values = [v for _, v in rows]
+    if all(v == values[0] for v in values):
+        print("# STALE: every read returned the same value — bridge is caching or the field is frozen")
+        return 3
+    if args.require_monotonic and all(isinstance(v, (int, float)) for v in values):
+        if not all(values[i] <= values[i + 1] for i in range(len(values) - 1)):
+            print("# STALE: non-monotonic — possible bridge reorder or duplicated sample")
+            return 3
+    print("# FRESH: values advanced during the sample window")
+    return 0
+
+
 def cmd_manifests(args):
     from .manifest import ManifestStore
     store = ManifestStore()
@@ -270,6 +320,18 @@ def build_parser():
     sp = sub.add_parser("verify", help="check the ELF matches the flashed firmware (needs hardware)")
     sp.add_argument("--chunks", type=int, default=5, help="chunks sampled per flash segment")
     sp.set_defaults(func=cmd_verify)
+
+    sp = sub.add_parser("freshness",
+                       help="read a field N times, verify it advances (catches wireless-bridge staleness)")
+    sp.add_argument("field", help="symbol or path that increments over time (e.g. s_ekf.x[3])")
+    sp.add_argument("--delay-ms", type=float, default=10.0,
+                    help="delay between samples (default 10 ms)")
+    sp.add_argument("--samples", type=int, default=3,
+                    help="number of samples (default 3, minimum 2)")
+    sp.add_argument("--require-monotonic", action="store_true",
+                    help="for numeric fields, fail if values are not non-decreasing")
+    _transport_args(sp)
+    sp.set_defaults(func=cmd_freshness)
 
     sp = sub.add_parser("manifests", help="list logging manifests")
     sp.set_defaults(func=cmd_manifests)
