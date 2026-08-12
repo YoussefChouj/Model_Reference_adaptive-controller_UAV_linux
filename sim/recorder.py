@@ -113,4 +113,7 @@ class JSONLRecorder(_RecorderBase):
         self._count(t)
 
 
-__all__ = ["CSV_COLUMNS", "Recorder", "CSVRecorder", "JSONLRecorder"]
+__all__ = ["CSV_COLUMNS", "Recorder", "CSVRecorder", "JSONLRecorder",
+           "FEATURE_SERIES_COLUMNS"]
+
+from sim.priors import FEATURE_SERIES_COLUMNS  # noqa: E402  (re-export)

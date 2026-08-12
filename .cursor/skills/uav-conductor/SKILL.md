@@ -164,6 +164,12 @@ is the audit.
 .venv/bin/python -m pytest <test paths from spec ## Tests> -q
 ```
 
+**Never pipe pytest output to `tail`, `head`, `less`, or `more`.** Pytest emits fewer
+lines than you expect (often 1–10 lines for a small spec); a `| tail -N` pipe hangs
+forever waiting for lines that pytest will never emit. Run pytest directly; capture
+exit code via `$?`; if you need to inspect, dump full output to `/tmp/last_pytest.txt`
+first and read the file with the Read tool.
+
 Save the exit code and the last ~30 lines of output. If the suite fails:
 
 - Read the journal (`### Unverified` section) — did the implementer predict this?

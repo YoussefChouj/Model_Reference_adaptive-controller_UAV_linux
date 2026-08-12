@@ -89,6 +89,10 @@ or `.cursor/rules/hardware-safety.mdc`:
 - Firmware constraints (Keil ARMCC V5.06, tight stacks) are in `.cursor/rules/project-context.mdc`.
 - Do not commit, do not push, do not run hardware/flashing/debug-probe tooling.
 - Run tests if the spec names them. Say so if you could not.
+- **Never pipe pytest output to `tail`, `head`, `less`, or `more`.** Pytest emits fewer
+ lines than you expect; a `| tail -N` pipe hangs forever waiting for lines that pytest
+ will never emit (run is already complete). Run pytest directly; capture exit code;
+ dump full output to `/tmp/last_pytest.txt` if you need to inspect.
 
 ### Information hiding — test files are redacted
 

@@ -26,6 +26,7 @@ from typing import Sequence
 import numpy as np
 
 from sim.priors import BasisDeclaration, RegressorVariant
+from sim.priors import from_dimensionless, to_dimensionless  # noqa: F401  (re-export)
 
 NUM_BASIS = 6  # MAX_NUM_BASIS with STRUCTURED + INCLUDE_CONTROL (mrac.h:80-96)
 

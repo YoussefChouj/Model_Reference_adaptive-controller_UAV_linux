@@ -21,7 +21,9 @@ basis functions are declared the same way without hand-derived tables.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
@@ -29,6 +31,11 @@ import numpy as np
 # Plant-tag tuple: (K, p, T). p may be None for the pure integrator (yaw);
 # T is in seconds; K is the lumped input->output gain.
 PlantTag = Tuple[float, object, float]
+
+FEATURE_SERIES_COLUMNS: tuple[str, ...] = (
+    "t", "x", "u_nom", "xm", "e", "phi_0", "phi_1", "phi_2",
+    "phi_3", "phi_4", "phi_5", "theta_dot_norm",
+)
 
 
 def _validate_plant_tag(tag) -> None:
@@ -170,6 +177,93 @@ class RegressorVariant:
 RegressorVariant.DEFAULT = RegressorVariant(name="default", num_basis=6)
 
 
+def _weight_vector(values, name: str) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be 1-D, got shape {arr.shape}")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} contains non-finite values")
+    return arr
+
+
+def _variant_scale(variant: RegressorVariant | None,
+                   num_weights: int) -> np.ndarray:
+    if variant is None:
+        return np.ones(num_weights)
+    if num_weights != variant.num_basis:
+        raise ValueError(
+            f"weight length {num_weights} does not match variant "
+            f"{variant.name!r} num_basis={variant.num_basis}"
+        )
+    scale = np.asarray(variant.scale_vector, dtype=float)
+    if scale.shape != (num_weights,):
+        raise ValueError(
+            f"variant {variant.name!r} scale_vector shape {scale.shape} "
+            f"does not match weight shape {(num_weights,)}"
+        )
+    if not np.all(np.isfinite(scale)) or np.any(scale == 0.0):
+        raise ValueError(
+            f"variant {variant.name!r} scale_vector must be finite and non-zero"
+        )
+    return scale
+
+
+def to_dimensionless(theta: np.ndarray, plant_tag: PlantTag,
+                     variant: RegressorVariant | None = None) -> np.ndarray:
+    """Convert raw weights to ``theta_tilde = theta * K * scale``."""
+    _validate_plant_tag(plant_tag)
+    raw = _weight_vector(theta, "theta")
+    scale = _variant_scale(variant, raw.shape[0])
+    return raw * (float(plant_tag[0]) * scale)
+
+
+def from_dimensionless(theta_tilde: np.ndarray, plant_tag: PlantTag,
+                       variant: RegressorVariant | None = None) -> np.ndarray:
+    """Invert :func:`to_dimensionless` for one plant and variant."""
+    _validate_plant_tag(plant_tag)
+    stored = _weight_vector(theta_tilde, "theta_tilde")
+    scale = _variant_scale(variant, stored.shape[0])
+    return stored / (float(plant_tag[0]) * scale)
+
+
+@dataclass(frozen=True)
+class TargetConstraints:
+    """Plant tags on which a prior may be used; empty means unrestricted."""
+    allowed: tuple[PlantTag, ...] = ()
+
+    def __post_init__(self) -> None:
+        allowed = tuple(self.allowed)
+        for tag in allowed:
+            _validate_plant_tag(tag)
+        object.__setattr__(self, "allowed", allowed)
+
+
+@dataclass(frozen=True)
+class ConvergenceResult:
+    """Convergence evidence recorded alongside a learned prior."""
+    weight_drift: float
+    drive_rms: float
+    final_norm: float
+    max_norm: float
+    well_posed: bool
+
+    def __post_init__(self) -> None:
+        values = (
+            self.weight_drift, self.drive_rms, self.final_norm, self.max_norm,
+        )
+        if not all(np.isfinite(float(value)) for value in values):
+            raise ValueError("convergence metrics must be finite")
+        if any(float(value) < 0.0 for value in values):
+            raise ValueError("convergence metrics must be non-negative")
+        if not isinstance(self.well_posed, (bool, np.bool_)):
+            raise ValueError("well_posed must be a boolean")
+        object.__setattr__(self, "weight_drift", float(self.weight_drift))
+        object.__setattr__(self, "drive_rms", float(self.drive_rms))
+        object.__setattr__(self, "final_norm", float(self.final_norm))
+        object.__setattr__(self, "max_norm", float(self.max_norm))
+        object.__setattr__(self, "well_posed", bool(self.well_posed))
+
+
 @dataclass(frozen=True)
 class Prior:
     """Dimensionless adaptive prior (ADR-0014 D1, D4; ADR-0013 D5).
@@ -230,8 +324,9 @@ class Prior:
         return self.plant_tag[2]
 
     def to_raw(self) -> np.ndarray:
-        """Recover raw ``Theta`` on the source plant: ``Theta = theta_tilde / K_source``."""
-        return self.theta_tilde / self.K
+        """Recover raw ``Theta`` on the source plant and regressor variant."""
+        variant = RegressorVariant.get(self.regressor_variant_id)
+        return from_dimensionless(self.theta_tilde, self.plant_tag, variant)
 
     def convert_to(self, target_plant_tag: PlantTag,
                    target_variant_id: str | None = None) -> "Prior":
@@ -273,3 +368,184 @@ class Prior:
             regressor_variant_id=self.regressor_variant_id,
             source_scenario=scenario,
         )
+
+
+class PriorFactory:
+    """Build a :class:`Prior` from a completed run's recorded state."""
+
+    def __init__(self, plant_tag: PlantTag, variant_id: str,
+                 source_scenario: str) -> None:
+        _validate_plant_tag(plant_tag)
+        if not isinstance(variant_id, str) or not variant_id:
+            raise ValueError("variant_id must be a non-empty string")
+        if not isinstance(source_scenario, str) or not source_scenario:
+            raise ValueError("source_scenario must be a non-empty string")
+        # Resolve the variant in __init__ so an unknown variant_id fails fast
+        # with a clear ValueError, not a KeyError raised lazily in build().
+        try:
+            self._variant = RegressorVariant.get(variant_id)
+        except KeyError as exc:
+            raise ValueError(
+                f"unknown regressor variant {variant_id!r}; "
+                f"registered: {RegressorVariant.all()}"
+            ) from exc
+        self.plant_tag = plant_tag
+        self.variant_id = variant_id
+        self.source_scenario = source_scenario
+
+    def build(self, theta: np.ndarray, convergence: ConvergenceResult,
+              constraints: TargetConstraints | None = None) -> Prior:
+        """Validate ``theta`` and ``convergence``, return an immutable Prior."""
+        if not isinstance(convergence, ConvergenceResult):
+            raise TypeError("convergence must be a ConvergenceResult")
+        if not convergence.well_posed:
+            raise ValueError(
+                "convergence is not well_posed; refusing to build prior "
+                "(ADR-0014 D8)."
+            )
+        raw = _weight_vector(theta, "theta")
+        if constraints is not None and constraints.allowed:
+            if self.plant_tag not in constraints.allowed:
+                raise ValueError(
+                    f"plant_tag {self.plant_tag!r} is not in "
+                    f"constraints.allowed={constraints.allowed}"
+                )
+        return Prior(
+            theta_tilde=to_dimensionless(raw, self.plant_tag, self._variant),
+            plant_tag=self.plant_tag,
+            regressor_variant_id=self.variant_id,
+            source_scenario=self.source_scenario,
+        )
+
+
+class PriorLibrary:
+    """Ordered collection of :class:`Prior` objects keyed by scenario."""
+
+    def __init__(self, name: str, plant_tag: PlantTag, variant_id: str) -> None:
+        if not isinstance(name, str) or not name:
+            raise ValueError("name must be a non-empty string")
+        _validate_plant_tag(plant_tag)
+        if not isinstance(variant_id, str) or not variant_id:
+            raise ValueError("variant_id must be a non-empty string")
+        self.name = name
+        self.plant_tag = plant_tag
+        self.variant_id = variant_id
+        self._priors: list[Prior] = []
+        self._convergence: dict[str, ConvergenceResult] = {}
+
+    def add(self, prior: Prior, convergence: ConvergenceResult) -> None:
+        if not isinstance(prior, Prior):
+            raise TypeError("prior must be a Prior")
+        if not isinstance(convergence, ConvergenceResult):
+            raise TypeError("convergence must be a ConvergenceResult")
+        if prior.plant_tag != self.plant_tag:
+            raise ValueError(
+                f"prior plant_tag {prior.plant_tag!r} does not match "
+                f"library plant_tag {self.plant_tag!r}"
+            )
+        if prior.regressor_variant_id != self.variant_id:
+            raise ValueError(
+                f"prior variant_id {prior.regressor_variant_id!r} does not "
+                f"match library variant_id {self.variant_id!r}"
+            )
+        if prior.source_scenario in self._convergence:
+            raise ValueError(
+                f"duplicate source_scenario {prior.source_scenario!r} "
+                f"in library {self.name!r}"
+            )
+        self._priors.append(prior)
+        self._convergence[prior.source_scenario] = convergence
+
+    def well_posed(self) -> list[Prior]:
+        return [p for p in self._priors
+                if self._convergence[p.source_scenario].well_posed]
+
+    def all(self) -> list[Prior]:
+        return list(self._priors)
+
+    def __len__(self) -> int:
+        return len(self._priors)
+
+    def convergence_for(self, scenario: str) -> ConvergenceResult:
+        if scenario not in self._convergence:
+            raise KeyError(f"no prior stored for source_scenario {scenario!r}")
+        return self._convergence[scenario]
+
+    def to_jsonl(self, path: Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as fh:
+            for prior in self._priors:
+                conv = self._convergence[prior.source_scenario]
+                record = {
+                    "name": self.name,
+                    "plant_tag": list(self.plant_tag),
+                    "variant_id": self.variant_id,
+                    "prior": {
+                        "theta_tilde": list(np.asarray(prior.theta_tilde,
+                                                       dtype=float)),
+                        "plant_tag": list(prior.plant_tag),
+                        "regressor_variant_id": prior.regressor_variant_id,
+                        "source_scenario": prior.source_scenario,
+                    },
+                    "convergence": {
+                        "weight_drift": conv.weight_drift,
+                        "drive_rms": conv.drive_rms,
+                        "final_norm": conv.final_norm,
+                        "max_norm": conv.max_norm,
+                        "well_posed": conv.well_posed,
+                    },
+                }
+                fh.write(json.dumps(record, sort_keys=True) + "\n")
+
+    @classmethod
+    def from_jsonl(cls, path: Path) -> "PriorLibrary":
+        path = Path(path)
+        first: Optional[PriorLibrary] = None
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                if first is None:
+                    first = cls(
+                        name=record["name"],
+                        plant_tag=tuple(record["plant_tag"]),
+                        variant_id=record["variant_id"],
+                    )
+                # Top-level metadata must match the library's pinned values;
+                # a heterogeneous JSONL is a schema violation, not a soft warning.
+                if record["name"] != first.name:
+                    raise ValueError(
+                        f"library name mismatch in {path}: "
+                        f"{record['name']!r} vs {first.name!r}"
+                    )
+                if tuple(record["plant_tag"]) != tuple(first.plant_tag):
+                    raise ValueError(
+                        f"plant_tag mismatch in {path}: "
+                        f"{record['plant_tag']!r} vs {first.plant_tag!r}"
+                    )
+                if record["variant_id"] != first.variant_id:
+                    raise ValueError(
+                        f"variant_id mismatch in {path}: "
+                        f"{record['variant_id']!r} vs {first.variant_id!r}"
+                    )
+                prior = Prior(
+                    theta_tilde=np.asarray(record["prior"]["theta_tilde"],
+                                           dtype=float),
+                    plant_tag=tuple(record["prior"]["plant_tag"]),
+                    regressor_variant_id=record["prior"]["regressor_variant_id"],
+                    source_scenario=record["prior"]["source_scenario"],
+                )
+                conv = ConvergenceResult(
+                    weight_drift=record["convergence"]["weight_drift"],
+                    drive_rms=record["convergence"]["drive_rms"],
+                    final_norm=record["convergence"]["final_norm"],
+                    max_norm=record["convergence"]["max_norm"],
+                    well_posed=bool(record["convergence"]["well_posed"]),
+                )
+                first.add(prior, conv)
+        if first is None:
+            raise ValueError(f"no prior records found in {path}")
+        return first

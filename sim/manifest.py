@@ -30,8 +30,14 @@ def write_manifest(
     machine: Any,
     plant_name: str = "identified",
     spawn_z: float | None = None,
+    prior: dict | None = None,
 ) -> dict:
-    """Write ``manifest.json`` and plain-text receipt sidecars."""
+    """Write ``manifest.json`` and plain-text receipt sidecars.
+
+    ``prior`` is an optional pass-through dict (the ``sim.run.run()`` result's
+    ``"prior"`` entry) emitted as a ``"prior"`` block in the manifest. No
+    schema version bump — existing keys are unchanged.
+    """
     directory = Path(outdir)
     directory.mkdir(parents=True, exist_ok=True)
     scenario_data = scenario_to_dict(scenario) if isinstance(scenario, Scenario) else dict(scenario)
@@ -51,6 +57,8 @@ def write_manifest(
         "cpu_count": os.cpu_count(),
         "spawn_z": float(spawn_z) if spawn_z is not None else None,
     }
+    if prior is not None:
+        manifest["prior"] = prior
     (directory / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
