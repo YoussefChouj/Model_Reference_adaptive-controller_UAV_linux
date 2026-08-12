@@ -29,9 +29,10 @@ from pathlib import Path
 import numpy as np
 
 
-# Column order MUST stay aligned with sim/run.py:46-49. The runner logs the
+# Column order MUST stay aligned with sim/run.py:_COLS. The runner logs the
 # primary columns; the calibrator columns are appended here.
-_PRIMARY_COLS = ["t", "r", "d", "xm", "x", "e", "u_nom", "u_ad", "u", "U", "wnorm", "edot"]
+# prior-06: u_ad_total and u_ff added (authority channel logging).
+_PRIMARY_COLS = ["t", "r", "d", "xm", "x", "e", "u_nom", "u_ad", "u_ad_total", "u_ff", "u", "U", "wnorm", "edot"]
 _CAL_COLS = ["b_a_x", "b_a_y", "b_a_z", "b_g_x", "b_g_y", "b_g_z",
              "gyro_state", "gyro_rejected"]
 
