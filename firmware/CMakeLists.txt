@@ -45,14 +45,6 @@ list(FILTER FW_SOURCES EXCLUDE REGEX ".*portable/RVDS/.*\\.c$")
 # Exclude demo_learning.c (experimental; defines main() colliding with main.c)
 list(FILTER FW_SOURCES EXCLUDE REGEX ".*/demo_learning\\.c$")
 
-# Exclude test/harness/stub files used by the off-target lane
-list(FILTER FW_SOURCES EXCLUDE REGEX ".*/tests/.*\\.c$")
-list(FILTER FW_SOURCES EXCLUDE REGEX ".*/stubs/.*\\.c$")
-list(FILTER FW_SOURCES EXCLUDE REGEX ".*/shim/.*\\.c$")
-list(FILTER FW_SOURCES EXCLUDE REGEX ".*/harness/.*\\.c$")
-# Exclude all Keil RVDS ports — only the GCC ARM_CM4F port is used
-list(FILTER FW_SOURCES EXCLUDE REGEX ".*portable/RVDS/.*\\.c$")
-
 # Exclude ST peripheral drivers not used by the F407ZG project.
 # Filename-only match anchored to end of string with .*/ prefix.
 foreach(driver

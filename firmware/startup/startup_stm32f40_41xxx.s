@@ -21,33 +21,10 @@
 .fpu fpv4-sp-d16
 .thumb
 
-/* ------------------------------------------------------------------
-   Stack / Heap
-   Labels hosted in linker script (firmware/cmake/stm32f407zg.ld)
-   ------------------------------------------------------------------ */
-.equ Stack_Size, 0x00000400
-.equ Heap_Size,  0x00000200
-
-.global Stack_Mem
-.global Heap_Mem
-
-.section .stack,"aw",%nobits
-.balign 4
-.global __StackTop
-.global __StackLimit
-.global __initial_sp
-.skip Stack_Size
-__StackTop:
-__StackLimit:
-__initial_sp:    .word 0   /* placeholder; resolved from linker script */
-
-.section .heap,"aw",%nobits
-.balign 4
-.global __HeapBase
-.global __HeapLimit
-.skip Heap_Size
-__HeapBase:
-__HeapLimit:
+/* Stack and heap sizes — declared in linker script (firmware/cmake/stm32f407zg.ld).
+ * The linker script owns __StackTop / __HeapBase / __HeapLimit and reserves
+ * _stack_size / _heap_size bytes inside ._user_heap_stack. The vector table's
+ * first entry points at __StackTop directly (the value the MCU loads into SP). */
 
 /* ------------------------------------------------------------------
    Vector table
@@ -62,8 +39,8 @@ __HeapLimit:
 .size __Vectors, .-__Vectors
 
 __Vectors:
-    .word __initial_sp              /* Top of Stack                */
-    .word Reset_Handler             /* Reset Handler               */
+    .word __StackTop                /* Top of Stack (value, not label)  */
+    .word Reset_Handler             /* Reset Handler                   */
     .word NMI_Handler               /* NMI Handler                 */
     .word HardFault_Handler         /* Hard Fault Handler         */
     .word MemManage_Handler         /* MPU Fault Handler          */

@@ -62,8 +62,9 @@ SECTIONS
         *(.ARM.exidx*)
         *(.arm.exidx*)
     } > FLASH
+    /* Cortex-M4 has no unwind tables; exidx is empty in practice.
+     * Keil puts this in IRAM1 by convention; FLASH is correct and saves RAM. */
 
-    /* CCM RAM — used for fast zero-copy scratch */
     .ccm :
     {
         . = ALIGN(4);
@@ -72,6 +73,7 @@ SECTIONS
         . = ALIGN(4);
     } > CCM
 
+    /* Initialised data: VMA in SRAM, LMA in FLASH. Reset_Handler copies. */
     .data :
     {
         . = ALIGN(4);
@@ -81,34 +83,7 @@ SECTIONS
         . = ALIGN(4);
         _edata = .;
     } > SRAM AT > FLASH
-
-    /* Initialised data loaded from flash to SRAM */
-    .data_load :
-    {
-        . = ALIGN(4);
-        _sdata_load = .;
-        *(.data)
-        *(.data*)
-        . = ALIGN(4);
-        _edata_load = .;
-    } > FLASH
-
-    ._user_heap_stack :
-    {
-        . = ALIGN(8);
-        _end = .;
-        __end = .;
-        end = .;          /* newlib's sbrk() expects this */
-        _heap_start = .;
-        . = . + _heap_size;
-        . = ALIGN(8);
-        __HeapLimit = .;
-        _heap_end = .;
-        . = . + _stack_size;
-        . = ALIGN(8);
-        __StackTop = .;
-        __StackLimit = __StackTop - _stack_size;
-    } > SRAM
+    _sdata_load = LOADADDR(.data);
 
     .bss :
     {
@@ -123,13 +98,32 @@ SECTIONS
         __bss_end__ = _ebss;
     } > SRAM
 
+    /* Heap + stack reservation. Stack grows down from __StackTop.
+     * Reset_Handler reads __StackTop into MSP via the vector table.
+     * newlib _sbrk() walks _end..__HeapLimit. */
+    ._user_heap_stack (NOLOAD) :
+    {
+        . = ALIGN(8);
+        _end = .;
+        __end = .;
+        end = .;
+        __HeapBase = .;
+        _heap_start = .;
+        . = . + _heap_size;
+        . = ALIGN(8);
+        __HeapLimit = .;
+        _heap_end = .;
+        . = . + _stack_size;
+        . = ALIGN(8);
+        __StackTop = .;
+        __StackLimit = __StackTop - _stack_size;
+        _estack = __StackTop;
+    } > SRAM
+
     /DISCARD/ :
     {
         libc.a (*)
         libm.a (*)
         libgcc.a (*)
     }
-
-    /* Symbol references used by startup */
-    _estack = __StackTop;
 }
