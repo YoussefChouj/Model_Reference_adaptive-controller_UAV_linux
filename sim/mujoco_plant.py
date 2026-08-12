@@ -64,6 +64,7 @@ class MujocoPlant(Plant):
         self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
         self.thrust_delay_s = float(thrust_delay_s)
         self.motor_tau = float(motor_tau)
+        self.model_xml = model_xml
         cfg = MujocoBridgeConfig(
             dt=dt,
             mass=self.airframe.mass,
@@ -131,7 +132,3 @@ class MujocoPlant(Plant):
         }
         return self._bridge.step(self._last_U)
 
-
-def _make_mujoco(dt: float) -> MujocoPlant:
-    """Registry factory — ``build_plant("mujoco", dt)`` uses this."""
-    return MujocoPlant(dt=dt)
