@@ -94,10 +94,16 @@ def flash(hex_path: Path, frequency_hz: int = 5_000_000) -> FlashResult:
     uid = "unknown"
 
     try:
+        # connect_mode=attach + resume_on_disconnect=False matches livewatch's
+        # safety contract: do not halt the core, do not resume on disconnect.
+        # reset_type=system forces AIRCR.SYSRESETREQ for both the implicit
+        # connect-time reset and the explicit post-flash reset; 'default'
+        # would use the target's own choice (also usually 'system').
         session = ConnectHelper.session_with_chosen_probe(
             options={
                 **_PROBE_CONFIG,
                 "frequency": frequency_hz,
+                "reset_type": "system",
             }
         )
         if session is None:
@@ -116,7 +122,9 @@ def flash(hex_path: Path, frequency_hz: int = 5_000_000) -> FlashResult:
             target.mass_erase()
             bytes_prog = int(board.program(hex_path, smart_flash=True))
 
-            # Post-flash system reset (NVIC AIRCR.SYSRESETREQ, no core halt)
+            # Post-flash system reset (NVIC AIRCR.SYSRESETREQ, no core halt).
+            # reset_type='system' on session ensures both the implicit and
+            # explicit reset use this path.
             target.system_reset()
 
             elapsed = time.monotonic() - start
