@@ -292,13 +292,30 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
                       source_scenario=scenario.name),
                   theta=theta_hist[-1],
                   convergence=conv),
-              "_cal_log": cal_history}
+              "_cal_log": cal_history,
+              # manifest: sim-arch-04 schema consolidation
+              "scenario_dict": {"name": scenario.name},
+              "git_sha": "unknown",   # filled by write_manifest caller
+              "sim_sha": "unknown",
+              "urdf_sha": "unknown",
+              "wall_time_s": 0.0,
+              "sim_time_s": 0.0,
+              "exit_reason": "completed",
+              "machine": None,
+              "spawn_z": None,
+              "plant_name": "identified",
+              }
 
     if write_artifacts:
         base = runs_dir if runs_dir is not None else _RUNS_DIR
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         outdir = Path(base) / f"{ts}_{scenario.name}"
-        RunArtifactWriter(outdir).write(result, scenario=scenario)
+        from sim.manifest_schema import ManifestPayload
+        payload = ManifestPayload.from_run_result(result)
+        from sim.manifest import write_manifest
+        write_manifest(outdir, payload=payload)
+        RunArtifactWriter(outdir).write(result, scenario=scenario,
+                                        manifest_payload=payload)
         # Per-tick features.csv (FEATURE_SERIES_COLUMNS, ADR-0014 D3).
         _write_features_csv(outdir, log, theta_hist, dt, axis)
         result["outdir"] = str(outdir)

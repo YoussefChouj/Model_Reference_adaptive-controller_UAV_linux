@@ -47,12 +47,19 @@ class RunArtifactWriter:
         self.outdir = Path(outdir)
         (self.outdir / "plots").mkdir(parents=True, exist_ok=True)
 
-    def write(self, result: dict, *, scenario) -> None:
-        """Write CSV, metrics.json, plots, and report.md."""
+    def write(self, result: dict, *, scenario,
+              manifest_payload=None) -> None:
+        """Write CSV, metrics.json, plots, and report.md.
+
+        ``manifest_payload`` is an optional ``ManifestPayload`` instance.  When
+        supplied, the report header reads ``payload.envelope`` instead of
+        ``result.get("envelope", "deployment")`` so the report is always
+        consistent with the manifest schema.
+        """
         self._write_csv(result)
         self._write_metrics_json(result)
         self._write_plots(result)
-        self._write_report(result, scenario)
+        self._write_report(result, scenario, manifest_payload)
 
     # ------------------------------------------------------------------
     # CSV
@@ -130,8 +137,9 @@ class RunArtifactWriter:
     # ------------------------------------------------------------------
     # report.md
     # ------------------------------------------------------------------
-    def _write_report(self, result: dict, scenario) -> None:
-        lines = self._build_report_lines(result, scenario)
+    def _write_report(self, result: dict, scenario,
+                       manifest_payload=None) -> None:
+        lines = self._build_report_lines(result, scenario, manifest_payload)
         (self.outdir / "report.md").write_text("\n".join(lines))
 
     @staticmethod
@@ -148,7 +156,8 @@ class RunArtifactWriter:
         return str(v)
 
     @classmethod
-    def _build_report_lines(cls, result: dict, scenario) -> list[str]:
+    def _build_report_lines(cls, result: dict, scenario,
+                            manifest_payload=None) -> list[str]:
         m = result["metrics"]
         rt = {0: "passthrough", 1: "first-order", 2: "second-order"}.get(
             result.get("ref_model_type"), "?")
@@ -159,12 +168,19 @@ class RunArtifactWriter:
                 return []
             return [f"### {title}", "", "| metric | value |", "|---|---|", *rows, ""]
 
+        # Read envelope from ManifestPayload if provided; fall back to result;
+        # the deployment envelope is the default, not "unknown".
+        if manifest_payload is not None:
+            envelope_str = manifest_payload.envelope or "deployment"
+        else:
+            envelope_str = result.get("envelope", "deployment")
+
         return [
             f"# Sim run -- {scenario.name}", "",
             f"- **Axis**: {scenario.axis}",
             f"- **Description**: {scenario.description}",
             f"- **Reference model**: {rt} (type {result.get('ref_model_type')})",
-            f"- **Adaptive envelope**: {result.get('envelope', 'unknown')} (spec-11)",
+            f"- **Adaptive envelope**: {envelope_str} (spec-11 / sim-arch-04)",
             f"- **MRAC injection**: {'ON' if result['injection'] else 'OFF (shadow)'}",
             f"- **dt**: {result['dt']} s ({1 / result['dt']:.0f} Hz)",
             f"- **Stable**: **{cls._fmt(m.get('stable'))}**", "",
