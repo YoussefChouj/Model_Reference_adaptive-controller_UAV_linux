@@ -477,6 +477,7 @@ class RigidBodyPlant(Plant):
                  airframe: Airframe | None = None,
                  motor_tau: float = DEFAULT_MOTOR_TAU,
                  thrust_delay_s: float = 0.0,
+                 axis_delays: dict[str, int] | None = None,
                  initial_state: dict | None = None):
         self.dt = dt
         self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
@@ -491,6 +492,19 @@ class RigidBodyPlant(Plant):
         # one per motor, matching the MujocoPlant bridge.
         self._thrust_delay = ActuatorDelayBuffer(round(thrust_delay_s / dt),
                                                  n_axes=4)
+        # prior-02: axis-level transport delay on roll/pitch/yaw commands,
+        # applied BEFORE the mixer. Defaults from CANONICAL_MODELS (seconds)
+        # converted to integer samples; yaw = 0 (identified value).
+        _defaults = {ax: int(round(m.delay / dt))
+                     for ax, m in CANONICAL_MODELS.items()}
+        _overrides = dict(axis_delays) if axis_delays else {}
+        self._axis_delays = {
+            ax: int(_overrides.get(ax, _defaults.get(ax, 0)))
+            for ax in ("roll", "pitch", "yaw")
+        }
+        self._axis_delay_roll = ActuatorDelayBuffer(self._axis_delays["roll"], n_axes=1)
+        self._axis_delay_pitch = ActuatorDelayBuffer(self._axis_delays["pitch"], n_axes=1)
+        self._axis_delay_yaw = ActuatorDelayBuffer(self._axis_delays["yaw"], n_axes=1)
         self.reset(initial_state)
 
     def reset(self, initial_state: dict | None = None) -> None:
@@ -542,6 +556,18 @@ class RigidBodyPlant(Plant):
         self._thrust_delay.reset()
         for _ in range(self._thrust_delay.N):
             self._thrust_delay.step(np.full(4, T_each))
+        # prior-02: warm-preload axis delay FIFOs with hover command (0 for
+        # roll/pitch/yaw). The first N reads return 0, matching Identified-
+        # Plant/_AxisSim behaviour. N=0 for any axis is a passthrough.
+        self._axis_delay_roll.reset()
+        self._axis_delay_pitch.reset()
+        self._axis_delay_yaw.reset()
+        for _ in range(self._axis_delay_roll.N):
+            self._axis_delay_roll.step(np.array([0.0]))
+        for _ in range(self._axis_delay_pitch.N):
+            self._axis_delay_pitch.step(np.array([0.0]))
+        for _ in range(self._axis_delay_yaw.N):
+            self._axis_delay_yaw.step(np.array([0.0]))
 
     def _quat_normalise(self) -> None:
         n = np.linalg.norm(self.q)
@@ -589,8 +615,22 @@ class RigidBodyPlant(Plant):
         For consistency with the rate-loop seam, all four axes are
         accepted and converted to mixer units here.
         """
+        # --- prior-02: axis-level transport delay applied at actuator input
+        # (before the mixer). Matches the physical ordering: command transport
+        # lag -> ESC/motor response. N=0 for any axis is a passthrough.
+        u_roll = float(u.get("roll", 0.0))
+        u_pitch = float(u.get("pitch", 0.0))
+        u_yaw = float(u.get("yaw", 0.0))
+        u_roll_eff = float(self._axis_delay_roll.step(np.array([u_roll]))[0])
+        u_pitch_eff = float(self._axis_delay_pitch.step(np.array([u_pitch]))[0])
+        u_yaw_eff = float(self._axis_delay_yaw.step(np.array([u_yaw]))[0])
         # --- 1. Mixer: per-axis commands -> per-motor mixer-unit commands
-        motor_cmd = _mixer_to_motor_commands(u)
+        motor_cmd = _mixer_to_motor_commands({
+            "roll": u_roll_eff,
+            "pitch": u_pitch_eff,
+            "yaw": u_yaw_eff,
+            "z": u.get("z", 0.0),
+        })
         # Convert mixer units to thrust (N). The throttle axis is
         # commanded in N already by convention (u['z'] carries total
         # thrust after the position loop); the roll/pitch/yaw axes
@@ -612,9 +652,9 @@ class RigidBodyPlant(Plant):
         thrust_target = np.full(4, T_each_nominal, dtype=float)
         # Apply roll/pitch differential as planar arm torque.
         # Roll differential: (m1 + m4) - (m2 + m3) in mixer units.
-        r_roll = float(u.get("roll", 0.0))
-        r_pitch = float(u.get("pitch", 0.0))
-        r_yaw = float(u.get("yaw", 0.0))
+        r_roll = u_roll_eff
+        r_pitch = u_pitch_eff
+        r_yaw = u_yaw_eff
         # Each unit of roll_u (firmware u, body-rate setpoint in
         # rad/s after the inner rate loop) translates to per-motor
         # differential thrust via a calibrated gain. The firmware's

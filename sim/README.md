@@ -25,7 +25,7 @@ transfers between `API/mrac.c` and here with **zero rescaling** (ADR-0006 D1).
 
 | Module | Mirrors | Role |
 |---|---|---|
-| `plant.py` | — (identified models) | Rate-loop plant seam `step(u_dict)->state_dict`; ZOH + integer transport-delay buffer. `IdentifiedPlant`, `RigidBodyPlant`, `MujocoPlant`. `CANONICAL_MODELS` is the **single source of truth** for the identified per-axis plants (scenarios reads it too). |
+| `plant.py` | — (identified models) | Rate-loop plant seam `step(u_dict)->state_dict`; ZOH + integer transport-delay buffer. Three implementations share the seam: `IdentifiedPlant` (per-axis identified rate plants, each axis carries integer-sample FIFO delay N from `CANONICAL_MODELS` — roll=3, pitch=2, yaw=0 samples at 200 Hz); `RigidBodyPlant` (analytic 6-DOF, same axis delays applied at actuator input before the mixer, plus optional per-motor thrust delay via `thrust_delay_s`); `MujocoPlant` (MuJoCo-backed 6-DOF, no transport delay — spec 03 scope excludes transport delay). `CANONICAL_MODELS` is the **single source of truth** for the identified per-axis plants (scenarios reads it too). |
 | `reference_model.py` | `mrac.c:168-196` | Per-axis `xm` recurrence + adaptive-law gains (`P`, and `Pe`/`Pedot` for 2nd order). `for_axis(..., ref_model_type=)` mirrors the firmware CMD-0x13 runtime switch — pass `0/1/2` to force passthrough/1st/2nd on any axis. `l1`/`l2` = CRM feedback gain `L` (ADR-0008); `Pe`/`Pedot` are the analytic 2×2 Lyapunov solution for `Am−L·C`, collapsing to ADR-0007 when `L=0`. |
 | `regressor.py` | `mrac.c:65-91` | 6-basis structured regressor `[bias, x, x·tanh x, cross, u_nom, xm]`. |
 | `drive.py` | (the `s` in `mrac.c`) | **Lyapunov-drive seam**: `s = eᵥᵀ P B`. Two adapters — `scalar_drive` (ADR-0003) and `state_space_drive` (ADR-0007). A new law (CRM, set-theoretic) is a new Drive, not another branch in `update()`. |
@@ -40,23 +40,26 @@ transfers between `API/mrac.c` and here with **zero rescaling** (ADR-0006 D1).
 | `runner.py` | — | **Deleted** (ADR-0012 D1). Scenario execution lives in `run.py`. |
 | `sanity.py` | — | Per-plant SysID gain-matching gate (ADR-0012 D5). Instantiates a plant, runs a step excitation, compares measured `(K, p, T)` against `CANONICAL_MODELS`. Replaced the Gazebo-era hover gate. |
 
-## Delay wrapper (ADR-0012 D6)
+## Delay wrapper (ADR-0012 D6; prior-02)
 
 Every 6-DOF plant used for prior learning carries an **actuator transport delay**
-on per-motor thrust, because weights learned on a delay-free plant are
-systematically over-confident. One primitive, `sim/delay.py:ActuatorDelayBuffer`,
-is shared by all plants (`N = round(T/dt)` integer-sample FIFO, `N=0` passthrough):
+because weights learned on a delay-free plant are systematically over-confident.
+One primitive, `sim/delay.py:ActuatorDelayBuffer`, is shared by all plants
+(`N = round(T/dt)` integer-sample FIFO, `N=0` passthrough):
 
-- `_AxisSim` (the `IdentifiedPlant` rate axis) delays its scalar input.
-- `RigidBodyPlant(thrust_delay_s=...)` delays the 4-per-motor thrust target,
-  pre-loading the FIFO with hover thrust so a plant holding hover keeps producing
-  hover during the lag (matching the MujocoPlant bridge's reset warm-up).
-- `MujocoPlant(thrust_delay_s=...)` delays per-motor thrust inside `mujoco_bridge`.
+| Plant | What is delayed | Where | Default N (200 Hz) |
+|---|---|---|---|
+| `IdentifiedPlant` / `_AxisSim` | Per-axis scalar input | Before the state update | roll=3, pitch=2, yaw=0 samples |
+| `RigidBodyPlant` | Per-axis roll/pitch/yaw command | At actuator input, before mixer | roll=3, pitch=2, yaw=0 samples |
+| `RigidBodyPlant` | Per-motor thrust target | After mixer, before motor LPF | configurable via `thrust_delay_s` |
+| `MujocoPlant` | — | — | No transport delay (spec 03 scope) |
 
-Default `thrust_delay_s=0` (or `delay=0`) is a pure passthrough — bit-identical to
-the pre-change plants. The delay and the motor LPF commute as LTI operators, so a
-delayed plant's response is exactly the undelayed response shifted by N ticks
-(verified in `test_plant.py::test_rigid_body_plant_thrust_delay_shifts_response_by_N`).
+For `RigidBodyPlant` the **axis delay is applied at the actuator input** (before the
+mixer). The physical ordering is: command transport lag → ESC/motor response.
+The motor-side `thrust_delay_s` (ADR-0012 D6) remains separately configurable.
+
+Default N per axis is derived from `CANONICAL_MODELS.delay` converted to integer
+samples: `N = round(delay_s / dt)`. Override per-axis with `axis_delays={"roll": 3, ...}`.
 
 ## Three prior-injection channels (ADR-0013 D4–D7; prior-06)
 
