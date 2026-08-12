@@ -126,9 +126,6 @@ target_compile_options(${TARGET_JX_FLY}.elf PRIVATE
 
     # Sections
     -ffunction-sections -fdata-sections
-
-    # Libraries
-    --specs=nano.specs
 )
 
 # ------------------------------------------------------------------
@@ -141,7 +138,7 @@ target_link_options(${TARGET_JX_FLY}.elf PRIVATE
     -mcpu=cortex-m4 -mthumb
     -mfloat-abi=hard -mfpu=fpv4-sp-d16
 
-    # Libraries
+    # Libraries — newlib nano + nosys. Specs belong here, not in compile opts.
     --specs=nano.specs --specs=nosys.specs
     -lc -lm -lnosys
 

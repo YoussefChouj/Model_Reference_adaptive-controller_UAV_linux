@@ -43,16 +43,13 @@ def toolchain_present() -> LinuxPreflightResult:
 
 
 def cmsis_dap_present() -> LinuxPreflightResult:
-    """Is a CMSIS-DAP probe enumerated and not held by another process?"""
-    from pyocd.probe.cmsis_dap_probe import CMSISDAPProbe
-    try:
-        probes = CMSISDAPProbe.get_all_connected_probes()
-    except Exception as exc:
-        return LinuxPreflightResult(
-            ok=False,
-            failed=["cmsis_dap"],
-            details={"cmsis_dap": f"pyocd error: {exc}"},
-        )
+    """Is a CMSIS-DAP probe enumerated and not held by another process?
+
+    Uses the shared enumerate_probes() helper from the package __init__.
+    Never raises — pyocd absent returns empty list (caught above).
+    """
+    from ground_station.flashtool_linux import enumerate_probes
+    probes = enumerate_probes()
     if not probes:
         return LinuxPreflightResult(
             ok=False,
@@ -60,7 +57,8 @@ def cmsis_dap_present() -> LinuxPreflightResult:
             details={
                 "cmsis_dap": (
                     "no probe enumerated — check USB connection, "
-                    "or another process holds the probe (uVision debug session, livewatch)"
+                    "or another process holds the probe (uVision debug session, livewatch). "
+                    "If pyocd is not installed: pip install pyocd."
                 )
             },
         )

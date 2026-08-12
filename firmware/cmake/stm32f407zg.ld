@@ -56,14 +56,14 @@ SECTIONS
         . = ALIGN(4);
     } > FLASH
 
-    /* ARM exception handlers — must be in SRAM for hardware faults */
+    /* ARM exception index tables — C++ exception unwinding metadata.
+     * Cortex-M4 has no unwind tables; exidx is empty in practice.
+     * Keil puts this in IRAM1 by convention; FLASH is correct and saves RAM. */
     .ARM.exidx :
     {
         *(.ARM.exidx*)
         *(.arm.exidx*)
     } > FLASH
-    /* Cortex-M4 has no unwind tables; exidx is empty in practice.
-     * Keil puts this in IRAM1 by convention; FLASH is correct and saves RAM. */
 
     .ccm :
     {

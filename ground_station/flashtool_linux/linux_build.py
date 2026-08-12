@@ -49,12 +49,30 @@ class BuildResult:
 
 
 def _env() -> dict:
-    """Environment with arm-none-eabi toolchain on PATH."""
+    """Environment with the arm-none-eabi toolchain on PATH.
+
+    Searches several common install locations: PATH itself, the ARM GNU
+    Toolchain tarball default, the user's local prefix, and the apt-prefix
+    symlink location. Returns the env unchanged if gcc is already findable.
+    """
     import os
+    import shutil
+
     env = dict(os.environ)
-    toolchain_bin = Path.home() / ".local" / "arm-toolchain" / "bin"
-    if str(toolchain_bin) not in env.get("PATH", ""):
-        env["PATH"] = f"{toolchain_bin}:{env.get('PATH', '')}"
+    if shutil.which("arm-none-eabi-gcc", path=env.get("PATH")):
+        return env
+
+    home = Path.home()
+    candidates = [
+        home / ".local" / "arm-toolchain" / "bin",                              # setup_linux_toolchain.sh
+        home / "opt" / "arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi" / "bin",  # ARM GNU tarball
+        Path("/opt/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi/bin"),     # system-wide tarball
+        Path("/usr/bin"),                                                       # apt: gcc-arm-none-eabi
+    ]
+    for d in candidates:
+        if (d / "arm-none-eabi-gcc").exists():
+            env["PATH"] = f"{d}:{env.get('PATH', '')}"
+            return env
     return env
 
 
