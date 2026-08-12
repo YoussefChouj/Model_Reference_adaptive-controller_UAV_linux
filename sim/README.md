@@ -32,8 +32,10 @@ transfers between `API/mrac.c` and here with **zero rescaling** (ADR-0006 D1).
 | `adaptive_law.py` | `mrac.c:93-276` | Lyapunov gradient update: projection / σ- & e-mod / deadzone / hard-freeze / tanh-sat / L1 / perf-recovery. Selects a `drive.py` adapter; one-file swap point for new laws. |
 | `baseline.py` | `pid.c` ComputePID | Inner rate PID (`gyrox/gyroy/gyroz` gains), deg/s in → mixer `U` → `u_nom = U/mrac_to_mixer` (Nm). |
 | `loop.py` | `mrac.c:424-485` | **Wiring seam** `ControlLoop.tick`: one closed-loop tick (ref → e → PID → regressor → law → plant), separate from logging. Where a closed-loop reference model would plug in. |
-| `scenarios.py` | — | Step / doublet / yaw-test (tracking) + inertia-offset / disturbance (dynamics change). |
-| `metrics.py` | — | **Run evaluation** (pure, log-only): tracking (IAE/ISE/ITAE/settling/overshoot), control effort + saturation, adaptation health (active fraction, bound saturation), robustness (`ė` RMS, zero-crossings), disturbance recovery. Tested on synthetic logs. |
+| `scenarios.py` | — | Rate-loop step/doublet/yaw/disturbance scenarios + trajectory scenario family (prior-10). `TRAJECTORY_SCENARIOS`, `run_trajectory_scenario`, `run_ds_sweep`. |
+| `metrics.py` | — | **Run evaluation** (pure, log-only): tracking (IAE/ISE/ITAE/settling/overshoot), control effort + saturation, adaptation health (active fraction, bound saturation), robustness (`ė` RMS, zero-crossings), disturbance recovery, trajectory path metrics (cross-track, along-track, max_error, transient_error). Tested on synthetic logs. |
+| `trajectory_runner.py` | — | Drives `RigidBodyPlant` + `OuterLoop` along a trajectory. `WaypointAccumulator` (Δs quantiser, firmware-parity), closed-form cross-track wiring. |
+| `trajectories.py` | — | Dense trajectory preset generators: circle, lemniscate, polygon, waypoints, sinusoid, figure8 (Bernoulli/Gerono). Closed-form curve descriptors (`CircleCurve`, `BernoulliCurve`, `GeronoCurve`, `SinusoidCurve`) for analytic cross-track. |
 | `run.py` | — | Closed-loop runner: owns the clock + log arrays, calls `loop.tick`, then `metrics.compute`; writes the per-run artifact folder. |
 | `runner.py` | — | **Deleted** (ADR-0012 D1). Scenario execution lives in `run.py`. |
 | `sanity.py` | — | Per-plant SysID gain-matching gate (ADR-0012 D5). Instantiates a plant, runs a step excitation, compares measured `(K, p, T)` against `CANONICAL_MODELS`. Replaced the Gazebo-era hover gate. |
@@ -102,6 +104,105 @@ Each run writes `sim/runs/<timestamp>_<scenario>/` (gitignored, ADR-0006 D7):
 `metrics.json` (grouped `track_*/ctrl_*/adapt_*/robust_*/dist_*`), `report.md`.
 Programmatic use: `from sim.run import run; res = run(scenarios.step("roll"), injection=True)`.
 Reproduce the as-flown power-on default (passthrough): `run(sc, ref_model_type=0)`.
+
+## Trajectory-tracking scenarios (prior-10)
+
+**Thesis context**: the primary claim is dense trajectory tracking. Airframe-invariant priors
+are instrumental to it. This module makes trajectory tracking a first-class scenario family,
+swept over waypoint spacing `Δs`.
+
+### Presets
+
+All presets match `TASK/AutoflyTask.c` parameterisation exactly so that simulated runs
+can be compared against real flights on the same geometry.
+
+|| Preset | Firmware equivalent | Geometry |
+||---|---|---|
+|| `sinusoid(axis, center, amplitude, frequency)` | `sinusoid_path` | Single-axis oscillation |
+|| `figure8(type=0)` | `figure8_path` type=0 | Bernoulli lemniscate (lying ∞) |
+|| `figure8(type=1)` | `figure8_path` type=1 | Gerono lemniscate (taller y) |
+|| `circle` | `circle_path` | Constant-radius, XZ plane |
+|| `lemniscate` | — (spec 4a baseline) | Bernoulli, published anchors available |
+|| `polygon` | — | N-sided regular polygon, sharp corners |
+|| `waypoints` | TWC via `SDK_Cmd_Pos*` | User-supplied point list |
+
+### Waypoint spacing `Δs`
+
+`Δs` is the **reference quantisation** knob. Dense references (small `Δs`) give a
+smooth setpoint; sparse references (large `Δs`) give a staircase that stresses the
+adaptation. Density and traversal speed are **independent knobs**: `Δs` changes the
+*shape* of the reference signal, not its speed.
+
+The sweep values are `{0, 0.02, 0.05, 0.10, 0.25}` m. `Δs=0` means continuous
+(no quantisation).
+
+**Unit contract**: positions are in metres for all axes. The firmware scales the Z
+delta by ×100 before computing Euclidean distance (z is metres, x/y are cm in the PID).
+The Python `WaypointAccumulator` mirrors this: `ds = sqrt(dx² + dy² + (dz·100)²)`.
+
+### Cross-track and along-track
+
+Cross-track error is the **perpendicular distance** from the flown XY position to the
+**closed-form ideal curve** — not to the committed waypoint. This decouples shape
+fidelity from quantisation. Along-track lag is the **tangential arc displacement** along
+the same curve.
+
+The `closed_form_cross_track(traj, x, y, t)` function in `sim/trajectories.py`
+returns `(cross_track_m, along_track_m)` for circle, figure8, and sinusoid presets.
+Polygon and lemniscate fall back to the polyline projector.
+
+Analytic validation: a perfectly flown circle gives zero cross-track error.
+
+### Published anchors (do not flattery the comparison)
+
+These are hardware numbers on different airframes at different speeds. Cite them as
+context for the reader, never as a like-for-like score against simulated runs.
+
+| Source | Preset | Error | Notes |
+|---|---|---|---|
+| Neural-Fly (arxiv 2022) | Figure-8 | 2.9 cm mean | Still air |
+| RAPTOR | Figure-8 | 0.19 m RMSE | 5.5 s run, Crazyflie |
+| NMPC+INDI | Figure-8 | 0.102 m | vs 0.343 m for NMPC+PID |
+
+### Running
+
+```bash
+python -m sim.run traj_circle          # any key in scenarios.TRAJ_ALL
+python -m sim.run traj_figure8_bernoulli
+pytest sim/tests/test_trajectory_scenarios.py -v
+```
+
+Programmatic sweep:
+
+```python
+from sim.scenarios import TRAJECTORY_SCENARIOS, run_ds_sweep, DS_SWEEP_VALUES
+from sim import metrics as M
+
+scenario = TRAJECTORY_SCENARIOS["traj_figure8_bernoulli"]
+results = run_ds_sweep(scenario, write_artifacts=False)
+for r in results:
+    m = M.compute_path(r["log"], dt=0.005)
+    print(f"{r['scenario']}: RMS={m['path_rms_cross_track']:.4f}  "
+          f"max_error={m['path_max_error']:.4f}  "
+          f"transient={m['path_transient_error']:.4f}")
+```
+
+### Simulation numbers are not directly comparable to flight numbers
+
+The outer-loop path (`OuterLoop` → `RigidBodyPlant`) is validated against firmware
+parity on rate-loop scenarios. Trajectory-tracking performance has **not yet been
+validated against a real flight log**. Do not cite simulated trajectory RMSE against
+published hardware benchmarks until that validation is complete.
+
+### Adaptation-activity metrics
+
+MRAC must be in the trajectory loop to measure adaptation activity. This is deferred
+to `prior-06` (injection seam), which wires `sim/loop.py`'s rate loop into the
+cascade. Until then, the trajectory runner uses `OuterLoop` (P/PI) which does not
+exercise adaptation. When `prior-06` lands, `TrajectoryScenario.use_mrac=True` will
+activate MRAC in trajectory mode and `metrics.compute_path` will gain
+`adapt_active_fraction` and `adapt_converged_weights` from the same log keys
+(`e`, `wnorm`) that `metrics.compute` already reads.
 
 ## Phase-1 findings (firmware behaviour confirmed by spec 00 + 00b)
 

@@ -1,5 +1,5 @@
 """Trajectory runner — drives the 6-DOF plant + outer loops along a
-predefined trajectory (spec 4a).
+predefined trajectory (spec 4a / prior-10).
 
 This is the closed-loop runner for the *trajectory* lane. The existing
 ``sim.run.run`` runner is the rate-loop runner; it operates on a
@@ -10,6 +10,8 @@ runs need:
   * the outer loops (``OuterLoop``) to convert position/attitude targets
     into per-axis rate + thrust commands
   * a dense waypoint sequence (from ``sim.trajectories``)
+  * an optional ``WaypointAccumulator`` that quantises the continuous
+    reference at spacing ``Δs`` metres (firmware parity)
 
 The output schema matches ``sim.run.run`` as closely as possible: a
 ``log`` dict with the same keys (so existing metrics + plots work),
@@ -35,9 +37,74 @@ import numpy as np
 
 from sim.outer_loops import OuterLoop
 from sim.plant import CANONICAL_AIRFRAME, Plant, RigidBodyPlant
-from sim.trajectories import Trajectory
+from sim.trajectories import Trajectory, closed_form_cross_track
 
 _RUNS_DIR = Path(__file__).resolve().parent / "runs"
+
+
+# ---------------------------------------------------------------------------
+# Firmware-parity waypoint accumulator (Δs quantiser)
+# ---------------------------------------------------------------------------
+
+class WaypointAccumulator:
+    """Reproduces the firmware's waypoint-spacing quantiser.
+
+    Each 200 Hz tick the mode computes its *continuous* parametric target.
+    A shared accumulator sums Euclidean distance moved since the last
+    commit. When ``accum >= Δs`` the target is committed and the
+    accumulator resets; between commits the target is held.
+
+    **Unit contract**: positions are in metres for ALL axes. The firmware
+    scales z by ×100 before computing Euclidean distance (z is metres,
+    x/y are cm in the firmware PID). In simulation: positions are all in
+    metres, but the z delta is scaled ×100 so that ``Δs`` in metres is
+    uniform across axes. ``Δs = 0`` means continuous (pass through).
+
+    Reference: ``TASK/AutoflyTask.c`` lines 54-101.
+    """
+
+    def __init__(self, delta_s_m: float = 0.0):
+        self.delta_s = float(delta_s_m)
+        self._accum = 0.0
+        self._last: tuple[float, float, float] | None = None
+        self._committed: tuple[float, float, float] | None = None
+        self._have_last = False
+
+    def reset(self) -> None:
+        self._accum = 0.0
+        self._last = None
+        self._committed = None
+        self._have_last = False
+
+    def tick(self, cont_x: float, cont_y: float,
+             cont_z: float) -> tuple[float, float, float]:
+        """Update the accumulator with the continuous target.
+
+        Returns the committed (possibly held) waypoint for this tick.
+        """
+        if self.delta_s <= 0.0:
+            self._last = (cont_x, cont_y, cont_z)
+            self._committed = (cont_x, cont_y, cont_z)
+            return self._committed
+
+        if not self._have_last:
+            self._last = (cont_x, cont_y, cont_z)
+            self._committed = (cont_x, cont_y, cont_z)
+            self._accum = 0.0
+            self._have_last = True
+            return self._committed
+
+        lx, ly, lz = self._last
+        dx = cont_x - lx
+        dy = cont_y - ly
+        dz = (cont_z - lz) * 100.0  # z in metres; scale to cm-equivalent
+        self._accum += math.sqrt(dx * dx + dy * dy + dz * dz)
+        self._last = (cont_x, cont_y, cont_z)
+
+        if self._accum >= self.delta_s:
+            self._committed = (cont_x, cont_y, cont_z)
+            self._accum = 0.0
+        return self._committed
 
 
 def _lerp_waypoint(traj: Trajectory, t: float) -> np.ndarray:
@@ -107,29 +174,49 @@ def _state_dict_from_plant(plant: RigidBodyPlant) -> dict:
 
 
 def run_trajectory(trajectory: Trajectory, *,
-                   dt: float = 0.005,
-                   plant: Plant | None = None,
-                   outer: OuterLoop | None = None,
-                   initial_state: Optional[dict] = None,
-                   write_artifacts: bool = True,
-                   runs_dir: Path | None = None,
-                   tag: str = "") -> dict:
+                  dt: float = 0.005,
+                  plant: Plant | None = None,
+                  outer: OuterLoop | None = None,
+                  initial_state: Optional[dict] = None,
+                  write_artifacts: bool = True,
+                  runs_dir: Path | None = None,
+                  tag: str = "",
+                  delta_s: float = 0.0,
+                  use_closed_form_ct: bool = False) -> dict:
     """Drive the analytic 6-DOF plant along ``trajectory``.
 
     Returns a dict with ``log`` (compatible with sim.metrics.compute and
     sim.metrics.compute_path), ``scenario`` name, ``outdir`` if
     artifacts were written, and ``trajectory`` itself.
+
+    Args:
+        trajectory: the trajectory preset to follow
+        dt: control loop tick interval, seconds (default 200 Hz)
+        plant: the 6-DOF plant; created fresh if None
+        outer: the outer-loop controller; created fresh if None
+        initial_state: dict of plant state overrides on reset
+        write_artifacts: write CSV + plots to runs/
+        runs_dir: override runs directory
+        tag: suffix added to the run directory name
+        delta_s: waypoint quantisation spacing, metres. 0 = continuous.
+            See ``WaypointAccumulator`` for the unit contract.
+        use_closed_form_ct: if True, compute cross-track and along-track
+            against the closed-form ideal curve (circle, figure8,
+            sinusoid) rather than the polyline projector. Safe for
+            known-geometry presets; polygon/waypoints always fall back
+            to polyline.
     """
-    # 1. Plant + outer loop.
+    # 1. Plant + outer loop + optional Δs accumulator.
     if plant is None:
         plant = RigidBodyPlant(dt=dt, airframe=CANONICAL_AIRFRAME,
-                               initial_state=initial_state)
+                              initial_state=initial_state)
     else:
         plant.reset(initial_state)
     if outer is None:
         outer = OuterLoop(dt=dt, mass=CANONICAL_AIRFRAME.mass,
-                          gravity=9.80665)
+                         gravity=9.80665)
     outer.reset()
+    accum = WaypointAccumulator(delta_s) if delta_s >= 0.0 else None
     # 2. Log arrays.
     n = int(round(trajectory.duration / dt)) + 1
     log: dict = {
@@ -157,8 +244,15 @@ def run_trajectory(trajectory: Trajectory, *,
         # Read pre-step state.
         state = _state_dict_from_plant(plant)  # type: ignore[arg-type]
         wp = _lerp_waypoint(trajectory, t)
-        target = {"x": float(wp[1]), "y": float(wp[2]),
-                  "z": float(wp[3]), "yaw": float(wp[4])}
+        # Apply Δs quantisation if configured.
+        raw_target = {"x": float(wp[1]), "y": float(wp[2]),
+                      "z": float(wp[3]), "yaw": float(wp[4])}
+        if accum is not None:
+            cx, cy, cz = accum.tick(raw_target["x"], raw_target["y"],
+                                    raw_target["z"])
+            target = {"x": cx, "y": cy, "z": cz, "yaw": raw_target["yaw"]}
+        else:
+            target = raw_target
         # Outer loop -> per-axis command (rate + thrust).
         u = outer.tick(state, target)
         # Step plant. Plant returns post-step state.
@@ -189,11 +283,19 @@ def run_trajectory(trajectory: Trajectory, *,
         log["x_err"][k] = target["x"] - state_next["x"]
         log["y_err"][k] = target["y"] - state_next["y"]
         log["z_err"][k] = target["z"] - state_next["z"]
-        # Path projection (XY).
-        ct, k_proj = _cross_track(trajectory, state_next["x"], state_next["y"])
-        log["cross_track_err"][k] = ct
-        idx_t = max(0, min(int(round(t / dt)), trajectory.n - 1))
-        log["along_track_err"][k] = _along_track_arc(trajectory, idx_t, k_proj)
+        # Path projection (XY): closed-form vs ideal curve, or polyline fallback.
+        if use_closed_form_ct:
+            ct, at = closed_form_cross_track(
+                trajectory, state_next["x"], state_next["y"], t)
+            log["cross_track_err"][k] = ct
+            log["along_track_err"][k] = at
+        else:
+            ct, k_proj = _cross_track(trajectory,
+                                      state_next["x"], state_next["y"])
+            log["cross_track_err"][k] = ct
+            idx_t = max(0, min(int(round(t / dt)), trajectory.n - 1))
+            log["along_track_err"][k] = _along_track_arc(trajectory, idx_t,
+                                                          k_proj)
     result = {
         "scenario": trajectory.name,
         "axis": "trajectory",

@@ -124,6 +124,228 @@ def disturbance_rejection(axis: str, *, torque_nm: float = 0.08,
                     description=f"{torque:g} Nm bias at t={t0}s, r=0")
 
 
+# Trajectory scenario family (prior-10)
+from dataclasses import dataclass
+
+from sim.trajectories import (
+    circle,
+    figure8,
+    lemniscate,
+    polygon,
+    sinusoid,
+)
+from sim.trajectory_runner import WaypointAccumulator, run_trajectory
+
+
+@dataclass
+class TrajectoryScenario:
+    """A trajectory-tracking scenario.
+
+    Drives ``RigidBodyPlant`` through the outer loops along a
+    predefined trajectory preset, with optional Δs quantisation.
+
+    Attributes:
+        name: unique identifier
+        trajectory_factory: callable returning a ``Trajectory``
+        delta_s: waypoint quantisation spacing in metres; 0 = continuous
+        use_closed_form_ct: compute cross-track vs closed-form ideal curve
+        use_mrac: wire MRAC rate loop (requires prior-06; deferred)
+        description: human-readable description
+        plant_factory: callable(dt) -> Plant; default = IdentifiedPlant.canonical
+    """
+    name: str
+    trajectory_factory: callable
+    delta_s: float = 0.0
+    use_closed_form_ct: bool = True
+    use_mrac: bool = False
+    description: str = ""
+    plant_factory: callable = None  # resolved lazily below
+
+    def make_plant(self, dt: float):
+        if self.plant_factory is not None:
+            return self.plant_factory(dt)
+        from sim.plant import IdentifiedPlant
+        return IdentifiedPlant.canonical(dt)
+
+
+def _canonical_traj_factory(traj):
+    return lambda: traj
+
+
+def _traj_scenario(name: str, traj_factory: callable,
+                   delta_s: float = 0.0,
+                   use_closed_form_ct: bool = True,
+                   description: str = "") -> TrajectoryScenario:
+    return TrajectoryScenario(
+        name=name,
+        trajectory_factory=traj_factory,
+        delta_s=delta_s,
+        use_closed_form_ct=use_closed_form_ct,
+        description=description,
+    )
+
+
+# Named presets (Δs=0 = continuous)
+TW_CIRCLE = _traj_scenario(
+    "traj_circle",
+    lambda: circle(aggressiveness=1.0, radius=1.0, duration=8.0),
+    description="Constant-radius circle, XZ plane, 1 m radius, 8 s",
+)
+
+TW_SINUSOID_X = _traj_scenario(
+    "traj_sinusoid_x",
+    lambda: sinusoid(axis=0, center=(0.0, 0.0, 1.0), amplitude=0.5,
+                     frequency=0.5, duration=8.0),
+    description="X-axis sinusoid, ±0.5 m, 0.5 Hz, 8 s",
+)
+
+TW_SINUSOID_Y = _traj_scenario(
+    "traj_sinusoid_y",
+    lambda: sinusoid(axis=1, center=(0.0, 0.0, 1.0), amplitude=0.5,
+                     frequency=0.5, duration=8.0),
+    description="Y-axis sinusoid, ±0.5 m, 0.5 Hz, 8 s",
+)
+
+TW_SINUSOID_Z = _traj_scenario(
+    "traj_sinusoid_z",
+    lambda: sinusoid(axis=2, center=(0.0, 0.0, 1.0), amplitude=0.3,
+                     frequency=0.5, duration=8.0),
+    description="Z-axis sinusoid, ±0.3 m, 0.5 Hz, 8 s",
+)
+
+TW_FIGURE8_BERNOULLI = _traj_scenario(
+    "traj_figure8_bernoulli",
+    lambda: figure8(center=(0.0, 0.0, 1.0), amplitude=1.0,
+                    angular_speed=1.0, type=0, duration=8.0),
+    description="Bernoulli figure-8 (lying infinity), 1 m amp, 1 rad/s, 8 s",
+)
+
+TW_FIGURE8_GERONO = _traj_scenario(
+    "traj_figure8_gerono",
+    lambda: figure8(center=(0.0, 0.0, 1.0), amplitude=1.0,
+                    angular_speed=1.0, type=1, duration=8.0),
+    description="Gerono figure-8 (taller in y), 1 m amp, 1 rad/s, 8 s",
+)
+
+TW_LEMNISCATE = _traj_scenario(
+    "traj_lemniscate",
+    lambda: lemniscate(aggressiveness=1.0, scale=1.0, duration=8.0),
+    use_closed_form_ct=False,  # lemniscate falls back to polyline
+    description="Bernoulli lemniscate, 1 m scale, aggressiveness 1.0, 8 s",
+)
+
+TW_POLYGON = _traj_scenario(
+    "traj_polygon",
+    lambda: polygon(aggressiveness=1.0, side=1.0, n_sides=4, duration=8.0),
+    use_closed_form_ct=False,  # polygon uses polyline
+    description="Square polygon, 1 m side, 8 s",
+)
+
+
+TRAJECTORY_SCENARIOS: dict[str, TrajectoryScenario] = {
+    "traj_circle": TW_CIRCLE,
+    "traj_sinusoid_x": TW_SINUSOID_X,
+    "traj_sinusoid_y": TW_SINUSOID_Y,
+    "traj_sinusoid_z": TW_SINUSOID_Z,
+    "traj_figure8_bernoulli": TW_FIGURE8_BERNOULLI,
+    "traj_figure8_gerono": TW_FIGURE8_GERONO,
+    "traj_lemniscate": TW_LEMNISCATE,
+    "traj_polygon": TW_POLYGON,
+}
+
+
+# ------------------------------------------------------------------
+# Runner for trajectory scenarios
+# ------------------------------------------------------------------
+
+def run_trajectory_scenario(scenario: TrajectoryScenario, *,
+                           dt: float = 0.005,
+                           write_artifacts: bool = True,
+                           runs_dir=None,
+                           seed: int | None = None,
+                           **kwargs) -> dict:
+    """Run a ``TrajectoryScenario`` and return the result dict.
+
+    ``kwargs`` are passed directly to ``run_trajectory``. The
+    ``delta_s`` and ``use_closed_form_ct`` come from the scenario.
+
+    If ``seed`` is given, NumPy's RNG is seeded before building the
+    trajectory so that the sweep is reproducible.
+    """
+    if seed is not None:
+        import numpy as np
+        np.random.seed(seed)
+    traj = scenario.trajectory_factory()
+    result = run_trajectory(
+        traj,
+        dt=dt,
+        write_artifacts=write_artifacts,
+        runs_dir=runs_dir,
+        tag=scenario.name,
+        delta_s=scenario.delta_s,
+        use_closed_form_ct=scenario.use_closed_form_ct,
+        **kwargs,
+    )
+    result["scenario"] = scenario.name
+    result["description"] = scenario.description
+    return result
+
+
+# ------------------------------------------------------------------
+# Δs sweep utilities
+# ------------------------------------------------------------------
+
+def run_ds_sweep(base_scenario: TrajectoryScenario, *,
+                  seeds: dict[float, int] | None = None,
+                  **run_kwargs) -> list[dict]:
+    """Run all Δs variants of a base scenario and return a list of result dicts.
+
+    Each variant uses a seeded RNG (fixed per Δs value) for reproducibility.
+    """
+    results = []
+    for ds in DS_SWEEP_VALUES:
+        seed = (seeds.get(ds, 42) if seeds is not None else 42)
+        variant_scenario = TrajectoryScenario(
+            name=f"{base_scenario.name}_ds{ds:.2f}",
+            trajectory_factory=base_scenario.trajectory_factory,
+            delta_s=ds,
+            use_closed_form_ct=base_scenario.use_closed_form_ct,
+            use_mrac=base_scenario.use_mrac,
+            description=f"{base_scenario.description}; Δs={ds:.2f} m",
+            plant_factory=base_scenario.plant_factory,
+        )
+        result = run_trajectory_scenario(
+            variant_scenario, seed=seed, **run_kwargs)
+        results.append(result)
+    return results
+
+
+# Δs sweep values (prior-10 §4)
+DS_SWEEP_VALUES = (0.0, 0.02, 0.05, 0.10, 0.25)
+
+
+def make_delta_s_variants(base_scenario: TrajectoryScenario
+                          ) -> list[TrajectoryScenario]:
+    """Produce one TrajectoryScenario per Δs value for the sweep."""
+    variants = []
+    for ds in DS_SWEEP_VALUES:
+        name = f"{base_scenario.name}_ds{ds:.2f}"
+        variants.append(TrajectoryScenario(
+            name=name,
+            trajectory_factory=base_scenario.trajectory_factory,
+            delta_s=ds,
+            use_closed_form_ct=base_scenario.use_closed_form_ct,
+            use_mrac=base_scenario.use_mrac,
+            description=f"{base_scenario.description}; Δs={ds:.2f} m",
+            plant_factory=base_scenario.plant_factory,
+        ))
+    return variants
+
+
+# ------------------------------------------------------------------
+# Registry: rate-loop + trajectory scenarios
+# ------------------------------------------------------------------
+
 ALL: dict[str, Callable[[], Scenario]] = {
     "step_roll": lambda: step("roll"),
     "step_pitch": lambda: step("pitch"),
@@ -132,6 +354,9 @@ ALL: dict[str, Callable[[], Scenario]] = {
     "inertia_offset_roll": lambda: inertia_offset("roll"),
     "disturbance_roll": lambda: disturbance_rejection("roll"),
 }
+
+# Trajectory scenario registry (keyed by name for convenience)
+TRAJ_ALL: dict[str, TrajectoryScenario] = TRAJECTORY_SCENARIOS.copy()
 
 
 # ------------------------------------------------------------------
