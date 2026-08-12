@@ -152,7 +152,9 @@ def compute(log: dict, theta: np.ndarray, dt: float, *,
 
 def compute_path(log: dict, *, dt: float,
                  z_umax: float | None = None,
-                 attitude_rate_umax: float | None = None) -> dict:
+                 attitude_rate_umax: float | None = None,
+                 transient_seconds: float = 1.0,
+                 trajectory=None) -> dict:
     """Trajectory-tracking metrics (spec 4a path_* group).
 
     Computed against a trajectory-runner's log (see
@@ -163,16 +165,34 @@ def compute_path(log: dict, *, dt: float,
 
     All keys are absolute scalar arrays of equal length. The metric
     set covers the spec's user stories 15-18:
+
       * path_rms_cross_track, path_max_cross_track      (15)
-      * path_rms_along_track, path_max_abs_along_track   (15)
-      * path_rms_position, path_max_abs_position         (16)
-      * path_ctrl_effort_rms, path_ctrl_effort_max       (16)
-      * path_sat_fraction_z, path_sat_fraction_att_rate  (17)
-      * path_att_rate_rms, path_att_rate_max             (18)
+      * path_rms_along_track, path_max_abs_along_track (15)
+      * path_rms_position, path_max_abs_position       (16)
+      * path_ctrl_effort_rms, path_ctrl_effort_max      (16)
+      * path_sat_fraction_z, path_sat_fraction_att_rate (17)
+      * path_att_rate_rms, path_att_rate_max            (18)
+
+    Plus the two additions from the prior-10 spec:
+      * path_max_error  -- max over entire run of ||position_error||
+      * path_transient_error -- max error over the first transient_seconds
 
     ``metrics.py`` stays **pure and log-only**: it does not import the
     runner or the trajectories module, so trajectory runs cannot leak
     into rate-loop metric calculation.
+
+    Args:
+        log: the trajectory run log dict
+        dt: control tick interval, seconds (for duration computations)
+        z_umax: optional z-command saturation threshold (N)
+        attitude_rate_umax: optional attitude-rate saturation threshold (rad/s)
+        transient_seconds: time window for the transient error metric (default 1.0 s)
+        trajectory: optional ``Trajectory`` object; if provided and
+            ``use_closed_form=True`` was passed to the runner,
+            closed-form cross-track / along-track is recomputed here
+            (the runner already stores them in the log; this param is
+            for recomputation in post-hoc analysis). Currently unused
+            but reserved for future re-projection.
     """
     m: dict = {}
     t = np.asarray(log["t"], float)
@@ -188,6 +208,15 @@ def compute_path(log: dict, *, dt: float,
     )
     m["path_n_samples"] = int(n)
     m["path_duration_s"] = float(t[-1] - t[0])
+    # --- max error (entire run) ---
+    m["path_max_error"] = float(np.max(pos_err))
+    # --- transient error (first transient_seconds) ---
+    transient_cut = float(transient_seconds)
+    transient_mask = t <= transient_cut
+    if np.any(transient_mask):
+        m["path_transient_error"] = float(np.max(pos_err[transient_mask]))
+    else:
+        m["path_transient_error"] = float(np.max(pos_err))
     # --- cross-track / along-track ---
     m["path_rms_cross_track"] = float(np.sqrt(np.mean(ct ** 2)))
     m["path_max_cross_track"] = float(np.max(ct))
@@ -252,6 +281,9 @@ def compute_path(log: dict, *, dt: float,
         + (log["z"][-1] - log["z_target"][-1]) ** 2
     ))
     m["path_final_position_error"] = final_pos_err
+    # NOTE: adaptation-activity metrics (adapt_active_fraction, converged weights)
+    # require MRAC in the trajectory loop. Deferred: wire sim/loop.py into
+    # trajectory_runner when prior-06 (injection seam) is available.
     return m
 
 
