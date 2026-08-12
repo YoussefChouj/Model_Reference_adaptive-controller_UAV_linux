@@ -10,6 +10,9 @@
 # Generated simulation run artifacts (ADR-0006 D7)
 sim/runs/
 
+# Firecrawl scrape caches (init by firecrawl-cli)
+.firecrawl/
+
 # Graphify AST cache — regenerable, hash-keyed, churns every rebuild
 graphify-out/cache/
 

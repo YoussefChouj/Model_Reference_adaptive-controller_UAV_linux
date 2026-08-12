@@ -88,6 +88,12 @@ Final `main` HEAD: `7581505`. Suite: 291 passed, 13 skipped.
 - `prior-01` must ask user before committing **and** before deleting
 - Specs 08–14 must not touch `API/`; every firmware change lands in `sim/` first with a parity test
 
+**SINDy ulog adapter bug found 2026-08-13** ([session](docs/sessions/sindy-ulog-adapter-validation-2026-08-13.md)).
+Real PX4 `.ulg` downloaded from UAV-SEAD HF mirror (1.76 MB, 28 topics).
+Adapter fails on modern PX4 field-name schemas: hints `["[roll","[pitch","[yaw","roll","pitch","yaw"]` don't match `vehicle_angular_velocity.xyz[0..2]` or `vehicle_rates_setpoint.{roll,pitch,yaw}`. Adapter returns `None` for fully-populated files. `prior-13b` is **blocked** until adapter is fixed; spec needed (`sindy-adapter-px4-schema-modernisation`, ~80 LOC + 5 tests).
+
+**logs.px4.io download path found gated** 2026-08-13: `https://cdn.logs.px4.io/<uuid>.ulg` returns 403 to anonymous curl (CloudFront/S3 signed cookie). The official `flight_review/download_logs.py` handles this with a 6s rate limit; from this box, `firecrawl interact` can fetch but is slow. **Use UAV-SEAD on HuggingFace as the working source** until a downloader script is wired up.
+
 ### Closed sessions
 
 | Session | Closed |

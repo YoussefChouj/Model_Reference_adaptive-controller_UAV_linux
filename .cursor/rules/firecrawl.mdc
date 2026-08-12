@@ -1,0 +1,147 @@
+---
+description: Firecrawl CLI capability, routing versus Apify/WebFetch, and credential rules for this workspace.
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Firecrawl — capability, routing, and credentials
+
+Firecrawl is the **first-call web data tool** for this workspace. It runs in the
+agent's own terminal session, has a CLI keyed by `FIRECRAWL_API_KEY`, and bundles
+search, scrape, interact, parse, monitor, and a paper index into one binary.
+Every command below works on this box without any extra setup beyond
+`FIRECRAWL_API_KEY` in the shell.
+
+## Quickstart (already installed)
+
+```bash
+export FIRECRAWL_API_KEY=fc-...         # 35-char key; not persisted in repo
+firecrawl --status                      # confirms auth + credits
+mkdir -p .firecrawl
+firecrawl scrape "https://example.com" -o .firecrawl/foo.md
+```
+
+`init --all -k <key>` is one-shot and idempotent — already done in this workspace.
+
+## Credential rules
+
+- The key is **session-only** in this repo. It is NOT written to `.env` or any
+ file because `.env` is not yet in `.gitignore`. Persist it in your shell
+ profile (`~/.bashrc`) alongside `DEEPSEEK_API_KEY`, not in the repo.
+- `FIRECRAWL_API_KEY` is a **per-shell env var** that may not survive across
+ tool invocations in this harness — **always re-`export` it on the same shell
+ line** as the command you want to run, especially in batched calls:
+  ```bash
+  export FIRECRAWL_API_KEY=fc-... && firecrawl search "..."
+  ```
+- `.firecrawl/` (scrape cache directory) is in `.gitignore`. New entries get
+ added there automatically. If a subagent creates one outside `.firecrawl/`,
+ add the path or move it.
+
+## Routing — Firecrawl vs Apify vs WebFetch
+
+Pick the tool by what you need and what the user said. Default order is
+**Firecrawl → Apify → WebFetch**.
+
+| Need | Tool | Why |
+|---|---|---|
+| Web search (general) | **Firecrawl `search`** | Agent-native, returns markdown + URL + metadata in one call |
+| Scrape a known URL (markdown) | **Firecrawl `scrape`** | Clean markdown output, handles JS, follows links, credit-cheap |
+| Local PDF/DOCX/XLSX → markdown | **Firecrawl `parse`** | 50 MB limit, local file path, supports `-S` summary and `-Q` question modes |
+| Public PDF/doc URL → markdown | **Firecrawl `scrape`** (NOT `parse`) | `parse` is for local files only |
+| Recurring page checks / change detection | **Firecrawl `monitor`** | Diff + AI judge against a plain-language `--goal`; webhook/email/Slack notify |
+| Scientific paper full-text passages | **Firecrawl `research search-papers`** | Purpose-built paper index (43M abstracts, arXiv + PubMed) |
+| GitHub issues / PRs / README search | **Firecrawl `research search-github`** | Same index, GitHub side |
+| Live page interaction (clicks, forms, login) | **Firecrawl `interact`** | Browser automation, only when scrape can't get the data |
+| Apify Actor (specialised scraper) | **Apify** | Use when an Actor already exists for the target (e.g. a specific e-commerce or social site) and its README matches; check Actor docs before raw `interact` |
+| Bulk crawl + map of a site | **Firecrawl `crawl` / `map`** | URL discovery + bulk extraction in one call |
+| Diagnosing a failing Firecrawl job | **Firecrawl `ask`** | Pass the failing `jobId`; reads team job logs |
+| "How does Firecrawl handle X?" | **Firecrawl `docs-search`** | Answers grounded in current docs with citations |
+| Single page, already in repo's cache or known to be static | **WebFetch** | Lightweight fallback; no credits, no setup |
+
+### When Apify still wins
+
+- A specialised Actor (e.g. `apify/rag-web-browser`) already exists for the
+ target. Actors are maintained by site experts and handle rate-limits,
+ anti-bot, and pagination that generic scrape gets wrong.
+- You need a structured dataset the Actor already publishes (e.g. Twitter
+ posts with reply counts, LinkedIn job listings with parsed fields).
+- The user explicitly asks for Apify.
+
+Apify is available via the `user-apify` MCP server. Default to Firecrawl for
+plain search/scrape; reach for Apify when an Actor is the right tool.
+
+### When WebFetch still wins
+
+- The page is already known to be static and small (a few KB), and you don't
+ want to spend a Firecrawl credit.
+- Firecrawl is rate-limited or out of credits (check `firecrawl --status`).
+- You want a quick sanity check on a URL the user just gave you.
+
+## Default flow for a fresh task
+
+1. **Search first** when you need discovery: `firecrawl search "<query>"`.
+2. **Scrape the top results**: `firecrawl scrape "<url>" -o .firecrawl/<slug>.md`.
+3. **Interact only if scrape returns empty/wrong**: `firecrawl interact "<goal>"`.
+4. **Parse for local files**: `firecrawl parse ./paper.pdf -o .firecrawl/paper.md`.
+5. **Cite the .firecrawl/<slug>.md files** in the report. They are the audit
+ trail; readers can re-scrape the same URL and compare.
+6. If the task implies recurrence ("alert me when", "track this page"), use
+ `firecrawl monitor` instead of repeated one-off scrapes.
+
+## Hard rules
+
+- **Re-export the key in the same shell line** as any Firecrawl command —
+ tool invocation may not inherit env from prior turns.
+- **Do not** write the API key to any file in the repo. `.env` is not
+ gitignored; the key is session-local only.
+- **Do not** chain `| tail`, `| head`, or any pager after `firecrawl` —
+ output is unbounded and these block. Capture to a file with `-o` instead.
+- **Do not** route simple search/scrape through Apify when Firecrawl handles
+ it natively. Apify is for specialised Actors.
+- **Do not** use `firecrawl parse` on a public URL — use `scrape`. `parse`
+ is for local files only (uploaded via multipart).
+
+## Cheat sheet
+
+```bash
+# Status + credits
+firecrawl --status
+
+# Search
+firecrawl search "<query>" --limit 10
+
+# Scrape a known URL → markdown
+firecrawl scrape "<url>" -o .firecrawl/<slug>.md
+
+# Local file → markdown
+firecrawl parse ./paper.pdf -o .firecrawl/paper.md
+firecrawl parse ./paper.pdf -S   # AI summary
+firecrawl parse ./paper.pdf -Q "what's the key claim?"
+
+# Recurring change detection
+firecrawl monitor create --url "<url>" --goal "notify when X changes"
+
+# Paper index (43M abstracts)
+firecrawl research search-papers --query "<query>"
+
+# GitHub history
+firecrawl research search-github --query "<query>"
+
+# Diagnose a failing job
+firecrawl ask --jobId <id>
+
+# Failing-job Q&A
+firecrawl docs-search --question "how do I batch-scrape?"
+```
+
+## Failure recovery
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `Error: Unauthorized: Invalid token` | `FIRECRAWL_API_KEY` unset or wrong | Re-`export` on the same line as the command |
+| `ERR_HTTP2_SERVER_REFUSED_STREAM` | Target blocks HTTP/2 or returned 5xx | Retry once; if persistent, switch to `interact` or `search` for that domain |
+| `Request failed with status code 401` | Key rotated or expired | Re-export; check dashboard |
+| Empty scrape result | Page renders client-side | Use `firecrawl interact` with a goal that names the data you want |
+| `error: unknown option '--query'` | Wrong subcommand syntax | Run `firecrawl <subcommand> --help` first |
+| Credits exhausted | Hit free-tier limit | Ask the user to top up or pause web work until next cycle |
