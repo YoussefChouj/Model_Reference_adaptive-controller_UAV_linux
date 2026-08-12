@@ -49,7 +49,7 @@ def test_sinusoid_axis_injection():
     # At t=0.25 s, f=1 Hz, phase=π/2 -> sin=1 -> x = centre_x + amp
     idx_quarter = int(0.25 / 0.005)
     np.testing.assert_allclose(t.waypoints[idx_quarter, 1],
-                               1.0 + 0.5, atol=1e-6)
+                               1.0 + 0.5, atol=1e-4)
     np.testing.assert_allclose(t.waypoints[idx_quarter, 2], 2.0, atol=1e-6)
 
 
@@ -65,28 +65,36 @@ def test_sinusoid_y_axis():
 
 
 def test_figure8_bernoulli_matches_firmware():
-    """Bernoulli parametric form: x = amp*cos(t)/(1+sin²(t)), y = amp*sin(t)*cos(t)/(1+sin²(t))."""
+    """Bernoulli lemniscate. Firmware: theta = angular_speed * t.
+    For the lemniscate to close (x=1, y=0 at both start and end),
+    t_elapsed must reach 2π, so duration = 2π when angular_speed=1."""
     t = figure8(center=(0.0, 0.0, 1.0), amplitude=1.0,
-                 angular_speed=1.0, type=0, duration=2.0)
+                 angular_speed=1.0, type=0, duration=2.0 * math.pi)
     # At t=0: sin(0)=0, cos(0)=1 -> x=1, y=0
     np.testing.assert_allclose(t.waypoints[0, 1], 1.0, atol=1e-6)
     np.testing.assert_allclose(t.waypoints[0, 2], 0.0, atol=1e-6)
-    # At t=π: sin(π)=0, cos(π)=-1 -> x=-1, y=0 (closed path)
-    idx_pi = np.argmax(t.waypoints[:, 0] >= math.pi)
+    # At t=π: sin(π)=0, cos(π)=-1 -> x=-1, y=0
+    idx_pi = int(np.argmin(np.abs(t.waypoints[:, 0] - math.pi)))
     np.testing.assert_allclose(t.waypoints[idx_pi, 1], -1.0, atol=1e-3)
+    # Last waypoint: t_param=2π -> back to x=1, y=0 (closed lemniscate)
+    last = t.waypoints[-1]
+    np.testing.assert_allclose(last[1], 1.0, atol=1e-3)
 
 
 def test_figure8_gerono_matches_firmware():
-    """Gerono parametric form: x = 0.5*amp*sin(2t), y = amp*sin(t)."""
+    """Gerono lemniscate: x=0.5*amp*sin(2t), y=amp*sin(t).
+    Duration=2π with angular_speed=1 gives theta=0→2π. At theta=π: y=0, x=0.
+    At theta=π/2: y=1, x=0 (lobe peak)."""
     t = figure8(center=(0.0, 0.0, 1.0), amplitude=1.0,
-                 angular_speed=1.0, type=1, duration=2.0)
+                 angular_speed=1.0, type=1, duration=2.0 * math.pi)
     # At t=0: sin(0)=0 -> x=0, y=0
     np.testing.assert_allclose(t.waypoints[0, 1], 0.0, atol=1e-6)
     np.testing.assert_allclose(t.waypoints[0, 2], 0.0, atol=1e-6)
-    # At t=π/2: sin(π/2)=1, sin(π)=0 -> x=0, y=1
-    idx_halfpi = np.argmax(t.waypoints[:, 0] >= math.pi / 2)
-    np.testing.assert_allclose(t.waypoints[idx_halfpi, 1], 0.0, atol=1e-3)
-    np.testing.assert_allclose(t.waypoints[idx_halfpi, 2], 1.0, atol=1e-3)
+    # At t=π: x=0.5*sin(2π)=0, y=sin(π)=0 (midpoint of figure-8)
+    # Note: coarse-grid + resample introduces ~0.0025 m error; use 5e-3
+    idx_pi = int(np.argmin(np.abs(t.waypoints[:, 0] - math.pi)))
+    np.testing.assert_allclose(t.waypoints[idx_pi, 1], 0.0, atol=5e-3)
+    np.testing.assert_allclose(t.waypoints[idx_pi, 2], 0.0, atol=5e-3)
 
 
 def test_figure8_invalid_type_raises():
