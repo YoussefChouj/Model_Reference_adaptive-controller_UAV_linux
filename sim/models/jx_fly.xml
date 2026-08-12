@@ -1,0 +1,136 @@
+<!--
+  JX_FLY MuJoCo model — authored by prior-03 (2026-08-12).
+
+  Validated against CANONICAL_AIRFRAME (hanging-pendulum campaign, 2026-07-28).
+
+  Airframe body: freejoint (no constraint forces), mass=1.2961 kg,
+  inertia tensor diag [0.00839, 0.00930, 0.01485] kg·m² about CG.
+
+  Motor geometry — X-frame, arm_length=0.200 m.
+  JX_FLY motor ordering is OPPOSITE to Crazyflie 2.x:
+    CF2:  M1 front=CCW, M2 right=CW,  M3 back=CCW,  M4 left=CW
+    JX_FLY: M1(+r,+r)=CW,  M2(-r,+r)=CCW, M3(-r,-r)=CW, M4(+r,-r)=CCW
+  The motor body names and site names encode this so the convention is
+  self-documenting. Motor spin direction is set in sim/mujoco_bridge.py
+  via the thrust-diff -> yaw-torque mapping.
+
+  Sites are named for the physics bridge's use: the bridge reads
+  site positions for construction-time validation and reads site
+  positions at runtime for diagnostics.
+
+  Timestep: 0.005 s (200 Hz) — matches MRAC_DT (ADR-0006 D1).
+  Gravity is enabled; no contact/constraint elements (freejoint only).
+-->
+<mujoco model="jx_fly">
+  <compiler angle="radian" inertial="local"/>
+
+  <option timestep="0.005" integrator="Euler">
+    <flag gravity="enable" contact="disable" constraint="disable"/>
+  </option>
+
+  <default>
+    <!-- All bodies are freejoint; no actuator/motor geom needed for
+         physics — the bridge injects forces via xfrc_applied. -->
+    <body type="free"/>
+  </default>
+
+  <worldbody>
+    <!-- Minimal scene geometry so the renderer shows something. -->
+    <light name="top" pos="0 0 3" dir="0 0 -1" diffuse=".8 .8 .8"/>
+
+    <!--
+      Airframe body — freejoint, mass and inertia from CANONICAL_AIRFRAME.
+      Freejoint means: 6-DOF (x,y,z,qx,qy,qz) with no constraint forces.
+      The bridge injects forces/torques at this body via xfrc_applied.
+
+      CG is at (0,0,0) in body frame. The 26.2 mm CG-below-thrust-plane
+      offset is applied as a thrust-arm moment in the bridge (not here) to
+      avoid double-counting it in the inertia tensor.
+    -->
+    <body name="airframe" pos="0 0 0" mocap="true">
+      <freejoint name="airframe_root"/>
+
+      <inertial
+        pos="0 0 0"
+        mass="1.2961"
+        fullinertia="1 1 1 0.00839 0.00930 0.01485"/>
+
+      <!-- Visual: small sphere at the thrust plane (z=0 in body = CG level). -->
+      <geom
+        type="sphere"
+        size="0.05"
+        pos="0 0 0"
+        rgba=".15 .15 .85 .3"
+        contype="0"
+        conaffinity="0"/>
+
+      <!--
+        Motor bodies — freejoint force injectors.
+        No inertia/mass needed (the bridge sets xfrc_applied directly).
+        Positions are body-frame (+x=front, +y=left in NED-convention X-frame).
+
+        Convention (OPPOSITE to CF2):
+          M1: (+r, +r) front-right  — CW spin
+          M2: (-r, +r) rear-right   — CCW spin
+          M3: (-r, -r) rear-left    — CW spin
+          M4: (+r, -r) front-left   — CCW spin
+      -->
+      <body name="M1" pos=" 0.200  0.200  0.0">
+        <freejoint name="M1_root"/>
+        <!-- Visual only — small sphere at motor location. -->
+        <geom
+          type="sphere"
+          size="0.02"
+          pos="0 0 0"
+          rgba=".9 .2 .2 .5"
+          contype="0"
+          conaffinity="0"/>
+      </body>
+
+      <body name="M2" pos="-0.200  0.200  0.0">
+        <freejoint name="M2_root"/>
+        <geom
+          type="sphere"
+          size="0.02"
+          pos="0 0 0"
+          rgba=".9 .2 .2 .5"
+          contype="0"
+          conaffinity="0"/>
+      </body>
+
+      <body name="M3" pos="-0.200 -0.200  0.0">
+        <freejoint name="M3_root"/>
+        <geom
+          type="sphere"
+          size="0.02"
+          pos="0 0 0"
+          rgba=".9 .2 .2 .5"
+          contype="0"
+          conaffinity="0"/>
+      </body>
+
+      <body name="M4" pos=" 0.200 -0.200  0.0">
+        <freejoint name="M4_root"/>
+        <geom
+          type="sphere"
+          size="0.02"
+          pos="0 0 0"
+          rgba=".9 .2 .2 .5"
+          contype="0"
+          conaffinity="0"/>
+      </body>
+
+      <!--
+        Physics validation sites — one per motor, matching motor_positions()
+        order in sim/plant.py so MujocoBridge can validate construction.
+        The site positions are in body frame and must match (+r,+r),
+        (-r,+r), (-r,-r), (+r,-r) for M1..M4 respectively.
+      -->
+      <site name="motor_M1" pos=" 0.200  0.200  0.0" size="0.01"/>
+      <site name="motor_M2" pos="-0.200  0.200  0.0" size="0.01"/>
+      <site name="motor_M3" pos="-0.200 -0.200  0.0" size="0.01"/>
+      <site name="motor_M4" pos=" 0.200 -0.200  0.0" size="0.01"/>
+
+    </body>
+  </worldbody>
+</mujoco>
