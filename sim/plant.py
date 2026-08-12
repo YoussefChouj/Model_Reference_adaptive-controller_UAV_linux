@@ -10,6 +10,9 @@ working unchanged. ``RigidBodyPlant`` returns the same keys *plus*
 ``{x, y, z, phi, theta, psi, vx, vy, vz_body}`` so callers can read
 the wider state.
 
+``MujocoPlant`` is in its own module (:mod:`sim.mujoco_plant`) and is
+re-exported here so ``from sim.plant import MujocoPlant`` still works.
+
   Phase 1 plant (rate loop only):
     G(s) = K / (s*(1 + s/p)) * e^(-sT)      roll/pitch  (rel-degree 2 + delay)
     G(s) = K / s                            yaw         (pure integrator)
@@ -34,17 +37,6 @@ import numpy as np
 from scipy.signal import cont2discrete
 
 from sim.delay import ActuatorDelayBuffer
-
-try:  # the mujoco bridge is always present in this repo (mujoco 3.x wheel)
-    from sim.mujoco_bridge import (  # type: ignore
-        MujocoBridge,
-        MujocoBridgeConfig,
-    )
-    _HAS_MUJOCO_BRIDGE_IMPORT = True
-except Exception:  # pragma: no cover - bridge module is required, not optional
-    MujocoBridge = None  # type: ignore
-    MujocoBridgeConfig = None  # type: ignore
-    _HAS_MUJOCO_BRIDGE_IMPORT = False
 
 # axis command key -> firmware body-rate output key
 _RATE_KEY = {"roll": "p", "pitch": "q", "yaw": "r", "z": "vz"}
@@ -790,109 +782,6 @@ def _quat_mul(q1: np.ndarray, q2: np.ndarray) -> np.ndarray:
 
 
 # ----------------------------------------------------------------------
-# Spec 03 — MuJoCo-backed 6-DOF plant (ADR-0012 D2/D3).
-#
-# Two independent 6-DOF implementations agreeing is a genuine validation
-# asset (ADR-0012 D3). ``MujocoPlant`` does not subclass the analytic plant;
-# both subclass :class:`Plant` and share the seam.
-# ----------------------------------------------------------------------
-class MujocoPlant(Plant):
-    """MuJoCo-backed 6-DOF quadrotor plant (ADR-0012 D2).
-
-    Wraps :class:`sim.mujoco_bridge.MujocoBridge`. The state-dict shape
-    is the same as :class:`RigidBodyPlant` so the two engines are
-    interchangeable at the seam.
-
-    Default configuration matches the canonical airframe and the
-    identified motor time constant (25 ms). The MJCF is generated
-    programmatically from the bridge config (no external file needed);
-    pass ``model_xml`` to load from file when prior-03 authors the
-    validated ``sim/models/jx_fly/jx_fly_mujoco.xml``. The transport
-    delay ``thrust_delay_s`` defaults to 0; ADR-0012 D6 requires it for
-    any plant used to learn priors — set it explicitly when adapting.
-    """
-
-    def __init__(self, dt: float = 0.005,
-                 airframe: Optional[Airframe] = None,
-                 thrust_delay_s: float = 0.0,
-                 motor_tau: float = DEFAULT_MOTOR_TAU,
-                 model_xml: str | None = None):
-        if not _HAS_MUJOCO_BRIDGE_IMPORT:
-            raise RuntimeError(
-                "MujocoPlant: sim.mujoco_bridge is not importable.")
-        self.dt = dt
-        self.airframe = airframe if airframe is not None else CANONICAL_AIRFRAME
-        self.thrust_delay_s = float(thrust_delay_s)
-        self.motor_tau = float(motor_tau)
-        cfg = MujocoBridgeConfig(
-            dt=dt,
-            mass=self.airframe.mass,
-            Ixx=self.airframe.Ixx,
-            Iyy=self.airframe.Iyy,
-            Izz=self.airframe.Izz,
-            r_motor=self.airframe.r_motor,
-            motor_tau=self.motor_tau,
-            thrust_delay_s=self.thrust_delay_s,
-            model_xml=model_xml,
-        )
-        self._bridge = MujocoBridge(cfg)
-        self._last_U: dict[str, float] = {
-            "roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 0.0,
-        }
-
-    @staticmethod
-    def is_available() -> tuple[bool, str]:
-        """Probe whether the MuJoCo backend is reachable.
-
-        Thin delegate to :meth:`MujocoBridge.is_available`. The single
-        error message ("mujoco is not installed in this venv") matches
-        the bridge's so a caller holding a :class:`Plant` reference gets
-        the same wording as a caller probing the bridge directly.
-        """
-        if not _HAS_MUJOCO_BRIDGE_IMPORT:
-            return (False, "mujoco is not installed in this venv")
-        return MujocoBridge.is_available()
-
-    def reset(self) -> None:
-        """Restore deterministic zero state (level, at origin).
-
-        Warm-starts the motor LPF to hover thrust so the plant does
-        not free-fall during the LPF convergence transient (~5*tau).
-        This keeps :meth:`step` deterministic *from t=0* — the analytic
-        ``RigidBodyPlant`` initialises its motor LPF at hover for the
-        same reason.
-        """
-        self._bridge.reset()
-        self._last_U = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": 0.0}
-        # Warm-up: motor LPF converges in ~5*tau seconds; use 10*tau
-        # so the LPF is at 99.9% of target by construction.
-        warmup_ticks = max(50, int(round(10 * self.motor_tau / self.dt)))
-        hover_total = self.airframe.mass * 9.80665
-        for _ in range(warmup_ticks):
-            self._bridge.step({
-                "roll": 0.0, "pitch": 0.0, "yaw": 0.0, "z": hover_total,
-            })
-        # The warm-up leaves the body slightly above origin and with
-        # a small upward velocity. Zero both without disturbing the
-        # now-settled motor LPF state.
-        d = self._bridge.data
-        d.qpos[0] = d.qpos[1] = d.qpos[2] = 0.0
-        d.qpos[3] = 1.0  # qw
-        d.qpos[4] = d.qpos[5] = d.qpos[6] = 0.0  # qx,qy,qz
-        d.qvel[:] = 0.0
-
-    def step(self, u: dict) -> dict:
-        """Advance one controller tick; return the same state dict as RigidBodyPlant."""
-        self._last_U = {
-            "roll": float(u.get("roll", 0.0)),
-            "pitch": float(u.get("pitch", 0.0)),
-            "yaw": float(u.get("yaw", 0.0)),
-            "z": float(u.get("z", 0.0)),
-        }
-        return self._bridge.step(self._last_U)
-
-
-# ----------------------------------------------------------------------
 # Plant factory — single registry keyed by name (ADR-0012 D7).
 #
 # Constructors that take only ``dt`` are exposed so callers can write
@@ -909,7 +798,9 @@ def _make_identified(dt: float) -> IdentifiedPlant:
 
 
 def _make_mujoco(dt: float) -> MujocoPlant:
-    return MujocoPlant(dt=dt)
+    # Defer import to avoid circular dependency at module level.
+    from sim.mujoco_plant import MujocoPlant as _MP  # noqa: F401
+    return _MP(dt=dt)
 
 
 PLANT_REGISTRY: dict[str, callable] = {
@@ -926,3 +817,13 @@ def build_plant(name: str, dt: float = 0.005) -> Plant:
             f"unknown plant {name!r}; registered: "
             f"{sorted(PLANT_REGISTRY.keys())}")
     return PLANT_REGISTRY[name](dt)
+
+
+# Lazy re-export of MujocoPlant from its own module.
+# Deferring the import avoids a circular dependency (plant -> mujoco_plant -> plant).
+# ``from sim.plant import MujocoPlant`` continues to work unchanged.
+def __getattr__(name: str):
+    if name == "MujocoPlant":
+        from sim.mujoco_plant import MujocoPlant
+        return MujocoPlant
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
