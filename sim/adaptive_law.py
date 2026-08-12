@@ -274,7 +274,20 @@ class AdaptiveLaw:
                     f"num_basis={self.n}"
                 )
             self._theta_prior = prior_arr
+        # sim-arch-03: seed initial weights before reset. Unlike theta_prior (the
+        # σ-mod attractor target), theta_seed is a one-shot initialisation — the law
+        # starts with these weights and adapts from there. Consumed by the paired-envelope
+        # sweep so it no longer needs _seeded_deploy().
+        seed = getattr(config, "theta_seed", None)
         self.reset()
+        if seed is not None:
+            seed_arr = np.asarray(seed, dtype=float)
+            if seed_arr.shape != (self.n,):
+                raise ValueError(
+                    f"theta_seed shape {seed_arr.shape} does not match "
+                    f"num_basis={self.n}"
+                )
+            self.Theta[:] = seed_arr
 
     def reset(self) -> None:
         self.Theta = np.zeros(self.n)

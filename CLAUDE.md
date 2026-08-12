@@ -16,7 +16,7 @@
 - SIL gate, telemetry v2 subscriptions, MicoAir radio bringup, ground station overhaul
 - All prior-transfer specs (00–14) with journals; 00 + 00b done, remainder unblocked per wave structure
 
-**Workflow-hardening sub-session 2026-08-12** (this session, uncommitted on `main`):
+**Workflow-hardening MERGED 2026-08-11** (also on `main` this session via `workflow/conductor-skill-v1` branch):
 
 - `.cursor/rules/subagent-model-pinning.mdc` (new, always-on) — forbids `model:` override on Task tool; surfaces Cursor fallbacks instead of absorbing them.
 - `.cursor/skills/uav-conductor/SKILL.md` (new, 306 lines) — full conductor playbook. Was referenced in `AGENTS.md` but did not exist. Adds: knowledge-stack preflight, pre-cleared permissions in delegation, four-check verification gate (test SHA, suite, scope, graph rebuild), test-source redaction, `tests/` excluded list.
@@ -31,47 +31,47 @@
 - Conductor's gate runs `git diff --name-only HEAD -- 'sim/tests/' 'tests/'`; any test file in diff = automatic rejection.
 - Journal entries now carry configured + actual model ids for audit.
 
-**`sim/` architecture review 2026-08-12** (this session, uncommitted):
+**`sim/` architecture review 2026-08-12** (COMPLETED, all merged to `main`):
 
-`.agent_contracts/sim-arch-2026-08-12/` — five specs from the deep-modules pass:
+`.agent_contracts/sim-arch-2026-08-12/` — five specs, all ACCEPTED and merged:
 
-- `00-summary.md` — verdict; two of six CLAUDE.md candidates were stale (no `axis_priors` ever existed; `recorder.py`/`run.py` schema duplication was overstated); three real issues + one missing-symbols gap.
-- `01-prior-05-factory-recovery.md` — `prior-05` is **half-landed**: commit on `main` declares the schema but does not implement `PriorFactory`, `PriorLibrary`, `to_dimensionless`/`from_dimensionless`, `ConvergenceResult`, `TargetConstraints`, `FEATURE_SERIES_COLUMNS`. Verified by `grep -rn`. **Blocks `prior-06`, `prior-09`, `prior-12`.**
-- `02-run-decompose.md` — `sim/run.py` `run()` does four jobs (loop + log + calibrator + artifact). Add `sim/artifact.py` (`RunArtifactWriter`) and `sim/calibrator_step.py` (`CalibratorStep`). Adds `theta_seed` branch to `AdaptiveLaw` so `_seeded_deploy` in `experiments.py` can be deleted.
-- `03-experiments-split.md` — split the five sweep families into `sim/sweeps/*.py`; add `sim/sweep_runner.py` for structured JSON+Markdown output (today's sweeps go to stdout only — not citable).
-- `04-manifest-consolidate.md` — schema lives in two places (`sim/manifest.py` and `sim/run.py:_report`). Single `ManifestPayload` dataclass in `sim/manifest_schema.py`. Bump version `"1.0"` → `"1.1"`.
-- `05-plant-seam-leak.md` — `MujocoPlant.is_available()` duplicates `MujocoBridge.is_available()`. Add abstract `is_available()` to `Plant` ABC.
+- `sim-arch-05` (`5d8d2c1`) — `Plant` ABC gets abstract `is_available()`. MujocoPlant is a thin delegate. 92 insertions.
+- `sim-arch-02` (`64cc642`) — `sim/run.py` (332 → ~50 LOC) split into `sim/artifact.py` (`RunArtifactWriter`) + `sim/calibrator_step.py` (`CalibratorStep`) + `theta_seed` on `AxisAdaptiveConfig`. 529 insertions.
+- `sim-arch-01` (`b5e098a`) — prior-05 factory recovery: implements `PriorFactory`, `PriorLibrary`, `to_dimensionless`, `from_dimensionless`, `ConvergenceResult`, `TargetConstraints`, `FEATURE_SERIES_COLUMNS`. Wires `result["plant_tag"]`, `["theta_tilde_raw"]`, `["convergence"]` into manifest. 828 insertions.
+- `sim-arch-04` (`7581505`) — `ManifestPayload` frozen dataclass in `sim/manifest_schema.py`. Schema version 1.0 → 1.1. `write_manifest()` accepts `payload=ManifestPayload` (preferred) or legacy kwargs (backward-compat). `RunArtifactWriter._build_report_lines()` reads `payload.envelope`. 419 insertions.
+- `sim-arch-03` — **in progress** (conductor `1a985ff7`): `sim/experiments.py` (343 LOC) → `sim/sweeps/*.py` + `sim/sweep_runner.py`. Sweep output to structured artifacts (not stdout). `theta_seed` replaces `_seeded_deploy` monkey-patch.
 
-Recommended wave order: `02` → `04` → `01` → `05` (parallel worktree) → `03`. Total 4–6 h agent work.
+Final `main` HEAD: `7581505`. Suite: 291 passed, 13 skipped.
 
-**Apify MCP auth resolved this session** (per user). All paths through `user-apify` are live; `RAG Web Browser` and `search-actors` are reachable without further setup.
+**Bug fixed twice in one session:** subagents piped pytest to `| tail -N`; `tail` blocks until N lines arrive. pytest for small test sets emits <N lines, so `tail` hangs forever. Rule now in `implement-spec` and `uav-conductor` skills: **never pipe pytest to `tail`/`head`/`less`/`more`**. Run directly; capture exit code via `> /tmp/last_run.txt 2>&1; echo "exit=$?"`.
 
 **Pending (deliberately not done):**
 - User-scope Cursor rule via `cursor_dialog` — blocked by Privacy Mode. Project-scope `.cursor/rules/` version is in place.
-- prior-05 status on the table below is now stale; per the review above, **the symbols it promised are not in the codebase**. Spec `01-prior-05-factory-recovery` must land before `prior-06`/`prior-09`/`prior-12`.
 
-**Not committed:** all changes sit on working tree. Open question for user: commit on `workflow/conductor-skill-v1` branch, or push straight to `main`? Uncommitted changes do not break `prior-11` work; separate concern.
+**Bug fixed twice in one session:** subagents piped pytest to `| tail -N`; `tail` blocks until N lines arrive. pytest for small test sets emits <N lines, so `tail` hangs forever. Rule now in `implement-spec` and `uav-conductor` skills: **never pipe pytest to `tail`/`head`/`less`/`more`**. Run directly; capture exit code via `> /tmp/last_run.txt 2>&1; echo "exit=$?"`.
 
 ### Active work — prior-transfer wave 1 (serial)
 
 | # | Spec | Blocks on | Status |
 |---|------|-----------|--------|
 | 00 | `What_lower_limit` sign-constraint gate | — | ✅ done |
-| 00b | Restore sim↔firmware parity | 00 | ✅ done — 2–3% RMSE improvement |
-| 01 | Retire Gazebo (2,049 LOC + 27 MB) | 00 | ✅ done |
-| 08 | Declared basis dimensions + regressor variant registry | 01 | ✅ done — 2026-08-11 |
-| 11 | Learning envelope vs deployment envelope | 00b | ✅ done — 2026-08-11 |
-| 02 | Transport-delay wrapper on 6-DOF plants | 01 | ⬜ after 01 |
-| 03 | `MujocoPlant` behind `Plant` seam | 01 | ⬜ after 01 |
+| 00b | Restore sim↔firmware parity | 00 | ✅ done |
+| 01 | Retire Gazebo | 00 | ✅ done |
+| 08 | Declared basis dimensions + regressor variant registry | 01 | ✅ done |
+| 11 | Learning envelope vs deployment envelope | 00b | ✅ done |
+| 05 | Prior factory + run logging | 00b, 08, 11 | ✅ done — `b5e098a`; all 7 promised symbols implemented; blocks 06/09/12 now lifted |
+| 02 | Transport-delay wrapper on 6-DOF plants | 01 | ⬜ wave 3 |
+| 03 | `MujocoPlant` behind `Plant` seam | 01 | ⬜ wave 3 |
 | 04 | SysID calibration gate for simulated plants | 02, 03 | ⬜ wave 3 |
-| 05 | Prior factory + run logging | 00b, 08, 11 | ⚠️ half-landed — see spec `01-prior-05-factory-recovery` |
-| 06 | Prior injection seam (3 channels) | 05 | ⬜ after 05 |
+| 06 | Prior injection seam (3 channels) | 05 | ⬜ unblocked — wave 2 |
 | 07 | `RigPlant` + rig SysID incl. Z axis | 00 | ⬜ Phase A in-pipeline; B/C human operator |
 | 09 | Cross-airframe prior invariance sweep | 03, 05, 06, 08 | ⬜ wave 4 |
 | 10 | Trajectory presets + `Δs` sweep | 01 | ⬜ wave 2 — **carries primary claim** |
 | 12 | Integral CL (history stack + rank condition) | 08, 11 | ⬜ wave 3 |
 | 13 | Offline prior fitting from real + public logs | 04, 08 | ⬜ wave 4 |
 | 14 | Attention vs uniform stack weighting | 12 | ⬜ wave 4 — **first cut under schedule pressure** |
+
+**Wave 2 (next):** `prior-06` (injection seam) + `prior-10` (trajectory presets + Δs sweep). Both are thesis-load-bearing.
 
 **Novelty ledger** (detail + citations in [SYNTHESIS.md](docs/literature-review-findings/SYNTHESIS.md) §3):
 
