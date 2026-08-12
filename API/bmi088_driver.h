@@ -151,7 +151,7 @@ extern _acc_data_st acc_data;
 #define FAIL          0
 #define SUCCESS       1
 
-#define NOP			__asm{NOP;}
+#define NOP                                 __asm volatile("nop")
 
 #define OFF_FREQ			1500
 

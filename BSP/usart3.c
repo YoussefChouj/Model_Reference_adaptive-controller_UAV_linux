@@ -79,7 +79,7 @@ void USART3_Configuration(void)
 	  DMA_DeInit(DMA1_Stream1);
     DMA_InitStructure.DMA_Channel            = DMA_Channel_4;//�����ַ
     DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);//�ڴ��ַ
-    DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
+    DMA_InitStructure.DMA_Memory0BaseAddr    = (uint32_t)NULL;
     DMA_InitStructure.DMA_DIR                = DMA_DIR_PeripheralToMemory;//DMA����Ϊ����
     DMA_InitStructure.DMA_BufferSize         = USART3_RXDMA_LEN;//����DMA�ڴ������ĳ���
     DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
@@ -105,9 +105,9 @@ void USART3_Configuration(void)
 	  DMA_DeInit(DMA1_Stream3);
     DMA_InitStructure.DMA_Channel            = DMA_Channel_4;               //�����ַ
     DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);
-    DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
+    DMA_InitStructure.DMA_Memory0BaseAddr    = (uint32_t)NULL;
     DMA_InitStructure.DMA_DIR                = DMA_DIR_MemoryToPeripheral;  //DMA����Ϊ����
-    DMA_InitStructure.DMA_BufferSize         = NULL;            //����DMA�ڴ������ĳ���
+    DMA_InitStructure.DMA_BufferSize         = (uint32_t)NULL;            //����DMA�ڴ������ĳ���
     DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
     DMA_InitStructure.DMA_MemoryInc          = DMA_MemoryInc_Enable;
     DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Byte;
@@ -130,7 +130,7 @@ void USART3_Configuration(void)
 //	  DMA_DeInit(DMA1_Stream1);
 //    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;//�����ַ
 //    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);//�ڴ��ַ
-//    DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
+//    DMA_InitStructure.DMA_Memory0BaseAddr    = (uint32_t)NULL;
 //    DMA_InitStructure.DMA_DIR                = DMA_DIR_PeripheralToMemory;//DMA����Ϊ����
 //    DMA_InitStructure.DMA_BufferSize         = NULL;//����DMA�ڴ������ĳ���
 //    DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;
@@ -150,7 +150,7 @@ void USART3_Configuration(void)
 //	  DMA_DeInit(DMA1_Stream3);
 //    DMA_InitStructure.DMA_Channel            = DMA_Channel_4;               //�����ַ
 //    DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)&(USART3->DR);
-//    DMA_InitStructure.DMA_Memory0BaseAddr    = NULL;
+//    DMA_InitStructure.DMA_Memory0BaseAddr    = (uint32_t)NULL;
 //    DMA_InitStructure.DMA_DIR                = DMA_DIR_MemoryToPeripheral;  //DMA����Ϊ����
 //    DMA_InitStructure.DMA_BufferSize         = NULL;            //����DMA�ڴ������ĳ���
 //    DMA_InitStructure.DMA_PeripheralInc      = DMA_PeripheralInc_Disable;

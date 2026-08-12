@@ -51,6 +51,7 @@ LANES = {
     "flight": "flight_analysis/tests",
     "sil": "sil_gate/tests",
     "flashtool": "ground_station/flashtool/tests",
+    "flashtool_linux": "ground_station/flashtool_linux/tests",
     "budget": "ground_station/build_budget/tests",
 }
 
@@ -189,6 +190,22 @@ def task_budget(argv: list[str]) -> int:
     return py("-m", "ground_station.build_budget", *argv, check=False)
 
 
+def task_build(argv: list[str]) -> int:
+    """CMake configure + build the firmware. Produces firmware/build/JX_FLY.hex."""
+    return py("-m", "ground_station.flashtool_linux", "build", *argv, check=False)
+
+
+def task_flash(argv: list[str]) -> int:
+    """Flash firmware/build/JX_FLY.hex over CMSIS-DAP. Needs probe + disarmed target."""
+    return py("-m", "ground_station.flashtool_linux", "flash",
+              "firmware/build/JX_FLY.hex", *argv, check=False)
+
+
+def task_probe_info(argv: list[str]) -> int:
+    """Enumerate CMSIS-DAP probes."""
+    return py("-m", "ground_station.flashtool_linux", "probe-info", *argv, check=False)
+
+
 TASKS = {
     "doctor": task_doctor,
     "test": task_test,
@@ -197,6 +214,9 @@ TASKS = {
     "freeze": task_freeze,
     "graph": task_graph,
     "budget": task_budget,
+    "build": task_build,
+    "flash": task_flash,
+    "probe-info": task_probe_info,
 }
 
 

@@ -107,9 +107,9 @@ void UART5_Configuration(void)
 
 		dma.DMA_Channel				=	DMA_Channel_4;
 		dma.DMA_PeripheralBaseAddr	=	(uint32_t)&(UART5->DR);
-		dma.DMA_Memory0BaseAddr		=	NULL;//����
+		dma.DMA_Memory0BaseAddr		=	(uint32_t)NULL;//����
 		dma.DMA_DIR					=	DMA_DIR_MemoryToPeripheral;	//�ڴ浽����
-		dma.DMA_BufferSize			=	NULL;//����
+		dma.DMA_BufferSize			=	(uint32_t)NULL;//����
 		dma.DMA_PeripheralInc		=	DMA_PeripheralInc_Disable;
 		dma.DMA_MemoryInc			=	DMA_MemoryInc_Enable;
 		dma.DMA_PeripheralDataSize	=	DMA_PeripheralDataSize_Byte;

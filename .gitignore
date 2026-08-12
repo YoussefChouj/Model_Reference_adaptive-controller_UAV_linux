@@ -19,6 +19,9 @@ graphify-out/cache/
 # Keil build output — regenerated on every uVision build
 OBJ/
 
+# CMake / arm-none-eabi-gcc build output
+firmware/build/
+
 # Python bytecode
 __pycache__/
 *.pyc
