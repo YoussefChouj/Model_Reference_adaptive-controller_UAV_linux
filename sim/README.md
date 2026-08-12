@@ -58,22 +58,42 @@ the pre-change plants. The delay and the motor LPF commute as LTI operators, so 
 delayed plant's response is exactly the undelayed response shifted by N ticks
 (verified in `test_plant.py::test_rigid_body_plant_thrust_delay_shifts_response_by_N`).
 
-## Dimensionless priors (ADR-0014 D1–D4, ADR-0013 D5)
+## Three prior-injection channels (ADR-0013 D4–D7; prior-06)
 
-`sim/priors.py` defines the dimensionless adaptive prior `Prior`, the stored form
-`Theta_tilde = K * Theta` learned on a source plant tagged by `plant_tag = (K, p, T)`.
-Deployment on any target is `Theta = Theta_tilde / K_target` — the `1/K` matching
-argument is what makes priors airframe-invariant. The raw `Theta` and the source
-`(K, p, T)` are stored alongside, never instead.
+Priors arrive as dimensionless `Θ̃ = K·Θ` tagged by `(K, p, T)`. Before injection they
+are re-dimensionalised via `from_dimensionless(Theta_tilde, plant_tag, variant)`:
 
-- `Prior.convert_to(target_plant_tag)` rescales for a target plant; **cross-plant
-  application without an explicit `convert_to` is refused** — the failure mode
-  ADR-0014 D7 identifies as the thesis headline result.
-- Cross-variant transfer is forbidden (`RegressorVariant` registry, ADR-0014 D4).
-- `sim/adaptive_law.py` carries the `sigma_prior` / `theta_prior` attractor
-  (ADR-0013 D5): `-sigma_prior·(Theta − theta_prior)` added to the gradient when
-  `sigma_prior_on` is set. Default `sigma_prior=0` is bit-identical to pre-change
-  (parity tests in `test_adaptive_law.py`).
+| Channel | Mechanism | Switch | Effect |
+|---|---|---|---|
+| **Value** | `-σ_prior·(Θ − Θ_prior)` in gradient | `sigma_prior_on` + `sigma_prior` > 0 | Pulls Θ toward Θ_prior |
+| **Authority** | Additive feedforward `Θ_priorᵀΦ` | `feedforward_on` | Direct torque from prior; adaptive law bit-identical |
+| **Envelope** | Per-scenario `Γ`, `What_limit`, `e_deadzone` | `scenario_envelope="learning"` | Widened adaptation bounds for learning |
+
+Run with prior injection:
+```python
+from sim.run import run
+from sim.scenarios import disturbance_rejection
+
+res = run(disturbance_rejection("roll"),
+          prior=my_prior,           # dimensionless Prior object
+          target_plant_tag=(165, 6.67, 0.015),  # or from run result
+          sigma_prior=0.5,          # value channel strength
+          feedforward_on=True,      # authority channel
+          scenario_envelope="learning",  # envelope channel
+          feedforward_ramp_s=0.5,   # seconds to ramp in authority
+          write_artifacts=True)
+```
+
+Defaults: `sigma_prior=0`, `feedforward_on=False`, `scenario_envelope=None` — all
+off reproduces current behaviour to floating-point tolerance (parity test in
+`test_adaptive_law.py::test_sigma_prior_zero_trajectory_matches_pre_change`).
+
+**On-rig recommendation (ADR-0013 D6):** Enable the authority channel first. It
+leaves the certified adaptive law bit-identical and can be killed independently.
+
+**The three channels interact:** with authority feedforward active, the adaptation
+learns `θ* − Θ_prior` instead of `θ*`. The value channel pulls Θ toward Θ_prior
+simultaneously. Analyse jointly before enabling both.
 
 ## The unit chain (firmware-faithful)
 
@@ -83,8 +103,10 @@ scenario r(t) [rad/s] ──▶ reference_model ──▶ xm [rad/s]
         ├─▶ ×57.3 ─▶ RatePID (deg/s) ─▶ U [mixer] ─▶ ÷mrac_to_mixer ─▶ u_nom [Nm]
         │                                        │            │ (regressor slot 4)
         │                              regressor(x, u_nom, xm) ─▶ Φ ─▶ adaptive_law ─▶ u_ad [Nm]
+        │                                                                              │
+        │                                                    ┌─ PriorInjection ── u_ff [Nm]
         ▼                                                                              │
-   plant.step({axis: u_nom + u_ad + disturbance})  ──▶  x [rad/s]
+   plant.step({axis: u_nom + u_ad + u_ff + disturbance})  ──▶  x [rad/s]
 ```
 
 `mrac_to_mixer` uses the active build (`ACTIVE_PAYLOAD = PAYLOAD_LIGHT` →

@@ -12,13 +12,20 @@ the gyro FSM internals.
 
 Each run writes sim/runs/<ts>_<scenario>/{plots/, data.csv, metrics.json, report.md}
 (ADR-0006 D7). Pass write_artifacts=False for a pure in-memory run (tests).
+
+prior-06: three prior-injection channels are wired here:
+  1. Value  -- sigma_prior attractor in AdaptiveLaw (sigma_prior_on + theta_prior)
+  2. Authority -- feedforward in ControlLoop via PriorInjection (feedforward_on)
+  3. Envelope -- per-scenario AxisAdaptiveConfig via scenario_envelope kwarg
 """
 from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -27,20 +34,23 @@ from sim.adaptive_law import AdaptiveFlags, AdaptiveLaw, AxisAdaptiveConfig
 from sim.artifact import RunArtifactWriter
 from sim.baseline import RatePID, RatePIDConfig
 from sim.calibrator_step import CalibratorStep
-from sim.loop import ControlLoop
+from sim.loop import ControlLoop, PriorInjection
 from sim.plant import CANONICAL_MODELS
 from sim.priors import (
     ConvergenceResult,
     FEATURE_SERIES_COLUMNS,
+    Prior,
     PriorFactory,
     RegressorVariant,
+    from_dimensionless,
     to_dimensionless,
 )
 from sim.regressor import structured_regressor
 from sim.reference_model import ReferenceModel, RefType
 
 # log columns, in CSV order. Must stay aligned with sim/artifact._PRIMARY_COLS.
-_COLS = ["t", "r", "d", "xm", "x", "e", "u_nom", "u_ad", "u", "U", "wnorm", "edot"]
+# u_ad_total = u_ad + u_ff; u_ff is zero when authority channel is off.
+_COLS = ["t", "r", "d", "xm", "x", "e", "u_nom", "u_ad", "u_ad_total", "u_ff", "u", "U", "wnorm", "edot"]
 
 _RUNS_DIR = Path(__file__).resolve().parent / "runs"
 
@@ -195,7 +205,16 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
         crm_l1: float = 0.0, crm_l2: float = 0.0,
         ref_model_type: int | None = None,
         dt: float = 0.005, write_artifacts: bool = True,
-        runs_dir: Path | None = None) -> dict:
+        runs_dir: Path | None = None,
+        # prior-06: three injection channels
+        prior: Prior | None = None,            # dimensionless prior to inject
+        target_plant_tag: tuple | None = None, # re-dimensionalise prior for this plant
+        scenario_envelope: str | None = None,  # "deployment" | "learning"; overrides config
+        sigma_prior: float | None = None,      # overrides config.sigma_prior
+        feedforward_on: bool = False,           # authority channel kill switch
+        feedforward_ramp_s: float = 0.5,       # authority channel ramp-in time
+        feedforward_max_abs: float = 2.0,      # authority channel absolute cap [Nm]
+        ) -> dict:
     """Simulate one scenario closed-loop; return a log+metrics dict.
 
     ``config`` overrides the firmware-default adaptive config for the axis.
@@ -211,20 +230,96 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
     default order (roll/pitch=2nd, yaw=1st). Pass 0 to reproduce the as-flown
     power-on default (``DEFAULT_REF_MODEL_TYPE = 0``).
 
+    prior-06: three orthogonal prior-injection channels:
+      1. **Value** (``sigma_prior``, ``theta_prior``): σ-mod attractor in ``AdaptiveLaw``.
+         ``sigma_prior`` from kwarg overrides ``config.sigma_prior``.
+      2. **Authority** (``feedforward_on``, ``feedforward_ramp_s``,
+         ``feedforward_max_abs``): ``Theta_prior.T @ Phi`` feedforward in
+         ``ControlLoop`` via ``PriorInjection``. The adaptive law is bit-identical;
+         this term is purely additive and independently killable.
+      3. **Envelope** (``scenario_envelope``): per-scenario ``AxisAdaptiveConfig``
+         parameterisation. Pass ``scenario_envelope="learning"`` or ``"deployment"``
+         to get that envelope instead of the caller-supplied ``config``.
+         ``config`` is still used for fields not overridden by the envelope.
+      4. **Theta prior re-dimensionalisation**: when ``prior`` is given, the
+         dimensionless ``Theta_tilde`` is re-dimensionalised via
+         ``from_dimensionless`` using ``target_plant_tag`` (or the run's own
+         ``plant_tag`` if not supplied). This produces the ``theta_prior`` array
+         fed into both the value channel (AdaptiveLaw) and the authority channel
+         (PriorInjection). ``sigma_prior`` from kwarg overrides the config default.
+
     ADR-0011 Phases 3 & 4: see ``sim.calibrator_step`` for the per-tick wiring.
     """
     axis = scenario.axis
     plant = scenario.make_plant(dt)
+    plant_tag = _plant_tag_for_axis(axis)
+
+    # prior-06 envelope channel: scenario_envelope overrides config envelope field
+    base_config = config if config is not None else AxisAdaptiveConfig.for_axis(axis)
+    if scenario_envelope == "learning":
+        resolved_config = AxisAdaptiveConfig.for_learning(axis)
+        # merge non-envelope fields from base if they were explicitly set
+        if config is not None:
+            # base config was caller-supplied; blend the envelope defaults with the caller's values
+            resolved_config = replace(resolved_config,
+                                    gamma=config.gamma, What_limit=config.What_limit,
+                                    What_tol=config.What_tol, What_lower_limit=config.What_lower_limit,
+                                    sigma=config.sigma, sigma_lf=config.sigma_lf,
+                                    gam_f=config.gam_f, omega_u=config.omega_u,
+                                    k_e=config.k_e,
+                                    sigma_prior=(sigma_prior if sigma_prior is not None
+                                                else getattr(config, "sigma_prior", 0.0)))
+    elif scenario_envelope == "deployment":
+        resolved_config = AxisAdaptiveConfig.for_deployment(axis)
+        if config is not None:
+            resolved_config = replace(resolved_config,
+                                    gamma=config.gamma, What_limit=config.What_limit,
+                                    What_tol=config.What_tol, What_lower_limit=config.What_lower_limit,
+                                    sigma=config.sigma, sigma_lf=config.sigma_lf,
+                                    gam_f=config.gam_f, omega_u=config.omega_u,
+                                    k_e=config.k_e,
+                                    sigma_prior=(sigma_prior if sigma_prior is not None
+                                                else getattr(config, "sigma_prior", 0.0)))
+    else:
+        resolved_config = replace(base_config,
+                                 sigma_prior=(sigma_prior if sigma_prior is not None
+                                              else getattr(base_config, "sigma_prior", 0.0)))
+
     ref = ReferenceModel.for_axis(axis, dt, q1=q1, q2=q2,
                                   ref_model_type=ref_model_type,
                                   l1=crm_l1, l2=crm_l2)
     pid = RatePID(RatePIDConfig.for_axis(axis))
     flags = flags if flags is not None else AdaptiveFlags()
-    config = config if config is not None else AxisAdaptiveConfig.for_axis(axis)
     state_space = ref.kind is RefType.SECOND_ORDER
-    law = AdaptiveLaw(config, flags, dt=dt, state_space=state_space, wc_edot=wc_edot)
+
+    # prior-06: resolve theta_prior from dimensionless Prior + target plant
+    theta_prior_raw: Optional[np.ndarray] = getattr(resolved_config, "theta_prior", None)
+    if prior is not None:
+        tag = target_plant_tag if target_plant_tag is not None else plant_tag
+        variant = RegressorVariant.get(prior.regressor_variant_id)
+        theta_prior_raw = from_dimensionless(prior.theta_tilde, tag, variant)
+        # Enable sigma_prior via kwarg if provided, else keep config default
+        if sigma_prior is not None:
+            resolved_config = replace(resolved_config, sigma_prior=sigma_prior)
+
+    # prior-06: value channel — wire theta_prior into config for AdaptiveLaw
+    if theta_prior_raw is not None:
+        resolved_config = replace(resolved_config, theta_prior=theta_prior_raw)
+        # Ensure sigma_prior_on is True when a prior is wired in
+        flags = replace(flags, sigma_prior_on=True)
+
+    law = AdaptiveLaw(resolved_config, flags, dt=dt, state_space=state_space, wc_edot=wc_edot)
+
+    # prior-06: authority channel — PriorInjection seam
+    pi = PriorInjection(
+        theta_prior=theta_prior_raw,
+        feedforward_on=feedforward_on,
+        feedforward_ramp_s=feedforward_ramp_s,
+        feedforward_max_abs=feedforward_max_abs,
+    )
     loop = ControlLoop(ref=ref, pid=pid, law=law, plant=plant, axis=axis,
-                       injection=injection)
+                       injection=injection, prior_injection=pi)
+    loop.reset()  # initialise the PI ramp-in state
     cal = CalibratorStep(plant, dt)
 
     n = int(round(scenario.duration / dt))
@@ -241,7 +336,11 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
         x = rec["x"]
         log["t"][k], log["r"][k], log["d"][k] = t, r, d
         log["xm"][k], log["x"][k], log["e"][k] = rec["xm"], x, rec["e"]
-        log["u_nom"][k], log["u_ad"][k], log["u"][k] = rec["u_nom"], rec["u_ad"], rec["u"]
+        log["u_nom"][k] = rec["u_nom"]
+        log["u_ad"][k] = rec["u_ad"]
+        log["u_ad_total"][k] = rec.get("u_ad_total", rec["u_ad"])
+        log["u_ff"][k] = rec.get("u_ff", 0.0)
+        log["u"][k] = rec["u"]
         log["U"][k], log["wnorm"][k], log["edot"][k] = rec["U"], rec["wnorm"], rec["edot"]
         theta_hist[k] = rec["theta"]
         cal.tick(t=t, r=r, g_ref=(0.0, 0.0, 1000.0),
@@ -252,14 +351,14 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
     metrics = metrics_mod.compute(
         log, theta_hist, dt,
         umax=pid.cfg.UMax,
-        what_limit=config.What_limit, what_tol=config.What_tol,
-        what_lower=config.What_lower_limit,
-        e_deadzone=config.e_deadzone if flags.deadzone_on else None,
-        e_freeze=config.e_freeze if flags.hard_freeze_on else None)
+        what_limit=resolved_config.What_limit, what_tol=resolved_config.What_tol,
+        what_lower=resolved_config.What_lower_limit,
+        e_deadzone=resolved_config.e_deadzone if flags.deadzone_on else None,
+        e_freeze=resolved_config.e_freeze if flags.hard_freeze_on else None)
 
     # spec-11: record final weights so the same config can be replayed
     # under the deployment envelope (paired learn/deploy experiment).
-    config.theta_final = theta_hist[-1].copy()
+    resolved_config.theta_final = theta_hist[-1].copy()
 
     snap = cal.snapshot()
     conv = _build_convergence(theta_hist, log["e"], log["edot"], dt, law,
@@ -270,7 +369,7 @@ def run(scenario, *, injection: bool = True, flags: AdaptiveFlags | None = None,
         theta_hist[-1], plant_tag, RegressorVariant.get(variant_id))
     result = {"scenario": scenario.name, "axis": axis, "injection": injection,
               "dt": dt, "ref_model_type": int(ref.kind),
-              "envelope": config.envelope,   # spec-11: which envelope produced this run
+              "envelope": resolved_config.envelope,   # spec-11: which envelope produced this run
               "log": log,
               "theta": theta_hist, "metrics": metrics,
               "acc_trim_b_a": snap["b_a"],
