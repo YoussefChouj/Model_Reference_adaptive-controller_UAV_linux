@@ -1,0 +1,258 @@
+% From .doc template: Materials and methods (The materials and methods section should provide sufficient information to allow replication of the results. Begin with a section describing the objectives and design of the study as well as prespecified components. 
+%
+%In addition, include a section at the end that fully describes the statistical methods with enough detail to enable a knowledgeable reader with access to the original data to verify the results. The values for N, P, and the specific statistical test performed for each experiment should be included in the appropriate figure legend or main text. 
+%
+%All descriptions of materials and methods should be included after the Discussion. This section should be broken up by short subheadings. Under exceptional circumstances, when a particularly lengthy description is required, a portion of the materials and methods can be included in the Supplementary Materials.)
+
+\section{Materials and Methods}
+\label{sec:methods} 
+
+\subsection*{Overview}
+We consider a general robot dynamics model:
+\begin{equation}
+    \label{eq:open-loop-dynamics}
+    \begin{aligned}
+    M(q)\ddot q + C(q,\dot q) \dot q + g(q) &= u + f(q, \dot{q}, w) 
+    \end{aligned}
+\end{equation}
+where $q, \dot q, \ddot q \in \mathbb{R}^n$ are the $n$ dimensional position, velocity, and acceleration vectors, $M(q)$ is the symmetric, positive definite inertia matrix, $C(q,\dot q)$ is the Coriolis matrix, $g(q)$ is the gravitational force vector and $u\in\mathbb{R}^n$ is the control force. Most importantly, $f(q,\dot q, w)$ incorporates unmodeled dynamics, and $w \in \mathbb{R}^m$ is an unknown hidden state used to represent the underlying environmental conditions, which is potentially time-variant. Specifically, in this \revB{article}, $w$ represents the wind profile (for example, the wind profile in \cref{fig:intro}), and different wind profiles yield different unmodeled aerodynamic disturbances for the UAV.
+
+\nf~can be broken into two main stages, the offline meta-learning stage and the online adaptive control stage. These two stages build a model of the unknown dynamics of the form 
+\begin{align}
+    f(q, \dot q, w) &\approx \phi(q, \dot q) a(w),
+\end{align}
+where $\phi$ is a basis or representation function shared by all wind conditions and captures the dependence of the unmodeled dynamics on the robot state, and $a$ is a set of linear coefficients that is updated for each condition. In the supplementary material (\ref{sec:supp-learning-expressiveness}), we prove that the decomposition $\phi(q,\dot{q})a(w)$ exists for any analytic function $f(q,\dot{q},w)$.
+In the offline meta-learning stage, we learn $\phi$ as a DNN using our meta-learning algorithm \DAML. This stage results in learning $\phi$ as a wind-invariant representation of the unmodeled dynamics, which generalizes to new trajectories and new wind conditions.
+In the online adaptive control stage, we adapt the linear coefficients $a$ using adaptive control. Our adaptive control algorithm is a type of composite adaptation and was carefully designed to allow for fast adaptation while maintaining the global exponential stability and robustness of the closed loop system. The offline learning and online control architectures are illustrated in \cref{fig:block-diagram}(B) and \cref{fig:block-diagram}(A,C), respectively.
+
+\subsection*{Data Collection}
+To generate training data to learn a wind-invariant representation of the unmodeled dynamics, the drone tracks a randomized trajectory with the baseline nonlinear controller for 2 minutes each in several different static wind conditions. \Cref{fig:training-data}(A) illustrates one trajectory under the wind condition \SI{13.3}{km/h}~(\SI{3.7}{m/s}). The set of input-output pairs for the \kth such trajectory is referred as the \kth subdataset, $D_{w_k}$, with the wind condition $w_k$. Our dataset consists of 6 different subdatasets with wind speeds from \SI{0}{km/h} to \SI{22.0}{km/h}~(\SI{6.1}{m/s}), which are in the white interpolation region in \cref{fig:error-wind-plot}. 
+
+% Trajectory design
+The trajectory follows a polynomial spline between 3 waypoints: the current position and two randomly generated target positions. The spline is constrained to have zero velocity, acceleration, and jerk at the starting and ending waypoints. Once the end of one spline is reached, the a new random spline is generated and the process repeats for the duration of the training data flight. This process allows us to generate a large amount of data using a trajectory very different from the trajectories used to test our method, such as the figure-8 in \cref{fig:intro}. By training and testing on different trajectories, we demonstrate that the learned model generalizes well to new trajectories. 
+
+% Compute f
+Along each trajectory, we collect time-stamped data $[q,\dot{q},u]$.  Next, we compute the acceleration $\ddot{q}$ by fifth-order numerical differentiation.  Combining this acceleration with \cref{eq:open-loop-dynamics}, we get a noisy measurement of the unmodeled dynamics, $y = f(x, w) + \epsilon$, where $\epsilon$ includes all sources of noise (e.g., sensor noise and noise from numerical differentiation) and $x = [q; \dot{q}] \in \mathbb{R}^{2n}$ is the state. Finally, this allows us to define the dataset, $\mathcal{D}=\{D_{w_1},\cdots,D_{w_K}\}$, where
+\begin{equation}
+D_{w_k}=\left\{x_k^{(i)}, y_k^{(i)}=f(x_k^{(i)},w_k)+\epsilon_k^{(i)} \right\}_{i=1}^{N_k}   
+\end{equation}
+is the collection of $N_k$ noisy input-output pairs with wind condition $w_k$. As we discuss in the ``\nameref{sec:results}'' section, in order to show \DAML~
+\rev{learns a model which can be transferred between drones, }
+% can \rev{transfer}learn a \rev{quadrotor-transferable} representation, 
+we applied this data collection process on both the custom built drone and the Intel Aero RTF drone.
+
+%% Meta-learning
+\subsection*{The \LearningAlg~(\DAML) Algorithm}
+In this section, we will present the methodology and details of learning the representation function $\phi$. In particular, we will first introduce the goal of meta-learning, motivate the proposed algorithm \DAML~by the observed domain shift problem from the collected dataset, and finally discuss key algorithmic details.
+
+\paragraph{Meta-Learning Goal} Given the dataset, the goal of meta-learning is to learn a representation $\phi(x)$, such that for any wind condition $w$, there exists a latent variable $a(w)$ which allows $\phi(x)a(w)$ to approximate $f(x,w)$ well. Formally, an optimal representation, $\phi$, solves the following optimization problem:
+\begin{equation}
+\label{eq:optimization-f-loss}
+    \min_{\phi,a_1,\cdots,a_K}\sum_{k=1}^K\sum_{i=1}^{N_k}
+    \left\| y_k^{(i)} - \phi(x_k^{(i)})a_k \right\|^2,
+\end{equation}
+where $\phi(\cdot):\B{R}^{2n}\rightarrow\B{R}^{n\times h}$ is the representation function and $a_k\in\B{R}^h$ is the latent linear coefficient. Note that the optimal weight $a_k$ is specific to each wind condition, but the optimal representation $\phi$ is shared by all wind conditions. In this \revB{article}, we use a deep neural network (DNN) to represent $\phi$. In the supplementary material (Section S2), we prove that for any analytic function $f(x,w)$, the structure $\phi(x)a(w)$ can approximate $f(x,w)$ with an arbitrary precision, as long as the DNN $\phi$ has enough neurons. This result implies that the $\phi$ solved from the optimization in \cref{eq:optimization-f-loss} is a reasonable representation of the unknown dynamics $f(x,w)$. 
+
+\paragraph{Domain Shift Problems} One challenge of the optimization in \cref{eq:optimization-f-loss} is the \emph{inherent domain shift} in $x$ caused by the shift in $w$. Recall that during data collection we have a program flying the drone in different winds. The actual flight trajectories differ vastly from wind to wind because of the wind effect.
+Formally, the distribution of $x_k^{(i)}$ varies between $k$ because the underlying environment or context $w$ has changed. For example, as depicted by \cref{fig:training-data}(C), the drone pitches into the wind, and the average degree of pitch depends on the wind condition. Note that pitch is only one component of the state $x$. The domain shift in the whole state $x$ is even more drastic.
+
+Such inherent shifts in $x$ bring challenges for deep learning. The DNN $\phi$ may memorize the distributions of $x$ in different wind conditions, such that the variation in the dynamics $\{ f(x,w_1), f(x,w_2), \cdots, f(x,w_K)\}$ is reflected via the distribution of $x$, rather than the wind condition $\{w_1, w_2, \cdots, w_K\}$. In other words, the optimization in \cref{eq:optimization-f-loss} may lead to \emph{over-fitting} and may not properly find a wind-invariant representation $\phi$.
+
+To solve the domain shift problem, inspired by \cite{ganin2016domain}, we propose the following adversarial optimization framework:
+\begin{equation}
+\label{eq:optimization-both-loss}
+\begin{aligned}
+    \max_{h} \min_{\phi,a_1,\cdots,a_K}
+    \sum_{k=1}^K\sum_{i=1}^{N_k}
+    \left(
+    \left\| y_k^{(i)} - \phi(x_k^{(i)})a_k \right\|^2 - \alpha\cdot\mathrm{loss}\left( h( \phi(x_k^{(i)}) ), k \right)
+    \right),
+    % \max_{h}\min_{\phi}\sum_{k=1}^K\min_a\sum_{i=1}^{N_k}
+    % \left\| y_k^{(i)} - r(g(x_k^{(i)})) - a^\top\phi(x_k^{(i)}) \right\|_2^2
+    % -\alpha\left\|h\left( g(x_k^{(i)}),\phi(x_k^{(i)}) \right)-c_k\right\|_2^2,
+\end{aligned}
+\end{equation}
+where $h$ \rev{is another DNN that works as a discriminator to} predict the environment index out of $K$ wind conditions, $\mathrm{loss}(\cdot)$ is a classification loss function (e.g., the cross entropy loss), $\alpha\geq0$ is a hyperparameter to control the degree of regularization, $k$ is the wind condition index, and $(i)$ is the input-output pair index. Intuitively, $h$ and $\phi$ play a zero-sum max-min game: the goal of $h$ is to predict the index $k$ directly from $\phi(x)$ (achieved by the outer $\max$); the goal of $\phi$ is to approximate the label $y_k^{(i)}$ while making the job of $h$ harder (achieved by the inner $\min$). In other words, $h$ is a learned regularizer to remove the environment information contained in $\phi$. In our experiments, the output of $h$ is a $K-$dimensional vector for the classification probabilities of $K$ conditions, and we use the cross entropy loss for $\mathrm{loss}(\cdot)$, which is given as
+\begin{align}
+    \mathrm{loss}\left( h( \phi(x_k^{(i)}) ), k \right) = - \sum_{j=1}^K \delta_{k j} \log\left( h( \phi(x_k^{(i)}) )^\top e_j \right)
+\end{align}
+where $\delta_{kj}=1$ if $k=j$ and $\delta_{kj}=0$ otherwise and $e_j$ is the standard basis function.
+
+\begin{algorithm}[t]
+    \caption{\LearningAlg~(\DAML)}
+    \label{alg:DIML}
+    \DontPrintSemicolon
+    \SetKwInput{KwSolver}{Solver}
+    \SetKwInput{KwObserve}{Observe}
+    \SetKwInput{KwPara}{Hyperparameter}
+    \SetKwInput{KwResult}{Result}
+    \SetKwInput{KwInitialize}{Initialize}
+    \SetKwComment{CommentT}{$\triangleright$\ }{}
+    \SetKwRepeat{RepeatConvergence}{repeat}{until convergence}
+    \SetKwFunction{Rand}{rand}
+    
+    \KwPara{$\alpha\geq0$, $0<\eta\leq1$, $\gamma>0$}
+    \KwIn{$\mathcal{D}=\{D_{w_1},\cdots,D_{w_K}\}$}
+    \KwInitialize{Neural networks $\phi$ and $h$}
+    \KwResult{Trained neural networks $\phi$ and $h$}
+    % \CommentT{Stage 1: Pretrain $r$ and $g$}
+    % \RepeatConvergence{}{
+    %     Sample randomly $D_{c_k}$ from $\mathcal{D}$ \\
+    %     Sample randomly a batch $B^{r,g}$ from $D_{c_k}$ \\
+    %     SGD on $r$ and $g$ with loss $\sum_{i\in B^{r,g}}\left\| y_k^{(i)} - r(g(x_k^{(i)}) )\right\|_2^2$
+    % }
+    
+    % \CommentT{Stage 2: Train $r$, $g$, $\phi$ and $h$}
+    \RepeatConvergence{}{
+        Randomly sample $D_{w_k}$ from $\mathcal{D}$ \\
+        Randomly sample two disjoint batches $B^a$ (adaptation set) and $B$ (training set) from $D_{w_k}$ \\
+        % Sample randomly batches $B^a$ from $D_{c_k}^{\text{(tr)}}$ and $B$ from $D_{c_k}^{\text{(val)}}$ \\
+        Solve the least squares problem $a^*(\phi)=\arg\min_a \sum_{i\in B^a} \left\| y_k^{(i)} - \phi(x_k^{(i)}) a \right\|^2$ \label{alg:DIML:LS} \\
+        % \CommentT{$a^*$ is a function of $\{B^a,r,g,\phi\}$, and we have a closed-form solution}
+        \If{$\|a^*\|>\gamma$}{
+            $a^*\leftarrow \gamma\cdot\frac{a^*}{\|a^*\|}\quad$ \label{alg:DIML:normalization} \CommentT{normalization}
+        }
+        Train DNN $\phi$ using stochastic gradient descent (SGD) and spectral normalization with loss 
+        \begin{equation*}
+        \begin{aligned}
+            \sum_{i\in B} \left( \left\| y_k^{(i)} - \phi(x_k^{(i)})a^*\right\|^2 
+            - \alpha\cdot\mathrm{loss}\left( h(\phi(x_k^{(i)})), k \right) \right)
+        \end{aligned}
+        \end{equation*}\label{alg:DIML:learning_phi}\\
+        \If{\Rand{} $\leq \eta$}{
+           Train DNN $h$ using SGD with loss $\sum_{i\in B}\mathrm{loss}\left( h(\phi(x_k^{(i)})), k \right)$ \label{alg:DIML:learning_h}
+        }
+    }
+\end{algorithm}
+
+\paragraph{Design of the \DAML~Algorithm} Finally, we solve the optimization problem in \cref{eq:optimization-both-loss} by the proposed algorithm \DAML~(described in Algorithm \ref{alg:DIML} and illustrated in \cref{fig:block-diagram}(B)), which belongs to the category of gradient-based meta-learning \cite{meta-learning-survey}, but with least squares as the adaptation step. \DAML~contains three steps: (i) The adaptation step (Line \ref{alg:DIML:LS}-6) solves an least squares problem as a function of $\phi$ on the adaptation set $B^a$. (ii) The training step (Line \ref{alg:DIML:learning_phi}) updates the learned representation $\phi$ on the training set $B$, based on the optimal linear coefficient $a^*$ solved from the adaptation step. (iii) The regularization step (Line 8-\ref{alg:DIML:learning_h}) updates the discriminator $h$ on the training set.
+
+We emphasize important features of \DAML:
+(i) After the adaptation step, $a^*$ is a function of $\phi$. In other words, in the training step (Line \ref{alg:DIML:learning_phi}), the gradient with respect to the parameters in the neural network $\phi$ will backpropagate through $a^*$. Note that the least-square problem (Line \ref{alg:DIML:LS}) can be solved efficiently with a closed-form solution.
+(ii) The normalization (Line \ref{alg:DIML:normalization}) is to make sure $\|a^*\|\leq\gamma$, which improves the robustness of our adaptive control design. We also use spectral normalization in training $\phi$, to control the Lipschitz property of the neural network and improve generalizability~\cite{shi2019neural,shi2021neural,bartlett2017spectrally}. 
+(iii) We train $h$ and $\phi$ in an alternating manner. In each iteration, we first update $\phi$ (Line \ref{alg:DIML:learning_phi}) while fixing $h$ and then update $h$ (Line \ref{alg:DIML:learning_h}) while fixing $\phi$. However, the probability to update the discriminator $h$ in each iteration is $\eta\leq1$ instead of $1$, to improve the convergence of the algorithm \cite{goodfellow2014generative}. 
+
+We further motivate the algorithm design using \cref{fig:training-data} and \cref{fig:training-tsne}. \Cref{fig:training-data}(A,B) shows the input and label from one wind condition, and \cref{fig:training-data}(C) shows the distributions of the pitch component in input and the $x-$component in label, in different wind conditions. The distribution shift in label implies the importance of meta-learning and adaptive control, because the aerodynamic effect changes drastically as the wind condition switches. On the other hand, the distribution shift in input motivates the need of \DAML. \Cref{fig:training-tsne} depicts the evolution of the optimal linear coefficient ($a^*$) solved from the adaptation step in \DAML, via the t-distributed stochastic neighbor embedding (t-SNE) dimension reduction, which projects the 12-dimensional vector $a^*$ into 2-d. The distribution of $a^*$ is more and more clustered as the number of training epochs increases. In addition, the clustering behavior in \cref{fig:training-tsne} has a concrete physical meaning: right top part of the t-SNE plot corresponds to a higher wind speed. These properties imply the learned representation $\phi$ is indeed shared by all wind conditions, and the linear weight $a$ contains the wind-specific information. Finally, note that $\phi$ with 0 training epoch reflects random features, which cannot decouple different wind conditions as cleanly as the trained representation $\phi$. Similarly, as shown in \cref{fig:training-tsne}, if we ignore the adversarial regularization term (by setting $\alpha=0$), different $a^*$ vectors in different conditions are less disentangled, which indicates that the learned representation might be less robust and explainable. 
+% Furthermore, during the online adaptation phase, the ideal $a^*$ will be changing with the trajectory and degrade residual force prediction. 
+For more discussions about $\alpha$ we refer to the supplementary materials (\ref{sec:supp-learning-hyperparameters}).
+
+%% Adaptive control subsection
+\subsection*{Robust Adaptive Controller Design}
+\label{sec:control}
+During the offline meta-training process, a least-squares fit is used to to find a set of parameters $a$ that minimizes the force prediction error for each data batch. 
+% Although we can derive a recursive formulation of the least squares estimator and use this estimator for our online adaptive control, such a method will not necessarily lead to the best tracking performance since it does not consider tracking error in adaptation.
+However, during the online control phase, we are ultimately interested in minimizing the position tracking error and we can improve the adaptation using a more sophisticated update law.
+% Such a method works well for the offline training phase, but not enough for the online adaptive control, because the ultimate objective for adaptive control is tracking error, rather than the supervised regression error in the offline training phase.
+Thus, in this section, we propose a more sophisticated adaptation law for the linear coefficients based upon a Kalman-filter estimator. This formulation results in automatic gain tuning for the update law, which allows the controller to quickly estimate parameters with large uncertainty. We further boost this estimator into a composite adaptation law, that is the parameter update depends both on the prediction error in the dynamics model as well as on the tracking error, as illustrated in \cref{fig:block-diagram}. This allows the system to quickly identify and adapt to new wind conditions without requiring persistent excitation. 
+In turn, this enables online adaptation of the high dimensional learned models from \DAML.
+
+Our online adaptive control algorithm can be summarized by the following control law, adaptation law, and covariance update equations, respectively.
+\begin{align}
+    \label{eq:control-law-our}
+    \unf &= \underbrace{M(q) \ddot{q_r} + C(q, \dot q) \dot q_r + g(q)}_{\text{nominal model feedforward terms}} \underbrace{- K s}_{\text{PD feedback}} \underbrace{- \phi(q, \dot q) \hat a}_{\text{learning-based feedforward}}
+    \\
+    \label{eq:adaptation-law-a}
+    \dot{\hat{a}} &= \underbrace{-\lambda \hat{a}}_{\text{regularization term}} \underbrace{- P \phi^\top R^{-1} (\phi \hat{a} - y)}_{\text{prediction error term}} \underbrace{+P \phi^\top s}_{\text{tracking error term}} \\
+    \label{eq:adaptation-law-P}
+    \dot{P} &= - 2 \lambda P + Q - P \phi ^\top R^{-1} \phi P
+\end{align}
+where $\unf$ is the control law, $\dot{\hat{a}}$ is the online linear-parameter update, $P$ is a covariance-like matrix used for automatic gain tuning, $s=\dot{\tilde{q}}+\Lambda\tilde{q}$ is the composite tracking error, \rev{$y$ is the measured aerodynamic residual force with measurement noise $\epsilon$}, and $K$, $\Lambda$, $R$, $Q$, and $\lambda$ are gains. The structure of this control law is illustrated in \cref{fig:block-diagram}. \Cref{fig:block-diagram} also shows further quadrotor specific details for the implementation of our method, including the kinematics block, where the desired thrust and attitude are determined from the desired force from \cref{eq:control-law-our}. These blocks are discussed further in the ``\nameref{sec:implementation}" section.
+
+In the next section, we will first introduce the baseline control laws, $\bar{u}$ and $u_\text{NL}$.  Then we discuss our control law $\unf$ in detail. Note that $\unf$ not only depends on the desired trajectory, but also requires the learned representation $\phi$ and the linear parameter $\hat{a}$ (an estimation of $a$). The composite adaptation algorithm for $\hat{a}$ is discussed in the following section.
+
+In terms of theoretical guarantees, the control law and adaptation law have been designed so that the closed-loop behavior of the system is robust to imperfect learning and time-varying wind conditions. Specifically, we define $d(t)$ as the representation error: $f = \phi \cdot a + d(t)$, and our theory shows that the robot tracking error exponentially converges to an error ball whose size is proportional to $\|d(t)\rev{+\epsilon}\|$ (i.e., the learning error and measurement noise) and $\|\dot{a}\|$ (i.e., how fast the wind condition changes). Later in this section we formalize these claims with the main stability theorem and present a complete proof in the supplementary materials.  
+% Our theory shows that the robot tracking error exponentially converges to a ball proportional to the inverse of the control and adaptation gain eigenvalues, the representation error in the learned model, $d$, defined below, and the rate of change of the wind effect due to changing conditions, $\phi \dot a$.
+% \begin{align}
+%     \|s\|, \|\tilde{a}\| &\sim \frac{1}{\lambda_{\text{min}}(K)}, \, \frac{1}{\lambda_{\text{min}}(P^{-1})}, \, d, \, \phi \dot a
+%     \\
+%     d: f &= \phi a + d
+% \end{align}
+
+\paragraph{Nonlinear Control Law}
+We start by defining some notation. The composite velocity tracking error term $s$ and the reference velocity $\dot q_r$ are defined such that 
+\begin{align}
+    \label{eq:s-dynamics}
+    s = \dot q - \dot q_r = \dot{\tilde{q}} + \Lambda \tilde{q}
+\end{align}
+where $\tilde{q} = q - q_d$ is the position tracking error and $\Lambda$ is a positive definite gain matrix. Note when $s$ exponentially converges to an error ball around $0$, $q$ will exponentially converge to a proportionate error ball around the desired trajectory $q_d(t)$ (see \ref{sec:supp-stability}). Formulating our control law in terms of the composite velocity error $s$ simplifies the analysis and gain tuning without loss of rigor. 
+
+% \todo{Remove $u_{\text{PID}}$ since it is not a conventional PID. xichen: now renamed to $\bar{u}$}
+% Before discussing the details of our adaptive controller, we will introduce two widely used baseline methods (PID baseline and nonlinear baseline). The baseline PID control law with gravity cancellation is defined as
+% \begin{equation}
+%     % \label{eq:control-law-PID}
+%     \bar{u} = g(q) - K s + K_I \int s dt = g(q) - \underbrace{K}_{\text{D gain}} \dot{\tilde q} - \underbrace{(K \Lambda + K_I)}_{\text{P gain}} \tilde q - \underbrace{K_I \Lambda}_{\text{I gain}} \int \tilde q dt.
+% \end{equation}
+The baseline nonlinear (NL) control law using PID feedback is defined as
+\begin{equation}
+    \label{eq:control-law-NL}
+    u_\text{NL} = \underbrace{M(q) \ddot{q_r} + C(q, \dot q) \dot q_r + g(q)}_{\text{nonlinear feedforward terms}} \underbrace{- K s - K_I\int s dt}_{\text{PID feedback}}.
+\end{equation}
+where $K$ and $K_I$ are positive definite control gain matrices. Note a \rev{standard PID controller typically only includes the PI feedback on position error, D feedback on velocity, and gravity compensation. This only leads to} local exponential stability about a fixed point, but it is often sufficient for gentle tasks such as a UAV hovering and slow trajectories in static wind conditions. \rev{In contrast, this nonlinear controller includes feedback on velocity error and feedforward terms to account for known dynamics and desired acceleration, which allows good tracking of dynamic trajectories in the presence of nonlinearities (e.g., $M(q)$ and $C(q,\dot q)$ are nonconstant in attitude control)}. However, this control law only compensates for changing wind conditions and unmodeled dynamics through an integral term, which is slow to react \rev{to changes in the unmodelled dynamics and disturbance forces.}
+
+Our method improves the controller by predicting the unmodeled dynamics and disturbance forces, and, indeed, in \cref{tab:flight-performance} we see a substantial improvement gained by using our learning method. Given the learned representation of the residual dynamics, $\phi(q, \dot q)$, and the parameter estimate $\hat a$, we replace the integral term with the learned force term, $\hat{f}=\phi \hat{a}$, resulting in our control law in \cref{eq:control-law-our}. 
+\rev{\nf~uses $\phi$ trained using \DAML~on a dataset collected with the same drone. \nftransfer~uses $\phi$ trained using \DAML~on a dataset collected with a different drone, the Intel Aero RTF drone. \nfconstant~does not use any learning but instead uses $\phi=I$ and is included to demonstrate that the main advantage of our method comes from the incorporation of learning. The learning based methods, \nf~and \nftransfer, outperform \nfconstant~because the compact learned representation can effectively and quickly predict the aerodynamic disturbances online in \cref{fig:trajectory}. This comparison is further discussed in the supplementary materials (\ref{supp:prediction-performance}).}
+
+\paragraph{Composite Adaptation Law}
+% Goal of adaptation law <- moved to overview of control section
+% The design of our learning-based method required a new adaptive control structure. Our method results in a stable closed-loop system and does not require persistent excitation, allowing for for high-dimensional learned models and achieving quick adaptation to changing environments. 
+
+% Adaptation law
+We define an adaptation law that combines a tracking error update term, a prediction error update term, and a regularization term in \cref{eq:adaptation-law-a,eq:adaptation-law-P},
+where $y$ is a noisy measurement of $f$, $\lambda$ is a damping gain, $P$ is a covariance matrix which evolves according to \cref{eq:adaptation-law-P}, and $Q$ and $R$ are two positive definite gain matrices. Some readers may note that the regularization term, prediction error term, and covariance update, when taken alone, are in the form of a Kalman-Bucy filter. This Kalman-Bucy filter can be derived as the optimal estimator that minimizes the variance of the parameter error \cite{kalman_new_1961}.
+The Kalman-Bucy filter perspective provides intuition for tuning the adaptive controller: the damping gain $\lambda$ corresponds to how quickly the environment returns to the nominal conditions, $Q$ corresponds to how quickly the environment changes, and $R$ corresponds to the combined representation error $d$ and measurement noise for $y$. More discussion on the gain tuning process is included in \ref{sec:supp-gain-tuning}. However, naively combining this parameter estimator with the controller can lead to instabilities in the closed-loop system behavior unless extra care is taken in constraining the learned model and tuning the gains. Thus, we have designed our adaptation law to include a tracking error term, making \cref{eq:adaptation-law-a} a composite adaptation law, guaranteeing stability of the closed-loop system (see \Cref{thm:stability-proof}), and in turn simplifying the gain tuning process. The regularization term allows the stability result to be independent of the persistent excitation of the learned model $\phi$, which is particularly relevant when using high-dimensional learned representations. The adaptation gain and covariance matrix, $P$, acts as automatic gain tuning for the adaptive controller, which allows the controller to quickly adapt to when a new mode in the learned model is excited. 
+
+\paragraph{Stability and Robustness Guarantees} 
+First we formally define the representation error $d(t)$, as the difference between the unknown dynamics $f(q,\dot{q},w)$ and the best linear weight vector $a$ given the learned representation $\phi(q,\dot{q})$, namely, $d(t) = f(q,\dot{q},w) - \phi(q,\dot{q})a(w)$. The measurement noise for the measured residual force is a bounded function $\epsilon(t)$ such that $y(t) = f(t) + \epsilon(t)$. If the environment conditions are changing, we consider the case that $\dot{a}\neq 0$. This leads to the following stability theorem.
+\begin{theorem}
+\label{thm:stability-proof}
+    If we assume that the desired trajectory has bounded derivatives and 
+    the system evolves according to the dynamics in \cref{eq:open-loop-dynamics}, the control law \cref{eq:control-law-our}, and the adaptation law \cref{eq:adaptation-law-a,eq:adaptation-law-P}, then the position tracking error exponentially converges to the ball
+    \begin{equation}
+        \label{eq:exponential-bound}
+        \lim_{t\rightarrow\infty}\|\tilde{q}\| \leq \sup_t \big[ C_1\|d(t)\| + C_2\|\rev{\epsilon(t)}\| +  C_3\left( \lambda\|a(t)\| + \|\dot{a}(t)\|\right) \big],
+    \end{equation} 
+    where $C_1$, $C_2$, and $C_3$ are three bounded constants depending on $\phi, R, Q, K,\Lambda, M$ and $\lambda$.
+\end{theorem}
+% \todo{comments and discuss trade-off and parameter tuning for $\lambda$}
+
+\subsection*{Implementation Details}
+\label{sec:implementation}
+
+\paragraph{Quadrotor Dynamics}
+Now we introduce the quadrotor dynamics. Consider states given by global position, $p \in \mathbb{R}^3$, velocity $v \in \mathbb{R}^3$, attitude rotation matrix $R \in \mathrm{SO}(3)$, and body angular velocity $\omega \in \mathbb{R}^3$. Then dynamics of a quadrotor are
+\begin{subequations}
+\begin{align}
+\dot{p} &= v, &  
+m\dot{v} &= mg + Rf_u + f,\label{eq:pos-dynamics} \\ 
+\dot{R}&=RS(\omega), & 
+J\dot{\omega} &= J \omega \times \omega  + \tau_u,
+\label{eq:att-dynamics}
+\end{align}
+\label{eq:quadrotor-dynamics}
+\end{subequations}
+where $m$ is the mass, $J$ is the inertia matrix of the quadrotor, $S(\cdot)$ is the skew-symmetric mapping, $g$ is the gravity vector, $f_u = [0, 0, T]^\top$ and $\tau_u = [\tau_x, \tau_y, \tau_z]^\top$ are the total thrust and body torques from four rotors predicted by the nominal model, and $f = [f_x, f_y, f_z]^\top$ are forces resulting from unmodelled aerodynamic effects due to varying wind conditions.
+
+We cast the position dynamics in \cref{eq:pos-dynamics} into the form of \cref{eq:open-loop-dynamics}, by taking $M(q) = m I$, $C(q, \dot q) \equiv 0$, and $u = R f_u$. Note that the quadrotor attitude dynamics \cref{eq:att-dynamics} is also a special case of \cref{eq:open-loop-dynamics} \cite{slotine1991applied,murray_mathematical_2017}, and thus our method can be extended to attitude control. We implement our method in the position control loop, that is we use our method to compute a desired force $u_d$.  Then the desired force is decomposed into the desired attitude $R_d$ and the desired thrust $T_d$ using kinematics (see \cref{fig:block-diagram}). Then the desired attitude and thrust are sent to the onboard PX4 flight controller.
+
+\paragraph{Neural Network Architectures and Training Details}
+In practice, we found that in addition to the drone velocity $v$, the aerodynamic effects also depend on the drone attitude and the rotor rotation speed. To that end, the input state $x$ to the deep neural network $\phi$ is a 11-d vector, consisting of a the \revB{drone} velocity (3-d), \revB{the drone attitude represented as} a quaternion (4-d), and \revB{the rotor speed commands as} a pulse width modulation (PWM) signal (4-d) (see \cref{fig:block-diagram,fig:training-data}). The DNN $\phi$ has four fully-connected hidden layers, with an architecture $11\rightarrow50\rightarrow60\rightarrow50\rightarrow4$ and Rectified Linear Units (ReLU) activation. We found that the three components of the wind-effect force, $f_x,f_y,f_z$, are highly correlated and sharing common features, so we use $\phi$ as the basis function for all the component. Therefore, the wind-effect force $f$ is approximated by
+\begin{equation}
+    f \approx \begin{bmatrix}
+    \phi(x) & 0 & 0 \\
+    0 & \phi(x) & 0 \\
+    0 & 0 & \phi(x)
+    \end{bmatrix}
+    \begin{bmatrix}
+    a_x \\ a_y \\ a_z 
+    \end{bmatrix},
+\end{equation}
+where $a_x,a_y,a_z\in\B{R}^4$ are the linear coefficients for each component of the wind-effect force. We followed Algorithm \ref{alg:DIML} to train $\phi$ in PyTorch, which is an open source deep learning framework. We refer to the supplementary material for hyperparameter details (\ref{sec:supp-learning-hyperparameters}).
+% \todo{discuss tuning for the learning rate, NN architecture, and $\gamma,\eta,\alpha$}
+
+Note that we explicitly include the PWM as an input to the $\phi$ network. The PWM information is a function of $u=Rf_u$, which makes the controller law (e.g., \cref{eq:control-law-our}) non-affine in $u$. We solve this issue by using the PWM from the last time step as an input to $\phi$, to compute the desired force $u_d$ at the current time step. Because we train $\phi$ using spectral normalization (see Algorithm \ref{alg:DIML}), this method is stable and guaranteed to converge to a fixed point, as discussed in \cite{shi2019neural}.
+
+\paragraph{\rev{Controller Implementation}}
+\rev{
+For experiments, we implemented a discrete form of the \nf~controllers, given in \ref{sec:supp-discrete}. 
+For INDI, we implemented the position and acceleration controller from Sections III.A and III.B in \cite{tal_accurate_2021}. For $\LOne$ adaptive control, we followed the adaptation law first presented in \cite{pravitra_L1-adaptive_2020} and used in \cite{hanover_performance_2021} and augment the nonlinear baseline control with $\hat{f} = - u_{\LOne}$.
+}

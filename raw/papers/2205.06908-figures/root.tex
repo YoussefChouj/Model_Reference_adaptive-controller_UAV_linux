@@ -1,0 +1,195 @@
+\documentclass[11pt]{article}
+
+\oddsidemargin 0in    %   Note \oddsidemargin = \evensidemargin
+\evensidemargin 0in
+\topmargin -0.5in
+\textheight 8.5 true in       % Height of text (including footnotes & figures)
+\textwidth 6.5 true in        % Width of text line.
+\date{}
+
+\usepackage{siunitx}
+\usepackage{outlines}
+\usepackage{times}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{bm}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{amsthm}
+\usepackage{color}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[ruled,noend,linesnumbered]{algorithm2e} 
+\usepackage{nameref}
+\usepackage{outlines}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage[normalem]{ulem}
+\usepackage[square,numbers]{natbib}
+\usepackage{slashbox}
+\usepackage{sectsty}
+
+%Load these packages last;
+\usepackage{subfiles}
+
+\crefname{figure}{Fig.}{Fig.}
+\crefname{table}{Table}{Tables}
+\crefname{equation}{Eq.}{Eq.}
+\Crefname{figure}{Figure}{Figures}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{fact}[theorem]{Fact}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}{Example}
+\newtheorem{alg}{Algorithm}
+\newtheorem{assumption}{Assumption}
+
+\crefname{theorem}{Theorem}{Theorem}
+\crefname{corollary}{Corollary}{Corollary}
+\crefname{fact}{Fact}{Fact}
+\crefname{lemma}{Lemma}{Lemma}
+
+\newcommand{\B}[1]{\mathbb{#1}}
+\newcommand{\BB}[0]{}
+\newcommand{\diff}{\text{d}}
+\newcommand{\E}[1]{\BB{E}\left[#1\right]}
+\newcommand{\Econd}[2]{\BB{E}\left[#1\middle|#2\right]}
+\newcommand{\V}{\mathcal{V}}
+\newcommand{\q}[0]{\mathbf{q}}
+\newcommand{\fa}{\mathbf{f}_\text{a}}
+\newcommand{\fahat}{\hat{\mathbf{f}}_\text{a}}
+\newcommand{\ahat}{\hat{\mathbf{a}}}
+\newcommand{\s}{\mathbf{s}}
+\newcommand{\lyap}{\mathcal{V}}
+\newcommand{\atilde}{\tilde{\BB a}}
+\newcommand{\stackedstate}{\begin{bmatrix} \BB s \\ \atilde \end{bmatrix}}
+\newcommand{\stackedstatedot}{\begin{bmatrix} \dot{\BB s} \\ \dot{\atilde} \end{bmatrix}}
+\newcommand{\expo}[1]{\mathrm{e}^{#1}}
+\newcommand{\lammin}[0]{\lambda_\text{\normalfont{min}}}
+\newcommand{\lammax}[0]{\lambda_\text{\normalfont{max}}}
+
+\newcommand{\todo}[1]{\textcolor{red}{#1}}
+% \newcommand{\revision}[1]{\textcolor{blue}{#1}}
+\newcommand{\revision}[1]{{#1}}
+% \newcommand{\rev}[1]{\textcolor{blue}{#1}}
+\newcommand{\rev}[1]{{#1}}
+% \newcommand{\revB}[1]{\textcolor{blue}{#1}}
+% \newcommand{\revC}[1]{\textcolor{green}{#1}}
+\newcommand{\revB}[1]{#1}
+\newcommand{\revC}[1]{#1}
+\newcommand{\supp}[1]{#1}
+% \newcommand{\supp}[1]{}
+% \newcommand{\guanya}[1]{\textbf{\textcolor{blue}{#1}}}
+
+\newcommand{\LOne}{{\mathcal{L}_1}}
+
+\newcommand{\kth}[0]{$k^{\mathrm{th}}$ }
+\newcommand{\vwind}[0]{v_\text{wind}}
+\newcommand{\inv}[0]{^{-1}}
+\newcommand{\metric}[0]{\mathcal{M}}
+\newcommand{\unf}[0]{u_\text{NF}}
+
+\newcommand{\nftransfer}[0]{Neural-Fly-Transfer}
+\newcommand{\nf}[0]{Neural-Fly}
+\newcommand{\nfconstant}[0]{Neural-Fly-Constant}
+\newcommand{\LearningAlg}[0]{Domain Adversarially Invariant Meta-Learning}
+\newcommand{\learningalg}[0]{domain adversarially invariant meta-learning}
+\newcommand{\Learningalg}[0]{Domain adversarially invariant meta-learning}
+\newcommand{\DAML}[0]{DAIML}
+\newcommand{\nowind}{\SI{0}{km/h}}
+\newcommand{\lowwind}{\SI{15.1}{km/h}}
+\newcommand{\medwind}{\SI{30.6}{km/h}}
+\newcommand{\highwind}{\SI{43.6}{km/h}}
+\newcommand{\sinwind}{$30.6+8.6\sin(t)$ \SI{}{km/h}}
+\newcommand{\nowindalt}{\SI{0}{m/s}}
+\newcommand{\lowwindalt}{\SI{4.2}{m/s}}
+\newcommand{\medwindalt}{\SI{8.5}{m/s}}
+\newcommand{\highwindalt}{\SI{12.1}{m/s}}
+\newcommand{\sinwindalt}{$8.5+2.4\sin(t)$ \SI{}{m/s}}
+\newcommand{\sota}{{state-of-the-art}}
+\newcommand{\Sota}{{State-of-the-art}}
+
+% \topmargin 0.0cm
+% \oddsidemargin 0.2cm
+% \textwidth 16cm 
+% \textheight 21cm
+% \footskip 1.0cm
+
+\title{Neural-Fly \revB{Enables} Rapid Learning \\ for Agile Flight in Strong Winds}
+
+\author
+{Michael O'Connell$^{\dagger}$, Guanya Shi$^{\dagger}$, Xichen Shi, \\ Kamyar Azizzadenesheli, Anima Anandkumar, Yisong Yue, Soon-Jo Chung$^{*}$
+\\
+\\
+\normalsize{Division of Engineering and Applied Science, California Institute of Technology} \\
+\normalsize{$^\dagger$ The first two authors contributed equally to this article. Alphabetical order.} \\
+\normalsize{$^*$ Corresponding authors. Email: sjchung@caltech.edu} \\
+\\
+\normalsize{\textcolor{blue}{This is the accepted version of Science Robotics Vol. 7, Issue 66, eabm6597 (2022)}}\\
+\normalsize{DOI: 10.1126/scirobotics.abm6597 \quad Video: \url{https://youtu.be/TuF9teCZX0U}} \\
+\normalsize{Data and training code: \url{https://github.com/aerorobotics/neural-fly}}
+}
+
+\begin{document} 
+
+% Make the title.
+
+\maketitle 
+\sectionfont{\MakeUppercase}
+
+\begin{abstract}
+Executing safe and precise flight maneuvers in dynamic high-speed winds is \revB{important} for the ongoing commoditization of uninhabited aerial vehicles (UAVs). However, since the relationship between various wind conditions and its \revB{effect} on aircraft maneuverability is not well understood, it is challenging to design effective robot controllers using traditional control design methods. We present \nf, a learning-based approach that allows rapid online adaptation by incorporating pre-trained representations through deep learning. \nf~builds on two key observations that aerodynamics in different wind conditions share a common representation and that the wind-specific part lies in a low-dimensional space. To that end, \nf~uses a \revB{proposed} learning algorithm, \LearningAlg~(\DAML), to learn the shared representation, only using 12 minutes of flight data. With the learned representation as a basis, \nf~then uses a composite adaptation law to update a set of linear coefficients for mixing the basis elements. When evaluated under challenging wind conditions generated with the Caltech Real Weather Wind Tunnel with wind speeds up to \rev{\highwind~(\highwindalt)}, \nf~achieves precise flight control with \revB{substantially} smaller tracking error than state-of-the-art nonlinear and adaptive controllers. In addition to strong empirical performance, the exponential stability of \nf~results in robustness guarantees.
+Finally, our control design \rev{extrapolates to unseen wind conditions, is shown to be effective for outdoor flights with only on-board sensors}, and can transfer across drones with minimal performance degradation.
+\end{abstract}
+
+% \section*{SUMMARY}
+% \revB{A} drone adapts to dynamic wind conditions using deep neural networks in real-time with stability guarantees.
+
+\input{sections/1_introduction.tex}
+
+\input{sections/2_results.tex}
+
+\input{sections/3_discussion.tex}
+
+\input{sections/4_materials-and-methods.tex}
+
+\section*{SUPPLEMENTARY MATERIALS}
+% Video 1. Neural-Fly enables agile quadrotor flights through low-clearance gates \\
+\ref{sec:supp-drone-configuration}. Drone Configuration Details \\
+\ref{sec:supp-learning-expressiveness}. The expressiveness of the learning architecture \\
+\ref{sec:supp-learning-hyperparameters}. Hyperparameters for \DAML~\rev{and the interpretation} \\
+\ref{sec:supp-discrete}. Discrete version of the proposed controller \\
+\ref{sec:supp-stability}. Stability and robustness formal guarantees and proof \\
+\ref{sec:supp-gain-tuning}. Gain tuning \\
+\rev{\ref{supp:prediction-performance}. Force prediction performance} \\
+\ref{sec:supp-localization-error}. Localization error analysis \\
+\Cref{fig:learning_curve}. Training and Validation Loss\\
+\Cref{fig:domain-shift}. Importance of domain-invariant representation\\
+\Cref{fig:force-prediction}. Measured residual force versus adaptive control augmentation \\
+\Cref{fig:localization-good}. Localization inconsistency \\
+\Cref{tab:drone_configuration}. Drone configuration details \\
+\cref{tab:hardware-comparison}. Hardware comparison\\
+\Cref{tab:learning_hyperparameter}. Hyperparameters used in DAIML
+
+\renewcommand{\refname}{REFERENCES}
+\bibliography{scibib}
+\bibliographystyle{unsrtnat}
+% \bibliographystyle{plainnat}
+
+\section*{ACKNOWLEDGEMENTS}
+\textbf{Acknowledgements:} A.A. is also affiliated with NVIDIA Corporation, and Y.Y. is also with associated Argo AI. K.A. is currently affiliated with Purdue University. We thank J. Burdick and J.-J. E. Slotine for their helpful discussions. We thank M. Anderson for help with configuring the quadrotor platform, and M. Anderson and P. Spieler for help with hardware troubleshooting. We also thank N. Badillo and L. Pabon Madrid for help in experiments.
+
+\textbf{Funding:} This research was developed with funding from the Defense Advanced Research Projects Agency (DARPA). This research was also conducted in part with funding from Raytheon Technologies.
+The views, opinions, and/or findings expressed are those of the authors and
+should not be interpreted as representing the official views or policies of
+the Department of Defense or the U.S. Government. The experiments reported in this article were conducted at Caltech's Center for Autonomous Systems and Technologies (CAST). \textbf{Author contributions:} (1) S.-J.C. and Y.Y. directed the research activities. (2) G.S. and M.O'C. designed and implemented the meta-learning algorithm under the guidance of Y.Y., K.A., A.A., S.-J.C., while the last-layer adaptation idea was started with a discussion by G.S., M.O'C., X.S., and S.-J.C. (3) M.O'C., G.S. designed and implemented the adaptive control algorithm with inputs from S.-J.C., X.S. (4) M.O'C., G.S. performed experiments and evaluated the results. (5) M.O'C. conducted the theoretical analysis of the meta-learning based adaptive controller with input from S.-J.C., G.S., X.S. (6) G.S. analyzed the learning algorithm with feedback from Y.Y., K.A., A.A., and S.-J.C. (7) G.S., M.O'C. made all the figures and videos with input from all the others. (8) All authors prepared the manuscript. 
+\textbf{Competing interests:} The authors
+declare that they have no competing interests. \textbf{Data and materials availability:} All data needed to evaluate the conclusions in the article are present in the article or in the Supplementary Materials.
+
+\input{sections/5_supplementary-materials.tex}
+
+\end{document}

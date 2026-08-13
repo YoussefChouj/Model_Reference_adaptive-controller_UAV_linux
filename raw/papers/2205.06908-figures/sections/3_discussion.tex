@@ -1,0 +1,63 @@
+% \documentclass[../root.tex]{subfiles}
+
+% \begin{document}
+\section{Discussion}
+\label{sec:discussion}
+\subsection*{State-of-the-art Tracking Performance}
+% Discuss general quadrotor control design and difficulty of designing tracking control
+When measuring position tracking errors, \rev{we observe that our \nf~method outperforms state-of-the-art flight controllers in all wind conditions}. 
+% Discuss important performance results and how this can be applied to "standard" hardware
+\nf~uses deep learning to obtain a compact representation of the aerodynamic disturbances and incorporates \rev{that representation} into an adaptive control design to achieve high precision tracking performance. 
+\rev{The benchmark methods used in this \revB{article} are nonlinear control, INDI, and $\LOne$ and performance is compared tracking an agile figure-8 in constant and time-varying wind speeds up to \highwind~(\highwindalt). 
+Furthermore, we observe a mean tracking error of \SI{2.9}{cm} in \nowind~wind, which is comparable with state-of-the-art tracking performance demonstrated on more aggressive racing drones \cite{tal_accurate_2021,hanover_performance_2021} despite several architectural limitations such as limited control rate in offboard mode, a larger, less maneuverable vehicle, and without direct motor speed measuremnts. All our experiments were conducted using the standard PX4 attitude controller, with \nf~implemented in an onboard, low cost, and ``credit-card sized" Raspberry Pi 4 computer.}
+Furthermore, \nf~is robust to changes in vehicle configuration, as demonstrated by the similar performance of \nftransfer. 
+
+% fundamental limit of control performance and how error is close to this limit
+To understand the fundamental tracking-error limit, we estimate that the localization precision from the OptiTrack system is about \SI{1}{cm}, which is a practical lower bound for the average tracking error in our system (see more details in the supplementary material, \ref{sec:supp-localization-error}). This is based on the fact that the difference between the OptiTrack position measurement and the onboard EKF position estimate is around \SI{1}{cm}. 
+% Note that with a constant wind \SI{4.3}{m/s}, the tracking error of our method is only \SI{3.3}{cm}, which is very close to this fundamental limit (\SI{1}{cm}-\SI{2}{cm}), even with a strong external wind disturbance and other modeling mismatches.
+
+% Remaining improvements to achieve "perfect" performance
+To achieve a tracking error of \SI{1}{cm}, remaining improvements should focus on reducing code execution time, communication delays, and attitude tracking delay. We measured the combined code execution time and communication delay to be at least \SI{15}{ms} and often as much as \SI{30}{ms}. A faster implementation (such as using C++ instead of Python) and streamlined communication layer (such as using ROS2's real-time features) could allow us to achieve tracking errors on the order of the localization accuracy. Attitude tracking delay can be \revB{substantially} reduced through the use of a nonlinear attitude controller (e.g., \cite{shi2018nonlinear}). \rev{Our method is also directly extensible to attitude control because attitude dynamics match the Euler-Lagrange dynamics used in our derivations.} However, further work is needed to understand the interaction of the learned dynamics with the cascaded control design when implementing a tracking attitude controller. 
+
+% % Control method can use any state-estimation algorithms and can extended to real world
+% The control method is also orthogonal to the pose estimation algorithm, and thus our method could be extended to real-world flight tests. The only necessary change would be replacing the OptiTrack position estimation with other sensors, such a Global Navigation Satellite System (GNSS) receiver or cameras using a Visual Inertial Odometry (VIO) algorithm.
+We have tested our control method in outdoor flight to demonstrate that it is robust to less precise state estimation and does not rely on any particular features of our test facility.
+Although control and estimation are usually separately designed parts of an autonomous system, aggressive adaptive control requires minimal noise in force measurement to effectively and quickly compensate for unmodelled dynamics. Testing our method in outdoor flight, the quadrotor maintains precise tracking with only \SI{7.5}{cm} tracking error on a gentle breezy day with wind speeds around \SI{17}{km/h}.
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[c]{0.35\linewidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/figure_outdoor_setup.pdf}
+    \end{subfigure}
+    ~
+    \begin{subfigure}[c]{0.62\linewidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/figure_outdoor_perf.pdf}
+    \end{subfigure}
+    
+    \vspace{-1.2cm}
+    \caption{\revision{\textbf{Outdoor flight setup and performance.} \textbf{Left:} In outdoor experiments, a GPS module is deployed for state estimation, and a weather station records wind profiles. The maximum wind speed during the test was around \SI{17}{km/h} (\SI{4.9}{m/s}). \textbf{Right:} Trajectory tracking performance of \nf.}}
+    \label{fig:outdoor}
+\end{figure}
+
+\subsection*{Challenges Caused by Unknown and Time-varying Wind Conditions}
+% Model was trained on static wind conditions but could still adapt to changing wind conditions
+In the real world, the wind conditions are not only unknown but also constantly changing, and the vehicle must continuously adapt. We designed the the sinusoidal wind test to emulate unsteady or gusty wind conditions.
+Although our learned model is trained on static and approximately uniform wind condition data, \nf~can quickly identify changing wind speed and maintains precise tracking even \rev{on the sinusoidal wind experiment}.
+\rev{Moreover,} in each of our experiments, the wind conditions were unknown to the UAV before starting the test yet were quickly identified by the adaptation algorithm. 
+
+% Adaptive control in \rev{windy} conditions is more difficult because the algorithm must disentangle the change in aerodynamic force from varying vehicle velocity and dynamic wind speed. 
+% To the best of our knowledge,  we are the first to
+\revB{Our work demonstrated that it is possible to} repeatably and quantitatively test quadrotor flight in time-varying wind. Our method separately learns the wind effect's dependence on the vehicle state (i.e., the wind-invariant representation in \cref{fig:block-diagram}(A)) and the wind condition (i.e., the wind-specific linear weight in \cref{fig:block-diagram}(A)). This separation allows \nf~to quickly adapt to the time-varying wind even as the UAV follows a dynamic trajectory, with an average tracking error below \rev{\SI{8.7}{cm}} in \cref{tab:flight-performance}.  
+
+\subsection*{Computational Efficiency of Our Method}
+% Learning is data efficient, both in sense of required training data and online adaptation time
+In the offline meta-learning phase, the proposed \DAML~algorithm is able to learn an effective representation of the aerodynamic effect in a data efficient manner. This requires only 12 minutes of flight data at \SI{50}{Hz}, for a total of 36,000 data points. The training procedure only takes 5 minutes on a normal desktop computer. In the online adaptation phase, our adaptive control method only takes \SI{10}{ms} to compute on a compact onboard Linux computer (Raspberry Pi 4). In particular, the feedforward inference time via the learned basis function is about \SI{3.5}{ms} and the adaptation update is about \SI{3.0}{ms}, which implies the compactness of the learned representation. % and efficient adaptation alg?
+
+\subsection*{Generalization to New Trajectories and New Aircraft}
+% Control method can be used with any trajectory or trajectory planning methods
+It is worth noting that our control method is orthogonal to the design of the desired trajectory. In this \revB{article}, we \rev{focus on the figure-8 trajectory which is a commonly used control benchmark. We also demonstrate our method flying a horizontal ellipse during the narrow gate demonstration \cref{fig:intro}.} Note that our method supports any trajectory planners such as \cite{foehn2021time} or learning-based planners \cite{nakka2020chance,doi:10.1126/scirobotics.abg5810,liu2020robust}. In particular, for those planners which require a precise and agile downstream controller (e.g., for close-proximity flight or drone racing \cite{foehn2021time,shi2021neural}), our method immediately provides a solution and further pushes the boundary of these planners, because our state-of-the-art tracking capabilities enable tighter configurations and smaller clearances. However, further research is required to understand the coupling between planning and learning-based control near actuation limits. \rev{Future work will consider using \nf~in a combined planning and control structure such as MPC, which will be able to handle actuation limits.}
+
+% Method is transferable between vehicles and types of robotic systems
+The comparison between \nf~and \nftransfer~show that our approach is robust to changing vehicle design and the learned representation \revB{does not depend on the} vehicle. This demonstrates the generalizability of the proposed method running on different quadrotors. Moreover, our control algorithm is formulated generally for all robotic systems described by the Euler-Langrange equation (see ``\nameref{sec:methods}''), including many types of aircraft such as \cite{shi_adaptive_2020,doi:10.1126/scirobotics.abf8136}. 

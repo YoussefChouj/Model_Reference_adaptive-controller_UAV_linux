@@ -1,0 +1,720 @@
+% \documentclass[../root.tex]{subfiles}
+
+% From .doc template: Materials and methods (The materials and methods section should provide sufficient information to allow replication of the results. Begin with a section describing the objectives and design of the study as well as prespecified components. 
+%
+%In addition, include a section at the end that fully describes the statistical methods with enough detail to enable a knowledgeable reader with access to the original data to verify the results. The values for N, P, and the specific statistical test performed for each experiment should be included in the appropriate figure legend or main text. 
+%
+%All descriptions of materials and methods should be included after the Discussion. This section should be broken up by short subheadings. Under exceptional circumstances, when a particularly lengthy description is required, a portion of the materials and methods can be included in the Supplementary Materials.)
+
+% \begin{document}
+
+\sectionfont{\MakeUppercase}
+\section*{Supplementary Materials}
+
+% \setcounter{page}{1}
+
+\setcounter{table}{0}
+\renewcommand{\thetable}{S\arabic{table}}
+
+\setcounter{subsection}{0}
+\renewcommand{\thesubsection}{Section S\arabic{subsection}}
+
+\setcounter{figure}{0}
+\renewcommand{\thefigure}{S\arabic{figure}}
+
+\subsection{Drone Configuration Details}
+\label{sec:supp-drone-configuration}
+
+\Cref{tab:drone_configuration} presents the configuration information of the custom built drone (fig.~\ref{fig:intro}(A)) and the Intel Aero drone. We use both drones for data collection and use the custom built drone exclusively for experiments.
+
+\begin{table}[ht]
+    \centering
+    \begin{tabular}{c|cc}
+    & Custom built drone & Intel Aero drone \\
+    \hline
+    Weight & \SI{2.53}{kg} & \SI{1.47}{kg} \\
+    Thrust-to-weight ratio & 2.2 & 1.6 \\ 
+    Rotor tilt angle & \SI{12}{\degree} front, \SI{10}{\degree} rear & \SI{0}{\degree} \\ 
+    Diameter & \SI{85}{cm} wide, \SI{75}{cm} long & \SI{52}{cm} wide, \SI{52}{cm} long \\ 
+    Configuration & Wide-X4 & X4 \\
+    On-board computer & Raspberry Pi 4 & Intel Aero computing board (Atom x7 processor) \\
+    Flight controller & Pixhawk 4 running PX4 & Aero Flight Controller running PX4 \\
+    \end{tabular}
+    \caption{\textbf{Drone configuration details}~Configurations of the custom built drone and the Intel Aero drone with propeller guards.}
+    \label{tab:drone_configuration}
+\end{table}
+
+% Compare with drones used in other SOTA work
+Precision tracking for drones often relies on specialized hardware and optimized vehicle design, whereas our method achieves precise tracking using improved dynamics prediction through online learning. 
+Although most researchers report the numeric tracking error of their method, it can be difficult to disentangle the improvement of the controller resulting from the algorithmic advancement versus the improvement from specialized hardware. For example moment of inertia generally scales with the radius squared and the lever arm for the motors scales with the radius, so the attitude maneuverability roughly scales with the inverse of the vehicle radius. Similarly, high thrust to weight ratio provides more attitude control authority during high acceleration maneuvers. More powerful motors, electronic speed controllers, and batteries together allow faster motor response time further improving maneuverability. Thus, state-of-the-art (SOTA) tracking performance usually requires specialized hardware often used for racing drones, resulting in a vehicle with greater maneuverability than our platform, a higher thrust to weight ratio, and using high-rate controllers sometimes even including direct motor RPM control. In contrast, our custom drone is more representative of typical consumer drone hardware. A detailed comparison with the hardware from some recent work in agile flight control is provided in \cref{tab:hardware-comparison}.
+
+\begin{table}[ht]
+    \centering
+    \begin{small}
+    \begin{tabular}{c|c|c|c|c}
+         & \nf~& INDI \cite{tal_accurate_2021} & Differentially flat                          & Gaussian Process \\
+         &     &                              & linear drag \cite{faessler_differential_2018} & MPC \cite{torrente2021data}\\
+         \hline
+        Flight computer & Raspberry Pi 4 & -- & laptop & laptop \\
+        Flight controller & Pixhawk 4 & STM32H7 &  Raceflight Revolt & ?\\
+        && (\SI{400}{MHz}) &&\\
+        Flight controller firmware & PX4 & custom & ? & ?\\
+        Mass [\SI{}{kg}] & 2.53 & 0.609 & 0.610 & 0.8 \\
+        Total width [\SI{}{cm}] & 85 & ? & ? & ? \\
+        Propeller diameter [\SI{}{in}] & 11 & 5 & 6 & ? \\
+        Motor Spacing [\SI{}{cm}] & 39* & 18 & -- & ?\\
+        Thrust-to-weight ratio [-] & 2.2 & ? & 4 & 5 \\
+        Motion capture frequency [\SI{}{Hz}] & 100 & 360 & 200 & 100 \\
+        MPC control frequency [\SI{}{Hz}] & -- & -- & -- & 50 \\
+        Position control frequency [\SI{}{Hz}] & 50 & ? & 55 & ?\\
+        Attitude control frequency [\SI{}{Hz}] & $<$1000 & 2000 & 4000 & ? \\
+        Motor speed feedback & No & Optical encoders  & No & No\\
+        & & (\SI{5}{kHz}) & & \\
+        % Max ground speed \SI{}{m/s} & 2.0 & 0.0 \\
+        % Max wind speed \SI{}{m/s} & 4.3 & 0.0
+        % Max air speed \SI{}{m/s} & 5.8 & 0.0 
+        % Max acceleration \SI{}{m/s^2} & 3.13 & 
+        % Max thrust from acceleration and gravity \SI{}{m/s^2} & 
+        % RMS position error \SI{}{cm} & 3.8 \\
+        % Adaptable & Yes \\
+        \multicolumn{5}{l}{}\\
+        \multicolumn{5}{l}{? indicates information not provided}\\
+        \multicolumn{5}{l}{-- indicates information not applicable}\\
+        \multicolumn{5}{l}{*  front to back}
+    \end{tabular}
+    \caption{\textbf{Hardware comparison} Hardware configuration comparison with other quadrotors that demonstrate state-of-the-art trajectory tracking. Direct comparisons of performance are difficult due to the varying configurations, controller tuning, and flight arenas. However, most methods require extremely maneuverable quadrotors and onboard/offboard computation power to achieve state-of-the-art performance, while \nf~achieves state-of-the-art performance on more standard hardware with all control running onboard.}
+    \label{tab:hardware-comparison}
+    \end{small}
+\end{table}
+
+
+\subsection{The Expressiveness of the Learning Architecture}
+\label{sec:supp-learning-expressiveness}
+
+In this section, we theoretically justify the decomposition $\BB f(\BB x,\BB w)\approx \phi(\BB x)\BB a(\BB w)$. In particularly, we prove that any analytic function $\bar{f}(\BB x,\BB w):[-1,1]^n\times[-1,1]^m\rightarrow\B{R}$ can be split into a $\BB w$-invariant part $\bar{\phi}(\BB x)$ and a $\BB w$-dependant part $\bar{\BB a}(\BB w)$ in the structure $\bar{\phi}(\BB x)\bar{\BB a}(\BB w)$ with arbitrary precision $\epsilon$, where $\bar{\phi}(\BB x)$ and $\bar{\BB a}(\BB w)$ are two polynomials. Further, the dimension of $\bar{\BB a}(\BB w)$ only scales polylogarithmically with $1/\epsilon$. 
+
+We first introduce the following multivariate polynomial approximation lemma in the hypercube proved in \cite{trefethen2017multivariate}.
+\begin{lemma}(Multivariate polynomial approximation in the hypercube)
+\label{lemma:poly_appro}
+Let $\bar{f}(\BB x,\BB w):[-1,1]^n\times[-1,1]^m\rightarrow\B{R}$ be a smooth function of $[\BB x,\BB w]\in[-1,1]^{n+m}$ for $n,m\geq 1$. Assume $\bar{f}(\BB x,\BB w)$ is analytic for all $[\BB x,\BB w]\in\B{C}^{n+m}$ with $\Re(x_1^2+\cdots+x_n^2+w_1^2+\cdots+w_m^2)\geq-t^2$ for some $t>0$, where $\Re(\cdot)$ denotes the real part of a complex number. Then $\bar{f}$ has a uniformly and absolutely convergent multivariate Chebyshev series 
+$$\sum_{k_1=0}^\infty\cdots\sum_{k_n=0}^\infty\sum_{l_1=0}^\infty\cdots\sum_{l_m=0}^\infty
+b_{k_1,\cdots,k_n,l_1,\cdots,l_m}T_{k_1}(x_1)\cdots T_{k_n}(x_n)T_{l_1}(w_1)\cdots T_{l_m}(w_m).
+$$
+Define $\BB s=[k_1,\cdots,k_n,l_1,\cdots,l_m]$. The multivariate Chebyshev coefficients satisfy the following exponential decay property:
+$$b_{s}=O\left( (1+t)^{-\|\BB s\|_2} \right).$$
+\end{lemma}
+
+Note that this lemma shows that the truncated Chebyshev expansions
+$$\mathcal{C}_p=\sum_{k_1=0}^p\cdots\sum_{k_n=0}^p\sum_{l_1=0}^p\cdots\sum_{l_m=0}^p
+b_{k_1,\cdots,k_n,l_1,\cdots,l_m}T_{k_1}(x_1)\cdots T_{k_n}(x_n)T_{l_1}(w_1)\cdots T_{l_m}(w_m)$$
+will converge to $\bar{f}$ with the rate $O((1+t)^{-p\sqrt{n+m}})$ for some $t>0$, i.e., $\sup_{[\BB x,\BB w]\in[-1,1]^{n+m}}\|\bar{f}(\BB x,\BB w)-\mathcal{C}_p(\BB x,\BB w)\|\leq O((1+t)^{-p\sqrt{n+m}})$. Finally we are ready to present the following representation theorem.
+
+\begin{theorem}
+\label{thm:representation}
+$\bar{f}(\BB x,\BB w)$ is a function satisfying the assumptions in Lemma~\ref{lemma:poly_appro}. For any $\epsilon>0$, there exist $h\in\B{Z}^+$, and two Chebyshev polynomials $\bar{\phi}(\BB x):[-1,1]^n\rightarrow\B{R}^{1\times h}$ and  $\bar{\BB a}(\BB w):[-1,1]^m\rightarrow\B{R}^{h\times 1}$ such that 
+$$\sup_{[\BB x,\BB w]\in[-1,1]^{n+m}}\|\bar{f}(\BB x,\BB w)-\bar{\phi}(\BB x) \bar{\BB a}(\BB w)\|\leq\epsilon$$
+and $h=O((\log(1/\epsilon))^m)$.
+\end{theorem}
+\begin{proof}
+First note that there exists $p=O\left(\frac{\log(1/\epsilon)}{\sqrt{n+m}}\right)$ such that $\sup_{[\BB x,\BB w]\in[-1,1]^{n+m}}\left\|\bar{f}(\BB x,\BB w)-\mathcal{C}_p(\BB x,\BB w)\right\|\leq\epsilon$. To simplify the notation, define
+$$\begin{aligned}
+g(\BB x,\BB k,\BB l) &= g(x_1,\cdots,x_n,k_1,\cdots,k_n,l_1,\cdots,l_m)=b_{k_1,\cdots,k_n,l_1,\cdots,l_m}T_{k_1}(x_1)\cdots T_{k_n}(x_n) \\
+g(\BB w,\BB l) &= g(w_1,\cdots,w_m,l_1,\cdots,l_m) = T_{l_1}(w_1)\cdots T_{l_n}(w_m)
+\end{aligned}$$
+Then we have
+$$\mathcal{C}_p(\BB x,\BB w) = \sum_{k_1,\cdots,k_n=0}^p\,\,\sum_{l_1,\cdots,l_m=0}^p g(\BB x,k_1,\cdots,k_n,l_1,\cdots,l_m)g(\BB w,l_1,\cdots,l_m)$$
+Then we rewrite $\mathcal{C}_p$ as $\mathcal{C}_p(\BB x,\BB w)=\bar{\phi}(\BB x)\bar{\BB a}(\BB w)$:
+\begin{equation*}
+\begin{aligned}
+\bar{\phi}(\BB x)^\top &= \begin{bmatrix}
+\sum_{k_1,\cdots,k_n=0}^p\, g(\BB x,k_1,\cdots,k_n,\BB l=[0,0,\cdots,0]) \\
+\sum_{k_1,\cdots,k_n=0}^p\, g(\BB x,k_1,\cdots,k_n,\BB l=[1,0,\cdots,0]) \\
+\sum_{k_1,\cdots,k_n=0}^p\, g(\BB x,k_1,\cdots,k_n,\BB l=[2,0,\cdots,0]) \\
+\vdots \\
+\sum_{k_1,\cdots,k_n=0}^p\, g(\BB x,k_1,\cdots,k_n,\BB l=[p,p,\cdots,p])
+\end{bmatrix},
+\bar{a}(w) = \begin{bmatrix}
+g(\BB w,\BB l=[0,0,\cdots,0]) \\
+g(\BB w,\BB l=[1,0,\cdots,0]) \\
+g(\BB w,\BB l=[2,0,\cdots,0]) \\
+\vdots \\
+g(\BB w,\BB l=[p,p,\cdots,p])
+\end{bmatrix}
+\end{aligned}
+\end{equation*}
+Note that the dimension of $\bar{\phi}(\BB x)$ and $\bar{\BB a}(\BB w)$ is
+$$h=(p+1)^{m}=O\left(\left(1+\frac{\log(1/\epsilon)}{\sqrt{n+m}}\right)^m\right)=O\left((\log(1/\epsilon))^m\right)$$
+\end{proof}
+% Note that Theorem \ref{thm:representation} directly implies the existence of $\rho(x)$ and $\phi(x)$ in \cref{eq:decomposition}. Let $f(x,c)=[f_1(x,c),\cdots,f_n(x,c)]$ and apply Theorem \ref{thm:representation} to each component (under some transformations), and then we will have
+% $$\begin{bmatrix}f_1(x,c) \\ f_2(x,c) \\ \vdots \\ f_n(x,c)
+% \end{bmatrix} \approx 
+% \underbrace{\begin{bmatrix}\bar{\rho}_1(x) \\ \bar{\rho}_2(x) \\ \vdots \\ \bar{\rho}_n(x,c)
+% \end{bmatrix}}_{\rho(x)\in\B{R}^n} + 
+% \underbrace{\begin{bmatrix}
+% \bar{\phi}_1(x)^\top & & & \\
+% & \bar{\phi}_2(x)^\top & & \\
+% & & \ddots & \\
+% & & & \bar{\phi}_n(x)^\top
+% \end{bmatrix}}_{\phi(x)^\top\in\B{R}^{n\times h}} 
+% \underbrace{\begin{bmatrix}\bar{a}_1(c) \\ \bar{a}_2(c) \\ \vdots \\ \bar{a}_n(c)
+% \end{bmatrix}}_{a(c)\in\B{R}^h}
+% $$
+% where $h=\sum_{i=1}^n O\left((\log(1/\epsilon))^m\right)=O\left((\log(1/\epsilon))^m\right)$.
+Note that Theorem \ref{thm:representation} can be generalized to vector-valued functions with bounded input space straightforwardly. Finally, since deep neural networks are universal approximators for polynomials \cite{yarotsky2017error}, Theorem \ref{thm:representation} immediately guarantees the expressiveness of our learning structure, i.e., $\phi(\BB x)\BB a(\BB w)$ can approximate $\BB f(\BB x,\BB w)$ with arbitrary precision, where $\phi(\BB x)$ is a deep neural network and $\ahat$ includes the linear coefficients for all the elements of $\BB f$. In experiments, we show that a four-layer neural network can efficiently learn an effective representation for the underlying unknown dynamics $\BB f(\BB x,\BB w)$.
+
+\subsection{Hyperparameters for \DAML~and the Interpretation}
+\label{sec:supp-learning-hyperparameters}
+
+We implemented \DAML~(Algorithm \ref{alg:DIML}) using PyTorch, with hyperparameters reported in \cref{tab:learning_hyperparameter}. We iteratively tuned these hyperparameters by trial and error. We notice that the behavior of the learning algorithm is not sensitive to most of parameters in \cref{tab:learning_hyperparameter}. The training process is shown in fig.~\ref{fig:learning_curve}, where we present the $f$ loss curve on both training set and validation set using three random seeds. The $f$ loss is defined by $\sum_{i\in B}\|\BB y_k^{(i)}-\phi(\BB x_k^{(i)})\BB a^*\|^2$ (see Line \ref{alg:DIML:learning_phi} in Algorithm \ref{alg:DIML}), which reflects how well $\phi$ can approximate the unknown dynamics $\BB f(\BB x,\BB w)$. The validation set we considered is from the figure-8 trajectory tracking tasks using the PID and nonlinear baseline methods. Note that the training set consists of a very different set of trajectories (using random waypoint tracking, see Results)
+%the ``\nameref{sec:results}'' Section)
+, and this difference is for studying whether and when the learned model $\phi$ starts over-fitting during the training process.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.8\linewidth]{figures/figure_training_curve.pdf}
+    \caption{\textbf{Training and validation loss.} The evolution of the $f$ loss on the training data and validation data in the training process, from three random seeds. Both mean (the solid line) and standard deviation (in the shaded area) are presented. Training with the adversarial regularization term ($\alpha=0.1$) has similar behaviors as $\alpha=0$ (no regularization) in the early phase before 300 training epochs, except that it converges slightly faster. However, the regularization term effectively avoids over-fitting and has smaller error on the validation dataset after 300 training epochs.}
+    \label{fig:learning_curve}
+\end{figure}
+
+\begin{table}
+    \centering
+    \begin{tabular}{c|c}
+    Architecture of $\phi$ net & $11\rightarrow50\rightarrow60\rightarrow50\rightarrow4$ with ReLU activation functions \\
+    Architecture of $h$ net & $4\rightarrow128\rightarrow6$ with ReLU activation functions \\
+    Batch size of $B_a$ & 128 \\
+    Batch size of $B$ & 256 \\
+    Loss function for $h$ & Cross-entropy loss \\
+    Learning rate for training $\phi$ & $0.0005$ \\
+    Learning rate for training $h$ & $0.001$ \\
+    Discriminator training frequency $\eta$ & $0.5$ \\
+    Normalization constant $\gamma$ & $10$ \\
+    The degree of regularization $\alpha$ & $0.1$ \\
+    \end{tabular}
+    \caption{Hyperparameters used in \DAML~(Algorithm \ref{alg:DIML}).}
+    \label{tab:learning_hyperparameter}
+\end{table}
+ 
+We emphasize a few important parameters as follows. (i) The frequency $0<\eta\leq1$ is to control how often the discriminator $\BB h$ is updated. Note that $\eta=1$ corresponds to the case that $\phi$ and $h$ are both updated in each iteration. We use $\eta=0.5$ for training stability, which is also commonly used in training generative adversarial networks \cite{goodfellow2014generative}. (ii) The regularization parameter $\alpha\geq0$. Note that $\alpha=0$ corresponds to the non-adversarial meta-learning case which does not incorporate the adversarial regularization term in \cref{eq:optimization-both-loss}. From fig.~\ref{fig:learning_curve}, clearly a proper choice of $\alpha$ can effectively avoid over-fitting. Moreover, another benefit of having $\alpha>0$ is that the learned model is more explainable. As observed in fig.~\rev{fig:training-tsne}, $\alpha>0$ disentangles the linear coefficients $\BB a^*$ between wind conditions. However, if $\alpha$ is too high it may degrade the prediction performance, so we recommend using relatively small value for $\alpha$ such as $0.1$.
+
+\rev{\paragraph{The importance of having a domain-invariant representation.}
+We use the following example to illustrate the importance of having a domain-invariant representation $\phi(\BB x)$ for online adaptation. Suppose the data distribution in wind conditions 1 and 2 are $P_1(\BB x)$ and $P_2(\BB x)$, respectively, and they do not overlap. Ideally, we would hope these two conditions share an invariant representation and the latent variables are distinct ($\BB a^{(1)}$ and $\BB a^{(2)}$ in the first line in fig.~\ref{fig:domain-shift} shown below). However, because of the expressiveness of DNNs, $\phi$ may memorize $P_1$ and $P_2$ and learn two modes $\phi_1(\BB x)$ and $\phi_2(\BB x)$. In the second line in the following figure, $\phi_1$ and $\phi_2$ are triggered if $\BB x$ is in $P_1$ and $P_2$, respectively ($\mathbf{1}_{\BB x\in{P_1}}$ and $\mathbf{1}_{\BB x\in{P_2}}$ are indicator functions), such that the latent variable $\BB a$ is identical in both wind conditions. Such an overfitted $\phi$ is not robust and not generalizable: for example, if the drone flies to $P_1$ in wind condition 2, the wrong mode $\phi_1$ will be triggered.}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figures/revision/shift.png}  
+    \caption{\textbf{Importance of domain-invariant representation.}}
+    \label{fig:domain-shift}
+\end{figure}
+\begin{center} 
+\end{center}
+
+\rev{The key idea to tackle this challenge is to encourage diversity in the latent space, which is why we introduced a discriminator in DAIML. Figure~\ref{fig:training-tsne} shows DAIML indeed makes the latent space much more disentangled.}
+
+
+\subsection{Discrete Version of the Proposed Controller}
+\label{sec:supp-discrete}
+
+In practice, we implement \nf on a digital system, and therefore, we require a discrete version of the controller. The feedback control policy $\BB u$ remains the same as presented in the main body of this article. However, the adaptation law must be integrated and therefore we must be concerned with both the numerical accuracy and computation time of this integration, particularly for the covaraince matrix $P$. During the development of our algorithm, we observed that a naive one-step Euler integration of the continuous time adaptation law would sometimes result $P$ becoming non-positive-definite due to a large $\dot{P}$ magnitude and a coarse integration step size (see \cite{dieci_positive_1994} for more discussion on the positive definiteness of numerical integration of the differential Riccati equation). To avoid this issue, we instead implemented the adaptation law in two discrete steps, a propagation and an update step, summarized as below. We denote the time at step $k$ as $t_k$, the value of a parameter before the update step but after the propagation step with a subscript $t_k^-$, and the value after both the propagation and update step with a subscript $t_k^+$. The value used in the controller is the value after both the propagation and update steps, that is $\hat{\BB a}(t_k) = \hat{\BB a}_{t_k^+}$. During the propagation step in \cref{eq:discrete-propagate-a,eq:discrete-propagate-P} both $\ahat$ and $P$ are regularized. Then, in the update step in \cref{eq:discrete-update-a,eq:discrete-update-P}, $P$ and $\ahat$ are updated according to the gain in \cref{eq:discrete-kalman-gain}. This mirrors a discrete Kalman filter implementation \cite{kalman_new_1960} with the tracking error term added in the update step. The discrete Kalman filter exactly integrates the continuous time Kalman filter when the prediction error $\BB e$, tracking error $\BB s$, and learned basis functions $\phi$ are constant between time steps ensuring the positive definiteness of $P$. 
+\begin{align}
+    \label{eq:discrete-propagate-a}
+    \hat{\BB a}_{t_k^-} &= \underbrace{(1 - \lambda \Delta t_k)}_{\text{damping}} \hat{\BB a}_{t_{k-1}^+}
+    \\
+    \label{eq:discrete-propagate-P}
+    P_{t_k^-} &= (1 -  \lambda \Delta t_k)^2 P_{t_{k-1}^+} + Q \Delta t_k 
+    \\
+    \label{eq:discrete-kalman-gain}
+    K_{t_k} &= P_{t_k^-}  \phi_{t_k}^\top \left(\phi_{t_k} P_{t_k^-} \phi_{t_k}^\top + R \Delta t_k\right)^{-1} 
+    \\
+    \label{eq:discrete-update-a}
+    \hat{\BB a}_{t_k^+} &= \hat{\BB a}_{t_k^-} - \underbrace{K_{t_k}\left( \phi_{t_k}\hat{\BB a}_{t_k^-} - \BB y_{t_k}\right)}_{\text{prediction error adaptation}} - \underbrace{P_{t_k^-} \phi_{t_k}^\top \BB s_{t_k}}_{\text{tracking error adaptation}} 
+    \\
+    \label{eq:discrete-update-P}
+    % P_{t_k^+} &= \left(I - K_{t_k} \phi_{t_k}\right) P_{t_k^-}
+    P_{t_k^+} &= \left(I - K_{t_k} \phi_{t_k}\right) P_{t_k^-} \left(I - K_{t_k} \phi_{t_k}\right)^\top + K_{t_k} R \Delta t_k K_{t_k}^\top 
+\end{align}
+
+
+\subsection{Stability and Robustness Formal Guarantees and Proof}
+\label{sec:supp-stability}
+
+We divide the proof of \Cref{eq:exponential-bound} into two steps. First, in \cref{thm:s-stability}, we show that the combined composite velocity tracking error and adaptation error, $\|[\BB s;\tilde{\BB a}]\|$, exponentially converges to a bounded error ball. This implies the exponential convergence of $\BB s$. Then in \Cref{cor:q-bound} we show that when $\BB s$ is exponentially bounded, $\tilde{\BB q}$ is also exponentially bounded. Combining the exponential bound from \cref{thm:s-stability} and the ultimate bound from \cref{cor:q-bound} proves \cref{thm:stability-proof}.
+
+Before discussing the main proof, let us consider the robustness properties of the feedback controller without considering any specific adaptation law. Taking the dynamics \cref{eq:open-loop-dynamics}, control law \cref{eq:control-law-our}, the composite velocity error definition \cref{eq:s-dynamics}, and the parameter estimation error $\tilde{\BB a}=\hat{\BB a}-\BB a$, we find
+\begin{equation}
+    \label{eq:s-closed-loop}
+    M\dot{\BB s}+(C+K)\BB s=-\phi \tilde{\BB a}+\BB d
+\end{equation}
+We can use the Lyapunov function $\mathcal{V}=\BB s^\top M \BB s$ under the assumption of bounded $\tilde{\BB a}$ to show that
+\begin{align}
+  \lim_{t\rightarrow\infty}\left\| \BB s \right\| &\leq \frac{\sup_t\|\BB d-\phi\tilde{\BB a}\| \lammax(M)}{\lammin(K) \lammin(M)}
+\end{align}
+Taking this results alone, one might expect that any online estimator or learning algorithm will lead to good performance. 
+However, the boundedness of $\tilde{\BB a}$ is not guaranteed; Slotine and Li discuss this topic thoroughly \cite{slotine1991applied}. In the full proof below, we show the stability and robustness of the \nf~adaptation algorithm.
+
+First, \revC{we introduce the parameter measurement noise $\bar{\epsilon}$, where $\bar{\epsilon}=\BB y - \phi \BB a$. Thus, $\bar{\epsilon}=\epsilon+\BB d$ and $\|\bar{\epsilon}\|\leq \|\epsilon\| + \|\BB d\|$ by the triangle inequality. 
+Using the above closed loop dynamics \cref{eq:s-closed-loop}, the parameter estimation error $\tilde{\BB a}$, and the adaptation law \cref{eq:adaptation-law-a,eq:adaptation-law-P}, the combined velocity and parameter-error closed-loop dynamics are given by} \begin{align}
+    \begin{bmatrix}
+        M & 0 \\
+        0 & P^{-1} %\Gamma^{-1}
+    \end{bmatrix}
+    \begin{bmatrix}
+        \dot{\BB s} \\ \dot {\tilde{\BB a}}
+    \end{bmatrix} 
+    + 
+    \begin{bmatrix}
+        C + K & \phi \\
+        -\phi^T & \phi^\top R\inv \phi + \lambda P \inv \\ %\Gamma^{-1} \\
+    \end{bmatrix}
+    \begin{bmatrix}
+        \BB s \\ \tilde{\BB a}
+    \end{bmatrix} 
+    =
+    \begin{bmatrix}
+        \BB d \\
+        \phi^\top R\inv \bar{\epsilon} - P\inv \lambda \BB a - P\inv \dot{\BB a}
+    \end{bmatrix}
+    \label{eq:stacked-dynamics}
+    \\
+    \frac{d}{dt}\left(P\inv\right) = - P\inv \dot P P\inv = P\inv \left(2 \lambda P - Q + P \phi ^\top R^{-1} \phi P\right) P\inv
+    \label{eq:Pinv-dynamics}
+\end{align}
+
+
+For our stability proof, we rely on the fact that $P\inv$ is both uniformly positive definite and uniformly bounded, that is, there exists some positive definite, constant matrices $A$ and $B$ such that $A \succeq P\inv \succeq B$.
+Dieci and Eirola \cite{dieci_positive_1994} show the slightly weaker result that that $P$ is positive definite and finite when $\phi$ is bounded under the looser assumption $Q\succeq0$. Following the proof from \cite{dieci_positive_1994} with the additional assumption that $Q$ is uniformly positive definite, one can show the uniform definiteness and uniform boundedness of $P$. Hence, $P\inv$ is also uniformly positive definite and uniformly bounded.
+
+\begin{theorem}
+\label{thm:s-stability}
+Given dynamics that evolve according to \cref{eq:stacked-dynamics,eq:Pinv-dynamics}, uniform positive definiteness and uniform boundedness of $P\inv$, the norm of $\stackedstate$ exponentially converges to the bound given in \cref{eq:exponential-bound-long} with rate $\alpha$.
+\begin{align}
+    \label{eq:exponential-bound-long}
+    \lim_{t\rightarrow\infty}\left\|\stackedstate\right\| &\leq \frac{1}{\alpha \lammin(\metric)}
+    \left( \sup_t\|\BB d\| + \sup_t(\|\phi^\top R\inv \bar{\epsilon}\|) + \lammax(P\inv)\sup_t(\|\lambda \BB a + \dot{\BB a}\|) \right)
+\end{align}
+% \todo{$d$ should be removed from the RHS.}
+where $\alpha$ and $\metric$ are functions of $\phi, R, Q, K, M$ and $\lambda$, and $\lammin(\cdot)$ and $\lammax(\cdot)$ are the minimum and maximum eigenvalues of $(\cdot)$ over time, respectively. Given \cref{cor:q-bound} and \cref{eq:exponential-bound-long}, the bound in \cref{eq:exponential-bound} is proven. Note $\lammax(P^{-1})=1/\lammin(P)$ and a sufficiently large value of $\lammin(P)$ will make the RHS of \cref{eq:exponential-bound-long} small.
+\end{theorem}
+\begin{proof}
+
+Now consider the Lyapunov function $\lyap$ given by
+\begin{align}
+    \lyap &= \stackedstate^\top
+        \begin{bmatrix}
+            M & 0 \\
+            0 & P\inv
+        \end{bmatrix}
+        \stackedstate
+\end{align}
+This Lyapunov function has the derivative
+\begin{align}
+    \dot{\lyap} &= 2 \stackedstate^\top 
+        \begin{bmatrix}
+            M & 0 \\
+            0 & P\inv
+        \end{bmatrix}
+        \stackedstatedot
+        +
+        \stackedstate^\top 
+        \begin{bmatrix}
+            \dot M & 0 \\
+            0 & \frac{d}{dt}\left(P\inv \right) 
+        \end{bmatrix}
+        \stackedstate
+    \\ &=
+        - 2 \stackedstate^\top
+        \begin{bmatrix}
+            C + K & \phi \\
+            -\phi^T & \phi^\top R\inv \phi + \lambda P \inv \\ %\Gamma^{-1} \\
+        \end{bmatrix}
+        \begin{bmatrix}
+            \BB s \\ \tilde{\BB a}
+        \end{bmatrix}
+        + 2 \stackedstate^\top
+        \begin{bmatrix}
+            \BB d \\
+            \phi^\top R\inv \bar{\epsilon} - P\inv \lambda \BB a - P\inv \dot{\BB a}
+        \end{bmatrix}
+        +
+        \\&\quad
+        \stackedstate^\top 
+        \begin{bmatrix}
+            \dot M & 0 \\
+            0 & \frac{d}{dt}\left(P\inv \right)
+        \end{bmatrix}
+        \stackedstate
+    \\ &=
+        - 2 \stackedstate^\top
+        \begin{bmatrix}
+            K & \phi \\
+            -\phi^T & \phi^\top R\inv \phi + \lambda P \inv \\ %\Gamma^{-1} \\
+        \end{bmatrix}
+        \begin{bmatrix}
+            \BB s \\ \tilde{\BB a}
+        \end{bmatrix}
+        + 2 \stackedstate^\top
+        \begin{bmatrix}
+            \BB d \\
+            \phi^\top R\inv \bar{\epsilon} - P\inv \lambda \BB a - P\inv \dot{\BB a}
+        \end{bmatrix}
+        \\&\quad
+        +
+        \stackedstate^\top 
+        \begin{bmatrix}
+            0 & 0 \\
+            0 & 2 \lambda P\inv - P\inv Q P\inv + \phi ^\top R^{-1} \phi
+        \end{bmatrix}
+        \stackedstate
+    \\ &=
+        - \stackedstate^\top
+        \begin{bmatrix}
+            2 K & 0 \\
+            0 & \phi^\top R\inv \phi + P\inv Q P\inv\\
+        \end{bmatrix}
+        \begin{bmatrix}
+            \BB s \\ \tilde{\BB a}
+        \end{bmatrix}
+        + 2 \stackedstate^\top
+        \begin{bmatrix}
+            \BB d \\
+            \phi^\top R\inv \bar{\epsilon} - P\inv \lambda \BB a - P\inv \dot{\BB a}
+        \end{bmatrix}
+\end{align}
+where we used the fact $\dot{M}-2C$ is skew-symmetric. As $K$, $ P\inv Q P\inv $, $M$, and $P\inv$ are all uniformly positive definite and uniformly bounded, and $\phi^\top R\inv \phi$ is positive semidefinite, there exists some $\alpha > 0$ such that 
+\begin{align}
+    \label{eq:convergence-rate}
+        - \begin{bmatrix}
+            2 K & 0 \\
+            0 & \phi^\top R\inv \phi + P\inv Q P\inv\\
+        \end{bmatrix}
+        &\preceq - 2 \alpha
+        \begin{bmatrix}
+            M & 0 \\
+            0 & P\inv
+        \end{bmatrix}
+\end{align}
+for all $t$.
+
+Define an upper bound for the disturbance term $D$ as
+\begin{align}
+    D = \sup_t \left\|
+        \begin{bmatrix}
+            \BB d \\
+            \phi^\top R\inv \bar{\epsilon} - P\inv \lambda \BB a - P\inv \dot{\BB a}
+        \end{bmatrix}
+        \right\|
+\end{align}
+and define the function $\metric$,
+\begin{align}
+    \metric &= 
+        \begin{bmatrix}
+            M & 0 \\
+            0 & P\inv
+        \end{bmatrix}
+\end{align}
+By \cref{eq:convergence-rate}, the Cauchy-Schwartz inequality, and the definition of the minimum eigenvalue, we have the following inequality for $\dot\lyap$:
+\begin{align}
+    \dot{\lyap} &\leq 
+        - 2 \alpha \lyap
+        + 2 \sqrt{\frac{\lyap}{\lammin(\metric)}} D
+\end{align}
+Consider the related systems, $\mathcal{W}$ where $\mathcal{W} = \sqrt{\lyap}$, $2\dot{\mathcal{W}} \mathcal{W} = \dot\lyap$, and the following three equations hold
+\begin{align}
+    2\dot{\mathcal{W}}\mathcal{W} &\leq - 2 \alpha \mathcal{W}^2 +  \frac{2 D \mathcal{W}}{\sqrt{\lammin(\metric)}}
+    \\
+    \dot{\mathcal{W}} &\leq - \alpha \mathcal{W} +  \frac{D}{\sqrt{\lammin(\metric)}}
+    % \\
+    % \dot{w} &= - 2 \alpha w + \frac{2 D}{\lambda_\textrm{min}(\metric)}
+    % \\
+    % w(0) &= \mathcal{W}(0) = \sqrt{\lyap(0)}
+\end{align}
+% We can easily integrate $w$ to get
+% \begin{align}
+%     w(t) &= \expo{-2 \alpha t} 
+%     \left(\mathcal{W}(0) 
+%         - \frac{D}{\alpha \sqrt{\lambda_\textrm{min}(\metric)}} 
+%     \right) 
+%     + \frac{D}{\alpha \sqrt{\lambda_\textrm{min}(\metric)}}
+% \end{align}
+By the Comparison Lemma \cite{khalil_nonlinear_2002},
+\begin{align}
+    \sqrt{\lyap} = \mathcal{W} \leq \expo{-\alpha t} \left(\mathcal{W}(0) - \frac{D}{\alpha \sqrt{\lammin(\metric)}} \right) + \frac{D}{\alpha \sqrt{\lammin(\metric)}}
+\end{align}
+and the stacked state exponentially converges to the ball
+\begin{align}
+    \lim_{t\rightarrow\infty}\left\| \stackedstate \right\| \leq \frac{D}{\alpha \lammin(\metric)} 
+\end{align}
+This completes the proof.
+\end{proof}
+
+Next, we present a corollary which shows the exponential convergence of $\tilde{\BB q}$ when $\BB s$ is exponentially stable.
+\begin{corollary}
+\label{cor:q-bound}
+
+If $\|\BB s(t)\|\leq A \exp(-\alpha t) + B / \alpha$ for some constants $A$, $B$, and $\alpha$, and $ \BB s = \dot{\tilde{\BB q}} + \Lambda \tilde{\BB q}$, then 
+\begin{align}
+\label{eq:q-bound-messy}
+\|\tilde{\BB q}\| \leq \expo{-\lammin(\Lambda)t}\|\tilde{\BB q}(0)\| + \int_0^t \expo{-\lammin(\Lambda)(t-\tau)} A \expo{- \alpha \tau}\text{\emph{d}}\tau +
+\int_0^t\expo{-\lammin(\Lambda)(t-\tau)}\frac{B}{\alpha} \text{\emph{d}}\tau
+\end{align}
+thus $\|\tilde{\BB q}\|$ exponentially approaches the bound
+\begin{align}
+    \label{eq:q-cor-bound}
+    \lim_{t\rightarrow\infty}\|\tilde{\BB q}\| &\leq \frac{B}{\alpha \lammin(\Lambda)}
+\end{align}
+\end{corollary}
+
+\begin{proof}
+From the Comparison Lemma \cite{khalil_nonlinear_2002}, we can easily show \cref{eq:q-bound-messy}. This can be further reduced as follows.
+\begin{align}
+    \|\tilde{\BB q}\| 
+    %  &\leq \expo{-\lammin(\Lambda)t}\|\tilde{q}(0)\| + \int_0^t A \expo{-\lammin(\Lambda)t}\expo{(\lammin(\Lambda)- \alpha) \tau}d\tau +
+    % \int_0^t\expo{-\lammin(\Lambda)(t-\tau)}\frac{B}{\alpha} d\tau\\
+    &\leq \expo{-\lammin(\Lambda)t}\|\tilde{\BB q}(0)\| + A\expo{-\lammin(\Lambda)t}\int_0^t \expo{(\lammin(\Lambda)- \alpha) \tau}\text{d}\tau +
+    \int_0^t\expo{-\lammin(\Lambda)(t-\tau)}\frac{B}{\alpha} \text{d}\tau\\
+    &
+    \leq \expo{-\lammin(\Lambda)t}\|\tilde{\BB q}(0)\| + A\frac{\expo{-\alpha t}-\expo{-\lammin(\Lambda)t}}{\lammin(\Lambda)-\alpha}+ \frac{B \left(1-\expo{-\lammin(\Lambda)t}\right)}{\alpha \lammin(\Lambda)}
+\end{align}
+Taking the limit, we arrive at \cref{eq:q-cor-bound}
+
+\end{proof}
+
+
+With the following corollary, we will justify that $\alpha$ is strictly positive even when $\phi\equiv0$, and thus the adaptive control algorithm guarantees robustness even in the absence of persistent excitation or with ineffective learning.
+In practice we expect some measurement information about all the elements of $\BB a$, that is, we expect a non-zero $\phi$. 
+\begin{corollary}
+If $\phi\equiv0$, then the bound in \cref{eq:exponential-bound-long} can be simplified to
+\begin{align}
+    \label{eq:worst-case-bound}
+    \lim_{t\rightarrow\infty}\left\| \stackedstate \right\| &\leq \frac{
+        \sup\|\BB d\| + %\sup(\|\phi^\top R\inv (d\rev{+\epsilon})\|) +
+        \lammax(P\inv)\sup(\|\lambda \BB a + \dot{\BB a}\|)
+    }{
+        \min\left(\lambda, \lammin(K)/\lammax(M)\right)\lammin(\metric)
+    }
+\end{align}
+\end{corollary}
+\begin{proof}
+Assuming $\phi\equiv0$ immediately leads to $\alpha$ of
+\begin{align}
+    \alpha &= \min\left(\frac{1}{2} \lammin( P\inv Q ), \frac{\lammin(K)}{\lammax(M)}\right)
+\end{align}
+% \todo{
+% \begin{align}
+%     \lim_{t\rightarrow\infty}\left\| \stackedstate \right\| &\leq \frac{
+%         \sup\|d\| + %\sup(\|\phi^\top R\inv (d\rev{+\epsilon})\|) +
+%         \lammax(P\inv)\sup(\|\lambda a + \dot{a}\|)
+%     }{
+%         \min(\lambda, \lammin(K)/\lammax(M)) \lammin(\metric)
+%     }
+%   \end{align}
+% }
+$\phi\equiv0$ also simplifies the $\dot{P}$ equation to a stable first-order differential matrix equation. By integrating this simplified $\dot{P}$ equation, we can show $P$ exponentially converges to the value $P=\frac{Q}{2\lambda}$. This leads to bound in \cref{eq:worst-case-bound}.
+
+\end{proof}
+
+
+We now introduce another corollary for the \nfconstant, when $\phi=I$. In this case, the regularization term is not needed, as it is intended to regularize the linear coefficient estimate in the absence of persistent excitation, so we set $\lambda=0$. This corollary also shows that \nfconstant~is sufficient for perfect tracking control when $\BB f$ is constant; though in this case, even \rev{the nonlinear baseline controller with} integral control will converge to perfect tracking. In practice for quadrotors, we only expect $\BB f$ to be constant when the drone air-velocity is constant, such as in hover or steady level flight with constant wind velocity.
+\begin{corollary}
+If $\phi\equiv I$, $Q=q I$, $R=r I$, $\lambda=0$, and $P(0)=p_0 I$ is diagonal, where $q$, $r$ and $p_0$ are strictly positive scalar constants, then the bound in \cref{eq:exponential-bound-long} can be simplified to
+\begin{align}
+    \lim_{t\rightarrow\infty}\left\| \stackedstate \right\| &\leq \frac{ \left(\left(1 + r^{-1}\right) \sup_t\|\BB f - \BB a\| \rev{+ \epsilon/r}\right) \lammax(M)}{\lammin(K) \lammin(\metric)}
+\end{align}
+\end{corollary}
+\begin{proof}
+Under these assumptions, the matrix differential equation for $P$ is reduced to the scalar differential equation
+\begin{align}
+    \frac{dp}{dt} &= q - p^2/r
+\end{align}
+where $P(t)=p(t) I$. This equation can be integrated to find that $p$ exponentially converges to $p = \sqrt{q r}$. Then by \cref{eq:convergence-rate}, $\alpha \leq \sqrt{q/r}$ and $\alpha \leq \lammin(K)/\lammax(M)$. If we choose $q$ and $r$ such that $\sqrt{q/r} = \lammin(K)/\lammax(M)$, then we can take $\alpha = \lammin(K)/\lammax(M)$. Then, the error bound reduces to 
+\begin{align}
+    \lim_{t\rightarrow\infty}\left\| \stackedstate \right\| &\leq \frac{D \lammax(M)}{\lammin(K) \lammin(\metric)}
+\end{align}
+Take $\BB a$ as a constant. Then $\dot{\BB a}=0$, $\BB d=\BB f - \BB a$, and $D$ is bounded by
+\begin{align}
+    D &\leq  \left(1 + r^{-1}\right) \sup_t\|\BB f - \BB a\| + \epsilon/r
+\end{align}
+
+\end{proof}
+
+
+% Now consider the virtual system with virtual state $y$ and dynamics
+% \begin{align}
+%     \dot{y}
+%     =
+%     \underbrace{-
+%         \begin{bmatrix}
+%             M\inv & 0 \\
+%             0 & P %\Gamma^{-1}
+%         \end{bmatrix}
+%         \begin{bmatrix}
+%             C + K & \phi \\
+%             -\phi^T & \phi^\top R\inv \phi + \lambda P \inv \\ %\Gamma^{-1} \\
+%         \end{bmatrix}
+%         y
+%     }_{g(y, q, \dot{q}, \ddot{q}, \ddot{q}_r, \dot{q}_r)}
+%     \label{eq:virtual-dynamics}
+% \end{align}
+
+% Now consider the metric function, $\metric$, defined as
+% \begin{align}
+%     \metric &= \begin{bmatrix}
+%          M & 0 \\ 0 & P^{-1}
+%     \end{bmatrix}
+% \end{align}
+% From Theorem 2.1 in \todo{update citation}
+% % \cite{contractiontutorial}
+% , we can show that the virtual system is contracting by finding a contraction rate $\alpha \in \mathcal{R}_{>0}$ such that 
+% \begin{align}
+%     \label{eq:contraction-bound}
+%     \dot{\metric} + \metric \frac{\partial g}{\partial y} + \frac{\partial g}{\partial y}^\top \metric \leq - 2 \alpha \metric
+% \end{align}
+% Substituting in the virtual dynamics given in \cref{eq:virtual-dynamics} and the derivative of $P\inv$ from \cref{eq:Pinv-dynamics}, this inequality can be simplified as follows.
+% \begin{align}
+%         \begin{bmatrix}
+%              \dot{M} & 0 \\ 0 & \frac{d}{dt}\left(P^{-1}\right)
+%         \end{bmatrix}
+%         -
+%         \begin{bmatrix}
+%             C + K & \phi \\
+%             -\phi^T & \phi^\top R\inv \phi + \lambda P \inv \\ %\Gamma^{-1} \\
+%         \end{bmatrix}
+%         -
+%         \begin{bmatrix}
+%             C + K & \phi \\
+%             -\phi^T & \phi^\top R\inv \phi + \lambda P \inv \\ %\Gamma^{-1} \\
+%         \end{bmatrix}^\top
+%         \leq
+%         - 2 \alpha 
+%         \begin{bmatrix}
+%              M & 0 \\ 0 & P^{-1}
+%         \end{bmatrix}
+%     \\
+%         \begin{bmatrix}
+%              \dot{M} & 0 \\ 0 & 2 \lambda P\inv - P\inv Q P\inv + \phi ^\top R^{-1} \phi
+%         \end{bmatrix}
+%         -
+%         \begin{bmatrix}
+%             2C + 2K & 0 \\
+%             0 & 2 \phi^\top R\inv \phi + 2 \lambda P \inv \\ %\Gamma^{-1} \\
+%         \end{bmatrix}
+%         \leq
+%         - 2 \alpha 
+%         \begin{bmatrix}
+%              M & 0 \\ 0 & P^{-1}
+%         \end{bmatrix}
+%     \\
+%         -
+%         \begin{bmatrix}
+%             2K & 0 \\
+%             0 & \phi^\top R\inv \phi + P\inv Q P\inv  \\ %\Gamma^{-1} \\
+%         \end{bmatrix}
+%         \leq
+%         - 2 \alpha 
+%         \begin{bmatrix}
+%              M & 0 \\ 0 & P^{-1}
+%         \end{bmatrix}
+% \end{align}
+% which holds if
+% \begin{align}
+%     \alpha &\leq \lambda_\text{min}(K)/m,\quad \text{and} 
+%     \label{eq:alpha-condition-1}\\
+%     \alpha &\leq \lambda_\text{min}(P\inv Q)/2
+%     \label{eq:alpha-condition-2}
+% \end{align}
+% Thus the virtual system $y$ is contracting at rate $\alpha$ which satisfies \cref{eq:alpha-condition-1,eq:alpha-condition-2}. Since $y=[s, \tilde{a}]$ and $y=0$ are both particular solutions to \cref{eq:virtual-dynamics}, this implies that $[s, \tilde{a}]$ exponentially converges to $0$ with rate $\alpha$ by Theorem 2.2 of \todo{update citation}
+% % \cite{contractiontutorial}. 
+
+% Now we can consider the robustness of the combined system. Taking the right hand side of \cref{eq:stacked-dynamics} as the disturbance term we can apply Theorem 2.4 of \todo{update citation}
+% % \cite{contractiontutorial}
+% , which shows that our system exponentially converges to the error ball
+% \begin{align}
+%     \left\| \begin{bmatrix}
+%         s \\ \tilde{a}
+%     \end{bmatrix}
+%     \right\|
+%     \leq
+%     \frac{
+%         \sup\|d\| + \sup(\|\phi^\top R\inv \phi d\|) + \lambda_\text{max}(P\inv)\sup(\|\lambda a + \dot{a}\|)
+%     }{\alpha}
+%     \sqrt{\frac{
+%         \max(\lambda_\text{max}(M), \lambda_\text{max}(P\inv)
+%     }{
+%         \min(\lambda_\text{min}(M), \lambda_\text{min}(P\inv)
+%     }}
+% \end{align}
+
+% \todo{write bound in terms of Q, lam, instead of Pinv}.
+
+
+
+% \begin{theorem}
+%     If we assume that the desired trajectory has bounded derivative, the representation error of the learned kernel is bounded by $d$, 
+%     % Under Assumptions~\ref{ass:bounded-traj} and~\ref{ass:representation-error} and using the control law defined in (\ref{equ:control-law}), 
+%     the composite tracking error and parameter estimation error evolving according to the dynamics in (\ref{equ:composite-error-dynamics}) and adaptation law in \cref{eq:adaptation-law}, then the tracking error exponentially converges to the ball
+%     \begin{equation}
+%         \label{equ:exponential-bound}
+%         \left\| \begin{bmatrix} s\\ \tilde{a}\end{bmatrix} \right\| 
+%         \leq 
+%         \frac{\sup_t[\kappa(M(q(t))), \kappa({P}^{-1})]}
+%         {\min[k, \frac{\lambda}{2}(\lambda_\mathrm{min}({P}^{-1}) + \gamma)] } \sup \left\| 
+%         \begin{bmatrix}
+%             d \\ %-\Gamma^{-1} 
+%             W^\top d_1 \!+\! \lambda \gamma a
+%         \end{bmatrix}\right\| 
+%     \end{equation} 
+% where $k = \lambda_{\min}(K)$ and $\kappa(\cdot)$ is the condition number.
+% \end{theorem}
+
+
+\subsection{Gain Tuning}
+\label{sec:supp-gain-tuning}
+
+The attitude controller was tuned following the method in \cite{noauthor_multicopter_nodate}.
+%, where the attitude rate controller and attitude control gain were tuned to minimize attitude tracking delay without increasing overshoot or noisy, oscillating behavior. 
+\rev{The gains for all of the position controllers tested were tuned on a step input of \SI{1}{m} in the x-direction. The proportional (P) and derivative (D) gains were tuned using the baseline nonlinear controller for good rise time with minimal overshoot or oscillations. The same P and D gains were used across all methods.} 
+
+\rev{The integral and adaptation gains were tuned separately for each method. In each case, the gains were increased to minimize response time until we observed having large overshoot, noticeably jittery, or oscillatory behavior. For $\LOne$ and INDI this gave a first-order filters with a cutoff frequency of \SI{5}{Hz}. For each of the \nf~methods, we used $R=r I$ and $Q=q I$, where $r$ and $q$ are a scalar values. The tuning method gave an $R$ gains similar to the measurement noise of the residual force, a $Q$ values on the order of $0.1$, and $\lambda$ values of $0.01$.}
+
+\subsection{Force Prediction Performance}
+\label{supp:prediction-performance}
+
+
+The section discusses fig.~\ref{fig:force-prediction}, which is useful for understanding why learning improves force prediction (which in turn improves control).
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\textwidth]{figures/revision/force-prediction-x.png}
+    % \includegraphics[width=\textwidth]{figures/revision/force-prediction-y.png}
+    \includegraphics[width=\textwidth]{figures/revision/force-prediction-z.png}
+    \caption{
+        \textbf{Measured residual force versus adaptive control augmentation, $\hat{\BB f}$.} Wind-effect x- and z-axis force prediction for different methods, $\hat{\BB f}$ and $K_i \int\tilde{\BB p}\text{d}t$, compared with the online residual force measurement, $\BB f$. The integral term in the nonlinear baseline method and the $\hat{\BB f}$ term in the adaptive control methods, including the \nf~methods, all act to compensate for the measured residual force. INDI, L1, and \nfconstant~estimate the residual force with sub-second lag, however adjusting the gains to decrease the lag increases noise amplification. \nf~and \nftransfer~have reduced the lag in estimating the residual force but have some model mismatch, especially at higher wind speeds.}
+    \label{fig:force-prediction}
+\end{figure}
+
+% Qualitative performance of baseline methods
+For the nonlinear baseline method, the integral (I) term compensates for the average wind effect, as seen in fig.~\ref{fig:force-prediction}. Thus, the UAV trajcetory remains roughly centered on the desired trajectory for all wind conditions, as seen in fig.~\ref{fig:trajectory}. The relative velocity of the drone changes too quickly for the integral-action to compensate for the changes in the wind effect. Although increasing the I gain would allow the integral control to react more quickly, a large I gain can also lead to overshoot and instability, thus the gain is effectively limited by the combined stability of the P, D, and I gains. 
+% For the PID baseline method, the UAV overshoots the figure-8 trajectory because the controller does not account for the desired acceleration. Interestingly, the PID baseline method has a similar tracking error in all experiments, as the errors resulting from the agile desired trajectory and the changing wind effect do not necessarily compound. 
+% The nonlinear baseline includes a feedforward term, allowing it to track the fast turns of the figure-8 more closely, although the performance degrades with increasingly difficult wind conditions. For both baseline methods, 
+
+% % qualitative performance of nfconstant
+% \nfconstant~improves the wind-force estimation and can more quickly adapt to the mean wind-effect than the baseline methods, however, the force prediction still lags behind the actual wind force, as seen in \cref{fig:trajectory}(B). This lag occurs because \nfconstant~does not leverage the prior knowledge of the underlying aerodynamics. Consequently, the ultimate tracking error is reduced by $13\%$ to $31\%$ compared to the nonlinear baseline but is still outperformed by the learning based methods, \nf~and \nftransfer.
+Next, consider the two SOTA baseline methods, INDI and $\LOne$, along with the non-learning version of our method, \nfconstant. These methods represent different adaptive control approaches that assume no prior model for the residual dynamics. Instead, each of these methods effectively outputs a filtered version of the measured residual force and the controller compensates for this adapted term. In fig.~\ref{fig:force-prediction}, we observe that each of these methods has a slight lag behind the measured residual force, in grey. This lag is reduced by increasing the adaptation gain, however, increasing the adaptation gain leads to noise amplification. Thus, these \emph{reactive} approaches are limited by some more inherent system properties, like measurement noise.
+
+Finally, consider the two learning versions of our method, \nf~and \nftransfer. These methods use a learned model in the adaptive control algorithm. Thus, once the linear parameters have adapted to the current wind condition, the model can predict future aerodynamic effects with minimal changes to the coefficients. As we extrapolate to higher wind speeds and time-varying conditions, some model mismatch occurs and is manifested as discrepancies between the predicted force, $\hat{\BB f}$, and the measured force, $\BB f$, as seen in fig.~\ref{fig:force-prediction}. Thus, our learning based control is limited by the learning representation error. This matches the conclusion drawn in our theoretical analysis, where tracking error scales linearly with representation error.
+
+
+% % Qualitative poerformance of learning methods
+% In contrast, even in time-varying wind conditions, the learning-based methods (\nf~and \nftransfer) can anticipate and more accurately track the time-varying disturbance force, because their predictions are based on a learned compact representation for the unknown disturbance. 
+% Both \nftransfer~and \nf~quickly identify the changing wind conditions through the composite adaptation algorithm, as seen in \cref{fig:trajectory}(B). Furthermore, these methods leverage the learned representation to anticipate the changing wind effects as the drone follows the agile trajectory, leading to improved trajectory tracking in \cref{fig:trajectory}(A). This remains true even under the challenging sinusoidal wind condition, where we see the learning-based methods quickly identify the unknown, changing wind effect in real time. Furthermore, our method learns a vehicle agnostic representation. \nf~performs marginally better than the variant \nftransfer, which uses a dataset collected on an Intel Aero drone to learn the representation $\phi$ and the custom drone for experiments. This not only implies the generalizability and robustness of our approach, but also provides great practical convenience when deploying our method on new prototype quadrotor platforms.
+
+\subsection{Localization Error Analysis}
+\label{sec:supp-localization-error}
+
+We estimate the root mean squared position localization precision to be about \SI{1}{cm}. This is based on a comparison of our two different localization data sources. The first is the OptiTrack motion capture system, which uses several infrared motion tracking cameras and reflective markers on the drone to produce a delayed measurement the position and orientation of the vehicle. The PX4 flight controller runs an onboard extended Kalman filter (EKF) to fuse the OptiTrack measurements with onboard inertial measurment unit (IMU) measurements to produce position, orientation, velocity, and angular rate estimates. In offline analysis, we correct for the delay of the OptiTrack system, and compare the position outputs of the OptiTrack system and the EKF. Typical results are shown in fig.~\ref{fig:localization-good}. The fixed offset between the measurements occurs because the OptiTrack system tracks the centroid of the reflective markers, where the EKF tracks the center of mass of the vehicle. Although the EKF must internally correct for this offset, we do not need to do so in our offline analysis because the offset is fixed. Thus, the mean distance between the the OptiTrack position and the EKF position corresponds to the distance between the center of mass and the center of vision, and the standard deviation of that distance is the root-mean-square error of the error between the two estimates. Averaged over all of the data from experiments in this paper, we see that the standard deviation is \SI{1.0}{cm}. Thus, we estimate that the localization precision has a standard deviation of about \SI{1.0}{cm}.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figures/estimation-error/estimation_error_PID_nowind.pdf}
+    \caption{\textbf{Localization inconsistency} Typical difference between the OptiTrack motion capture position measurement, $\BB p_\text{mocap}$, and the EKF position estimate, $\BB p_\text{EKF}$, corrected for the Optitrack delay. The mean difference corresponds to a constant offset between the center of mass, which the EKF tracks, and the centroid of reflective markers, which the OptiTrack measures. The standard deviation corresponds to the root-mean-square error between the two measurements.}
+    \label{fig:localization-good}
+\end{figure}

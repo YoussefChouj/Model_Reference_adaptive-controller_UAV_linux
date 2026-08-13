@@ -1,0 +1,472 @@
+\begin{thebibliography}{60}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Foehn et~al.(2021)Foehn, Romero, and Scaramuzza]{foehn2021time}
+Philipp Foehn, Angel Romero, and Davide Scaramuzza.
+\newblock Time-optimal planning for quadrotor waypoint flight.
+\newblock \emph{Science Robotics}, 6\penalty0 (56), 2021.
+
+\bibitem[Faessler et~al.(2018)Faessler, Franchi, and
+  Scaramuzza]{faessler_differential_2018}
+Matthias Faessler, Antonio Franchi, and Davide Scaramuzza.
+\newblock Differential {Flatness} of {Quadrotor} {Dynamics} {Subject} to
+  {Rotor} {Drag} for {Accurate} {Tracking} of {High}-{Speed} {Trajectories}.
+\newblock \emph{IEEE Robotics and Automation Letters}, 3\penalty0 (2):\penalty0
+  620--626, April 2018.
+\newblock ISSN 2377-3766.
+\newblock \doi{10.1109/LRA.2017.2776353}.
+
+\bibitem[Ventura~Diaz and Yoon(2018)]{ventura2018high}
+Patricia Ventura~Diaz and Steven Yoon.
+\newblock High-fidelity computational aerodynamics of multi-rotor unmanned
+  aerial vehicles.
+\newblock In \emph{2018 AIAA Aerospace Sciences Meeting}, page 1266, 2018.
+
+\bibitem[Tal and Karaman(2021)]{tal_accurate_2021}
+Ezra Tal and Sertac Karaman.
+\newblock Accurate {Tracking} of {Aggressive} {Quadrotor} {Trajectories}
+  {Using} {Incremental} {Nonlinear} {Dynamic} {Inversion} and {Differential}
+  {Flatness}.
+\newblock \emph{IEEE Transactions on Control Systems Technology}, 29\penalty0
+  (3):\penalty0 1203--1218, May 2021.
+\newblock ISSN 1558-0865.
+\newblock \doi{10.1109/TCST.2020.3001117}.
+
+\bibitem[Mallikarjunan et~al.(2012)Mallikarjunan, Nesbitt, Kharisov, Xargay,
+  Hovakimyan, and Cao]{mallikarjunan_l1_2012}
+Srinath Mallikarjunan, Bill Nesbitt, Evgeny Kharisov, Enric Xargay, Naira
+  Hovakimyan, and Chengyu Cao.
+\newblock L1 {Adaptive} {Controller} for {Attitude} {Control} of {Multirotors}.
+\newblock In \emph{{AIAA} {Guidance}, {Navigation}, and {Control}
+  {Conference}}, Minneapolis, Minnesota, August 2012. American Institute of
+  Aeronautics and Astronautics.
+\newblock ISBN 978-1-60086-938-9.
+\newblock \doi{10.2514/6.2012-4831}.
+\newblock URL \url{https://arc.aiaa.org/doi/10.2514/6.2012-4831}.
+
+\bibitem[Pravitra et~al.(2020)Pravitra, Ackerman, Cao, Hovakimyan, and
+  Theodorou]{pravitra_L1-adaptive_2020}
+Jintasit Pravitra, Kasey~A. Ackerman, Chengyu Cao, Naira Hovakimyan, and
+  Evangelos~A. Theodorou.
+\newblock L1-{Adaptive} {MPPI} {Architecture} for {Robust} and {Agile}
+  {Control} of {Multirotors}.
+\newblock In \emph{2020 {IEEE}/{RSJ} {International} {Conference} on
+  {Intelligent} {Robots} and {Systems} ({IROS})}, pages 7661--7666, October
+  2020.
+\newblock \doi{10.1109/IROS45743.2020.9341154}.
+\newblock ISSN: 2153-0866.
+
+\bibitem[Hanover et~al.(2021)Hanover, Foehn, Sun, Kaufmann, and
+  Scaramuzza]{hanover_performance_2021}
+Drew Hanover, Philipp Foehn, Sihao Sun, Elia Kaufmann, and Davide Scaramuzza.
+\newblock Performance, precision, and payloads: Adaptive nonlinear mpc for
+  quadrotors.
+\newblock \emph{IEEE Robotics and Automation Letters}, 7\penalty0 (2):\penalty0
+  690--697, 2021.
+
+\bibitem[Shi et~al.(2019)Shi, Shi, O’Connell, Yu, Azizzadenesheli,
+  Anandkumar, Yue, and Chung]{shi2019neural}
+Guanya Shi, Xichen Shi, Michael O’Connell, Rose Yu, Kamyar Azizzadenesheli,
+  Animashree Anandkumar, Yisong Yue, and Soon-Jo Chung.
+\newblock Neural lander: Stable drone landing control using learned dynamics.
+\newblock In \emph{2019 International Conference on Robotics and Automation
+  (ICRA)}, pages 9784--9790. IEEE, 2019.
+
+\bibitem[Shi et~al.(2020{\natexlab{a}})Shi, H{\"o}nig, Yue, and
+  Chung]{shi2020neural}
+Guanya Shi, Wolfgang H{\"o}nig, Yisong Yue, and Soon-Jo Chung.
+\newblock Neural-swarm: Decentralized close-proximity multirotor control using
+  learned interactions.
+\newblock In \emph{2020 IEEE International Conference on Robotics and
+  Automation (ICRA)}, pages 3241--3247. IEEE, 2020{\natexlab{a}}.
+
+\bibitem[Shi et~al.(2021{\natexlab{a}})Shi, H{\"o}nig, Shi, Yue, and
+  Chung]{shi2021neural}
+Guanya Shi, Wolfgang H{\"o}nig, Xichen Shi, Yisong Yue, and Soon-Jo Chung.
+\newblock Neural-swarm2: Planning and control of heterogeneous multirotor
+  swarms using learned interactions.
+\newblock \emph{IEEE Transactions on Robotics}, 2021{\natexlab{a}}.
+
+\bibitem[Torrente et~al.(2021)Torrente, Kaufmann, F{\"o}hn, and
+  Scaramuzza]{torrente2021data}
+Guillem Torrente, Elia Kaufmann, Philipp F{\"o}hn, and Davide Scaramuzza.
+\newblock Data-driven mpc for quadrotors.
+\newblock \emph{IEEE Robotics and Automation Letters}, 6\penalty0 (2):\penalty0
+  3769--3776, 2021.
+
+\bibitem[Bartlett et~al.(2017)Bartlett, Foster, and
+  Telgarsky]{bartlett2017spectrally}
+Peter~L Bartlett, Dylan~J Foster, and Matus~J Telgarsky.
+\newblock Spectrally-normalized margin bounds for neural networks.
+\newblock \emph{Advances in Neural Information Processing Systems},
+  30:\penalty0 6240--6249, 2017.
+
+\bibitem[Slotine and Li(1991)]{slotine1991applied}
+J.-J.~E. Slotine and Weiping Li.
+\newblock \emph{Applied nonlinear control}.
+\newblock Prentice Hall, Englewood Cliffs, N.J, 1991.
+\newblock ISBN 978-0-13-040890-7.
+
+\bibitem[Slotine and Li(1989)]{slotine_composite_1989}
+Jean-Jacques~E. Slotine and Weiping Li.
+\newblock Composite adaptive control of robot manipulators.
+\newblock \emph{Automatica}, 25\penalty0 (4):\penalty0 509--519, July 1989.
+\newblock ISSN 0005-1098.
+\newblock \doi{10.1016/0005-1098(89)90094-0}.
+\newblock URL
+  \url{https://www.sciencedirect.com/science/article/pii/0005109889900940}.
+
+\bibitem[Meier et~al.(2012)Meier, Tanskanen, Heng, Lee, Fraundorfer, and
+  Pollefeys]{meier_pixhawk_2012}
+Lorenz Meier, Petri Tanskanen, Lionel Heng, Gim~Hee Lee, Friedrich Fraundorfer,
+  and Marc Pollefeys.
+\newblock {PIXHAWK} -{A} micro aerial vehicle design for autonomous flight
+  using onboard computer vision.
+\newblock \emph{Autonomous Robots}, 33\penalty0 (1-2):\penalty0 21--39, August
+  2012.
+\newblock ISSN 0929-5593.
+\newblock \doi{10.1007/s10514-012-9281-4}.
+\newblock URL
+  \url{https://graz.pure.elsevier.com/en/publications/pixhawk-a-micro-aerial-vehicle-design-for-autonomous-flight-using}.
+\newblock Publisher: Springer Science + Business Media.
+
+\bibitem[Mellinger and Kumar(2011)]{mellinger_minimum_2011}
+Daniel Mellinger and Vijay Kumar.
+\newblock Minimum snap trajectory generation and control for quadrotors.
+\newblock In \emph{2011 {IEEE} {International} {Conference} on {Robotics} and
+  {Automation}}, pages 2520--2525, May 2011.
+\newblock \doi{10.1109/ICRA.2011.5980409}.
+
+\bibitem[Ioannou and Sun(1996)]{ioannou1996robust}
+Petros~A Ioannou and Jing Sun.
+\newblock \emph{Robust adaptive control}, volume~1.
+\newblock Prentice-Hall Upper Saddle River, NJ, 1996.
+
+\bibitem[Krstic et~al.(1995)Krstic, Kokotovic, and
+  Kanellakopoulos]{krstic1995nonlinear}
+Miroslav Krstic, Petar~V Kokotovic, and Ioannis Kanellakopoulos.
+\newblock \emph{Nonlinear and adaptive control design}.
+\newblock John Wiley \& Sons, Inc., 1995.
+
+\bibitem[Narendra and Annaswamy(2012)]{narendra2012stable}
+Kumpati~S Narendra and Anuradha~M Annaswamy.
+\newblock \emph{Stable adaptive systems}.
+\newblock Courier Corporation, 2012.
+
+\bibitem[Farrell and Polycarpou(2006)]{farrell_adaptive_2006}
+Jay~A. Farrell and Marios~M. Polycarpou.
+\newblock \emph{Adaptive {Approximation} {Based} {Control}}.
+\newblock John Wiley \& Sons, Ltd, 2006.
+\newblock ISBN 978-0-471-78181-3.
+\newblock \doi{10.1002/0471781819.fmatter}.
+\newblock URL
+  \url{https://onlinelibrary.wiley.com/doi/abs/10.1002/0471781819.fmatter}.
+\newblock \_eprint:
+  https://onlinelibrary.wiley.com/doi/pdf/10.1002/0471781819.fmatter.
+
+\bibitem[Wise et~al.(2006)Wise, Lavretsky, and Hovakimyan]{wise2006adaptive}
+Kevin~A Wise, Eugene Lavretsky, and Naira Hovakimyan.
+\newblock Adaptive control of flight: theory, applications, and open problems.
+\newblock In \emph{2006 American Control Conference}, 2006.
+
+\bibitem[Shi et~al.(2020{\natexlab{b}})Shi, Spieler, Tang, Lupu, Tokumaru, and
+  Chung]{shi_adaptive_2020}
+Xichen Shi, Patrick Spieler, Ellande Tang, Elena-Sorina Lupu, Phillip Tokumaru,
+  and Soon-Jo Chung.
+\newblock Adaptive {Nonlinear} {Control} of {Fixed}-{Wing} {VTOL} with
+  {Airflow} {Vector} {Sensing}.
+\newblock In \emph{2020 {IEEE} {International} {Conference} on {Robotics} and
+  {Automation} ({ICRA})}, pages 5321--5327, Paris, France, May
+  2020{\natexlab{b}}. IEEE.
+\newblock ISBN 978-1-72817-395-5.
+\newblock \doi{10.1109/ICRA40945.2020.9197344}.
+\newblock URL \url{https://ieeexplore.ieee.org/document/9197344/}.
+
+\bibitem[Rahimi and Recht(2007)]{rahimi2007random}
+Ali Rahimi and Benjamin Recht.
+\newblock Random features for large-scale kernel machines.
+\newblock In \emph{Proceedings of the 20th International Conference on Neural
+  Information Processing Systems}, pages 1177--1184, 2007.
+
+\bibitem[Lale et~al.(2021)Lale, Azizzadenesheli, Hassibi, and
+  Anandkumar]{lale_model_2021}
+Sahin Lale, Kamyar Azizzadenesheli, Babak Hassibi, and Anima Anandkumar.
+\newblock Model {Learning} {Predictive} {Control} in {Nonlinear} {Dynamical}
+  {Systems}.
+\newblock In \emph{2021 60th {IEEE} {Conference} on {Decision} and {Control}
+  ({CDC})}, pages 757--762, December 2021.
+\newblock \doi{10.1109/CDC45484.2021.9683670}.
+\newblock ISSN: 2576-2370.
+
+\bibitem[Nakanishi et~al.(2002)Nakanishi, Farrell, and
+  Schaal]{nakanishi_locally_2002}
+J.~Nakanishi, J.A. Farrell, and S.~Schaal.
+\newblock A locally weighted learning composite adaptive controller with
+  structure adaptation.
+\newblock In \emph{{IEEE}/{RSJ} {International} {Conference} on {Intelligent}
+  {Robots} and {Systems}}, volume~1, pages 882--889 vol.1, September 2002.
+\newblock \doi{10.1109/IRDS.2002.1041502}.
+
+\bibitem[Chen and Khalil(1995)]{chen1995adaptive}
+Fu-Chuang Chen and Hassan~K Khalil.
+\newblock Adaptive control of a class of nonlinear discrete-time systems using
+  neural networks.
+\newblock \emph{IEEE Transactions on Automatic Control}, 40\penalty0
+  (5):\penalty0 791--801, 1995.
+
+\bibitem[Johnson and Calise(2003)]{johnson2003limited}
+Eric~N Johnson and Anthony~J Calise.
+\newblock Limited authority adaptive flight control for reusable launch
+  vehicles.
+\newblock \emph{Journal of Guidance, Control, and Dynamics}, 26\penalty0
+  (6):\penalty0 906--913, 2003.
+
+\bibitem[Narendra and Mukhopadhyay(1997)]{narendra1997adaptive}
+Kumpati~S Narendra and Snehasis Mukhopadhyay.
+\newblock Adaptive control using neural networks and approximate models.
+\newblock \emph{IEEE Transactions on Neural Networks}, 8\penalty0 (3):\penalty0
+  475--485, 1997.
+
+\bibitem[Bisheban and Lee(2021)]{bisheban_geometric_2021}
+Mahdis Bisheban and Taeyoung Lee.
+\newblock Geometric {Adaptive} {Control} {With} {Neural} {Networks} for a
+  {Quadrotor} in {Wind} {Fields}.
+\newblock \emph{IEEE Transactions on Control Systems Technology}, 29\penalty0
+  (4):\penalty0 1533--1548, July 2021.
+\newblock ISSN 1558-0865.
+\newblock \doi{10.1109/TCST.2020.3006184}.
+
+\bibitem[LeCun et~al.(2015)LeCun, Bengio, and Hinton]{lecun2015deep}
+Yann LeCun, Yoshua Bengio, and Geoffrey Hinton.
+\newblock Deep learning.
+\newblock \emph{nature}, 521\penalty0 (7553):\penalty0 436--444, 2015.
+
+\bibitem[Finn et~al.(2017)Finn, Abbeel, and Levine]{finn2017model}
+Chelsea Finn, Pieter Abbeel, and Sergey Levine.
+\newblock Model-agnostic meta-learning for fast adaptation of deep networks.
+\newblock In \emph{International Conference on Machine Learning}, pages
+  1126--1135. PMLR, 2017.
+
+\bibitem[Hospedales et~al.(2021)Hospedales, Antoniou, Micaelli, and
+  Storkey]{meta-learning-survey}
+Timothy~M Hospedales, Antreas Antoniou, Paul Micaelli, and Amos~J. Storkey.
+\newblock Meta-learning in neural networks: A survey.
+\newblock \emph{IEEE Transactions on Pattern Analysis and Machine
+  Intelligence}, pages 1--1, 2021.
+\newblock \doi{10.1109/TPAMI.2021.3079209}.
+
+\bibitem[Shi et~al.(2021{\natexlab{b}})Shi, Azizzadenesheli, O'Connell, Chung,
+  and Yue]{shi2021meta}
+Guanya Shi, Kamyar Azizzadenesheli, Michael O'Connell, Soon-Jo Chung, and
+  Yisong Yue.
+\newblock Meta-adaptive nonlinear control: Theory and algorithms.
+\newblock \emph{Advances in Neural Information Processing Systems}, 34,
+  2021{\natexlab{b}}.
+
+\bibitem[Nagabandi et~al.(2018)Nagabandi, Clavera, Liu, Fearing, Abbeel,
+  Levine, and Finn]{nagabandi2018learning}
+Anusha Nagabandi, Ignasi Clavera, Simin Liu, Ronald~S Fearing, Pieter Abbeel,
+  Sergey Levine, and Chelsea Finn.
+\newblock Learning to adapt in dynamic, real-world environments through
+  meta-reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:1803.11347}, 2018.
+
+\bibitem[Song et~al.(2020)Song, Yang, Choromanski, Caluwaerts, Gao, Finn, and
+  Tan]{song2020rapidly}
+Xingyou Song, Yuxiang Yang, Krzysztof Choromanski, Ken Caluwaerts, Wenbo Gao,
+  Chelsea Finn, and Jie Tan.
+\newblock Rapidly adaptable legged robots via evolutionary meta-learning.
+\newblock In \emph{2020 IEEE/RSJ International Conference on Intelligent Robots
+  and Systems (IROS)}, pages 3769--3776. IEEE, 2020.
+
+\bibitem[Belkhale et~al.(2021)Belkhale, Li, Kahn, McAllister, Calandra, and
+  Levine]{belkhale2021model}
+Suneel Belkhale, Rachel Li, Gregory Kahn, Rowan McAllister, Roberto Calandra,
+  and Sergey Levine.
+\newblock Model-based meta-reinforcement learning for flight with suspended
+  payloads.
+\newblock \emph{IEEE Robotics and Automation Letters}, 6\penalty0 (2):\penalty0
+  1471--1478, 2021.
+
+\bibitem[McKinnon and Schoellig(2021)]{mckinnon2021meta}
+Christopher~D McKinnon and Angela~P Schoellig.
+\newblock Meta learning with paired forward and inverse models for efficient
+  receding horizon control.
+\newblock \emph{IEEE Robotics and Automation Letters}, 6\penalty0 (2):\penalty0
+  3240--3247, 2021.
+
+\bibitem[Clavera et~al.(2018)Clavera, Rothfuss, Schulman, Fujita, Asfour, and
+  Abbeel]{clavera2018model}
+Ignasi Clavera, Jonas Rothfuss, John Schulman, Yasuhiro Fujita, Tamim Asfour,
+  and Pieter Abbeel.
+\newblock Model-based reinforcement learning via meta-policy optimization.
+\newblock In \emph{Conference on Robot Learning}, pages 617--629. PMLR, 2018.
+
+\bibitem[O'Connell et~al.(2021)O'Connell, Shi, Shi, and Chung]{o2021meta}
+Michael O'Connell, Guanya Shi, Xichen Shi, and Soon-Jo Chung.
+\newblock Meta-learning-based robust adaptive flight control under uncertain
+  wind conditions.
+\newblock \emph{arXiv preprint arXiv:2103.01932}, 2021.
+
+\bibitem[Richards et~al.(2021)Richards, Azizan, Slotine, and
+  Pavone]{richards2021adaptive}
+Spencer~M Richards, Navid Azizan, Jean-Jacques~E Slotine, and Marco Pavone.
+\newblock Adaptive-control-oriented meta-learning for nonlinear systems.
+\newblock \emph{arXiv preprint arXiv:2103.04490}, 2021.
+
+\bibitem[Peng et~al.(2021)Peng, Zhu, and Jiao]{peng2021linear}
+Matt Peng, Banghua Zhu, and Jiantao Jiao.
+\newblock Linear representation meta-reinforcement learning for instant
+  adaptation.
+\newblock \emph{arXiv preprint arXiv:2101.04750}, 2021.
+
+\bibitem[Lee et~al.(2020)Lee, Hwangbo, Wellhausen, Koltun, and
+  Hutter]{lee2020learning}
+Joonho Lee, Jemin Hwangbo, Lorenz Wellhausen, Vladlen Koltun, and Marco Hutter.
+\newblock Learning quadrupedal locomotion over challenging terrain.
+\newblock \emph{Science robotics}, 5\penalty0 (47), 2020.
+
+\bibitem[Tobin et~al.(2017)Tobin, Fong, Ray, Schneider, Zaremba, and
+  Abbeel]{tobin2017domain}
+Josh Tobin, Rachel Fong, Alex Ray, Jonas Schneider, Wojciech Zaremba, and
+  Pieter Abbeel.
+\newblock Domain randomization for transferring deep neural networks from
+  simulation to the real world.
+\newblock In \emph{2017 IEEE/RSJ International Conference on Intelligent Robots
+  and Systems (IROS)}, pages 23--30. IEEE, 2017.
+
+\bibitem[Ramos et~al.(2019)Ramos, Possas, and Fox]{ramos2019bayessim}
+Fabio Ramos, Rafael~Carvalhaes Possas, and Dieter Fox.
+\newblock Bayessim: adaptive domain randomization via probabilistic inference
+  for robotics simulators.
+\newblock \emph{arXiv preprint arXiv:1906.01728}, 2019.
+
+\bibitem[Morgan et~al.(2016)Morgan, Subramanian, Chung, and
+  Hadaegh]{morgan_swarm_2015}
+Daniel Morgan, Giri~P Subramanian, Soon-Jo Chung, and Fred~Y Hadaegh.
+\newblock Swarm assignment and trajectory optimization using variable-swarm,
+  distributed auction assignment and sequential convex programming.
+\newblock \emph{The International Journal of Robotics Research}, 35\penalty0
+  (10):\penalty0 1261--1285, 2016.
+
+\bibitem[Shi et~al.(2018)Shi, Kim, Rahili, and Chung]{shi2018nonlinear}
+Xichen Shi, Kyunam Kim, Salar Rahili, and Soon-Jo Chung.
+\newblock Nonlinear control of autonomous flying cars with wings and
+  distributed electric propulsion.
+\newblock In \emph{2018 IEEE Conference on Decision and Control (CDC)}, pages
+  5326--5333. IEEE, 2018.
+
+\bibitem[Nakka et~al.(2020)Nakka, Liu, Shi, Anandkumar, Yue, and
+  Chung]{nakka2020chance}
+Yashwanth~Kumar Nakka, Anqi Liu, Guanya Shi, Anima Anandkumar, Yisong Yue, and
+  Soon-Jo Chung.
+\newblock Chance-constrained trajectory optimization for safe exploration and
+  learning of nonlinear systems.
+\newblock \emph{IEEE Robotics and Automation Letters}, 6\penalty0 (2):\penalty0
+  389--396, 2020.
+
+\bibitem[Loquercio et~al.(2021)Loquercio, Kaufmann, Ranftl, Müller, Koltun,
+  and Scaramuzza]{doi:10.1126/scirobotics.abg5810}
+Antonio Loquercio, Elia Kaufmann, René Ranftl, Matthias Müller, Vladlen
+  Koltun, and Davide Scaramuzza.
+\newblock Learning high-speed flight in the wild.
+\newblock \emph{Science Robotics}, 6\penalty0 (59):\penalty0 eabg5810, 2021.
+\newblock \doi{10.1126/scirobotics.abg5810}.
+\newblock URL
+  \url{https://www.science.org/doi/abs/10.1126/scirobotics.abg5810}.
+
+\bibitem[Liu et~al.(2020)Liu, Shi, Chung, Anandkumar, and Yue]{liu2020robust}
+Anqi Liu, Guanya Shi, Soon-Jo Chung, Anima Anandkumar, and Yisong Yue.
+\newblock Robust regression for safe exploration in control.
+\newblock In \emph{Learning for Dynamics and Control}, pages 608--619. PMLR,
+  2020.
+
+\bibitem[Kim et~al.(2021)Kim, Spieler, Lupu, Ramezani, and
+  Chung]{doi:10.1126/scirobotics.abf8136}
+Kyunam Kim, Patrick Spieler, Elena-Sorina Lupu, Alireza Ramezani, and Soon-Jo
+  Chung.
+\newblock A bipedal walking robot that can fly, slackline, and skateboard.
+\newblock \emph{Science Robotics}, 6\penalty0 (59):\penalty0 eabf8136, 2021.
+\newblock \doi{10.1126/scirobotics.abf8136}.
+
+\bibitem[Ganin et~al.(2016)Ganin, Ustinova, Ajakan, Germain, Larochelle,
+  Laviolette, Marchand, and Lempitsky]{ganin2016domain}
+Yaroslav Ganin, Evgeniya Ustinova, Hana Ajakan, Pascal Germain, Hugo
+  Larochelle, Fran{\c{c}}ois Laviolette, Mario Marchand, and Victor Lempitsky.
+\newblock Domain-adversarial training of neural networks.
+\newblock \emph{The Journal of Machine Learning Research}, 17\penalty0
+  (1):\penalty0 2096--2030, 2016.
+
+\bibitem[Goodfellow et~al.(2014)Goodfellow, Pouget-Abadie, Mirza, Xu,
+  Warde-Farley, Ozair, Courville, and Bengio]{goodfellow2014generative}
+Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley,
+  Sherjil Ozair, Aaron Courville, and Yoshua Bengio.
+\newblock Generative adversarial nets.
+\newblock \emph{Advances in Neural Information Processing Systems}, 27, 2014.
+
+\bibitem[Kalman and Bucy(1961)]{kalman_new_1961}
+R.~E. Kalman and R.~S. Bucy.
+\newblock New {Results} in {Linear} {Filtering} and {Prediction} {Theory}.
+\newblock \emph{Journal of Basic Engineering}, 83\penalty0 (1):\penalty0
+  95--108, March 1961.
+\newblock ISSN 0021-9223.
+\newblock \doi{10.1115/1.3658902}.
+\newblock URL
+  \url{https://asmedigitalcollection.asme.org/fluidsengineering/article/83/1/95/426820/New-Results-in-Linear-Filtering-and-Prediction}.
+
+\bibitem[Murray et~al.(2017)Murray, Li, and Sastry]{murray_mathematical_2017}
+Richard~M. Murray, Zexiang Li, and S.~Shankar Sastry.
+\newblock \emph{A {Mathematical} {Introduction} to {Robotic} {Manipulation}}.
+\newblock CRC Press, 1 edition, December 2017.
+\newblock ISBN 978-1-315-13637-0.
+\newblock \doi{10.1201/9781315136370}.
+\newblock URL \url{https://www.taylorfrancis.com/books/9781351469791}.
+
+\bibitem[Trefethen(2017)]{trefethen2017multivariate}
+Lloyd Trefethen.
+\newblock Multivariate polynomial approximation in the hypercube.
+\newblock \emph{Proceedings of the American Mathematical Society}, 145\penalty0
+  (11):\penalty0 4837--4844, 2017.
+
+\bibitem[Yarotsky(2017)]{yarotsky2017error}
+Dmitry Yarotsky.
+\newblock Error bounds for approximations with deep relu networks.
+\newblock \emph{Neural Networks}, 94:\penalty0 103--114, 2017.
+
+\bibitem[Dieci and Eirola(1994)]{dieci_positive_1994}
+Luca Dieci and Timo Eirola.
+\newblock Positive definiteness in the numerical solution of {Riccati
+  differential} equations.
+\newblock \emph{Numerische Mathematik}, 67\penalty0 (3):\penalty0 303--313,
+  April 1994.
+\newblock ISSN 0945-3245.
+\newblock \doi{10.1007/s002110050030}.
+\newblock URL \url{https://doi.org/10.1007/s002110050030}.
+
+\bibitem[Kalman(1960)]{kalman_new_1960}
+R.~E. Kalman.
+\newblock A {New} {Approach} to {Linear} {Filtering} and {Prediction}
+  {Problems}.
+\newblock \emph{Journal of Basic Engineering}, 82\penalty0 (1):\penalty0
+  35--45, March 1960.
+\newblock ISSN 0021-9223.
+\newblock \doi{10.1115/1.3662552}.
+\newblock URL \url{https://doi.org/10.1115/1.3662552}.
+
+\bibitem[Khalil(2002)]{khalil_nonlinear_2002}
+Hassan~K. Khalil.
+\newblock \emph{Nonlinear {Systems}, 3rd {Edition}}.
+\newblock Prentice Hall, 2002.
+\newblock URL
+  \url{https://www.pearson.com/content/one-dot-com/one-dot-com/us/en/higher-education/program.html}.
+
+\bibitem[noa(2021)]{noauthor_multicopter_nodate}
+Multicopter {PID} {Tuning} {Guide} {\textbar} {PX4} {User} {Guide}, 12 2021.
+\newblock URL
+  \url{https://docs.px4.io/master/en/config_mc/pid_tuning_guide_multicopter.html}.
+
+\end{thebibliography}
