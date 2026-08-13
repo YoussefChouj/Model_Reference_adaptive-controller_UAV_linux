@@ -1,0 +1,86 @@
+---
+description: Git + shell operational rules for agents on this Linux box. Hard rules, not advice.
+globs: ["**/*"]
+---
+
+# Agent environment — git, shell, paths
+
+## Git on this box
+
+The git harness on this Linux box intermittently **hangs** the call even with
+`core.pager=cat` set. Root cause is harness env-inheritance, not git config.
+The only reliable fix is a timeout wrapper.
+
+- **Always invoke git via the wrapper.** `git …` raw is forbidden, even with
+ `--no-pager`. Use `timeout 30 git …` (or longer for `git log` with ranges).
+- **After `git merge --ff-only`, verify with `git log -1 --oneline`.** The
+ "Already up to date" message means *the branch ref looks related to the
+ source* — not "the merge happened". Compare HEAD to the expected SHA.
+- **Worktree-local branch refs lag.** After any merge or fast-forward in the
+ operator repo, `git fetch <operator-repo-path>` in every open worktree.
+- **Use a fresh shell for every `git` invocation in a subagent.** The working
+ tree's shell state (cwd, env) is sticky across `working_directory` overrides
+ in the agent harness. Don't chain git commands across `cd` boundaries.
+- **No `git log` on the whole tree.** Specify a path; otherwise
+ `git --no-pager log -1 --oneline <path>` is the cheap default.
+
+## Paths and python
+
+- **Use absolute python paths.** `.venv/bin/python` will not resolve from the
+ wrong cwd after a `working_directory` switch. Use
+ `/home/youssef/cursor_setup/Model_Reference_adaptive-controller_UAV/.venv/bin/python`.
+- **For new directories, use the `Write` tool.** Chained `mkdir && …` under
+ `/tmp/` drops commands silently on this harness. Don't chain.
+- **Quote paths containing spaces.** The Windows box has one space in
+ `FreeRTOS---Six_Degrees_of_Freedom _Adaptive_controller`; the Linux box
+ currently does not, but don't bet on that.
+
+## Push guard — which remote is `origin`
+
+As of 2026-08-14 on this Linux box:
+
+- `origin` = `git@github.com:YoussefChouj/Model_Reference_adaptive-controller_UAV_linux.git` (LINUX)
+- `windows` = `git@github.com:YoussefChouj/Model_Reference_adaptive-controller_UAV.git` (WINDOWS, legacy)
+
+If the configured `origin` URL doesn't match the table above, **stop and tell
+the user** before any push. Verify with `git remote -v`.
+
+**Rule of thumb:**
+
+- If the commit touches `sim/`, `ground_station/` (linux side), `docs/`,
+ `analysis/`, `.cursor/`, `.claude/`, `scripts/`, `pyproject.toml`,
+ `requirements.txt`, or the Linux toolchain in `firmware/` → push to `origin`
+ (linux).
+- If the commit touches `API/`, `FreeRTOS/`, `USER/`, `TASK/`, `BSP/`, `OBJ/`,
+ `*.hex`, `*.axf`, `*.uvprojx`, the Keil uVision project, or any
+ CMSIS-DAP / pyocd path → those are windows-owned. The Linux box must not
+ push firmware changes. Hand them to the operator on the Windows box.
+
+If both kinds of files changed in one commit, **split the commit before
+pushing** — never mix platform into a single commit.
+
+## Diagnosis cheatsheet
+
+| Symptom | Most likely cause | Fix |
+|---|---|---|
+| `git` call returns no exit | Pager / harness hangs | Wrap in `timeout 30 git …` |
+| `git push` rejected (non-FF) | Local ahead of remote OR behind merge gate | `git fetch` then check `git status -sb` |
+| `Already up to date` but tree unchanged | Working-tree HEAD ≠ branch ref | `git log -1 --oneline` to see real HEAD |
+| `mkdir && …` chain drops second command | Silent harness rejection | Use `Write` tool for new files |
+| `ModuleNotFoundError` | Wrong Python interpreter | Use full `.venv/bin/python` path |
+| `git status --short` returns 113 rows for a one-file edit | `raw/papers/*-images/` regression | `git ls-files raw/papers/ \| grep -c -- "-images/"` — expect 0 |
+
+## Recovery commands (read-only)
+
+```bash
+git remote -v                                        # which remote is origin
+git rev-parse --abbrev-ref HEAD                      # which branch
+git rev-parse --abbrev-ref HEAD@{u}                  # upstream tracking
+git log -1 --oneline                                  # real HEAD
+git status --short | wc -l                           # working-tree size
+git ls-files raw/papers/ | grep -c -- "-images/"     # image drift check
+```
+
+If `git ls-files raw/papers/ | grep -c -- "-images/"` returns > 0, the
+`-images/` cleanup has regressed. Re-run the cleanup procedure in
+`.cursor/rules/000-core.mdc` §History.

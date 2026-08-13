@@ -49,6 +49,15 @@ ground_station/logs/**/*.png
 # The manifest of what was archived is itself a .csv -- keep it tracked.
 !ground_station/logs/ARCHIVE_MANIFEST.csv
 
+# Paper ingest images: paper-reader extracts PNG formulas/figures into
+# raw/papers/<paper>-images/. The .md files reference them by relative
+# path, but the images are regenerable by `python scripts/pdf-to-md.py
+# path/to/paper.pdf --engine both`. Skip them from version control to
+# keep `git status` readable.
+raw/papers/*-images/
+raw/papers/*-images/**
+raw/papers/*-raw.jsonl
+
 # Cited runs -- keep tracked:
 !ground_station/logs/bench/thrust_20260625_000238.csv
 !ground_station/logs/flight_1783831067.csv
