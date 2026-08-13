@@ -64,7 +64,7 @@ Configured models for this project — **do not override via Task `model:` param
 |---|---|---|
 | `uav-conductor` | `claude-opus-5-high` | Pipeline orchestrator |
 | `uav-planner` | `claude-opus-5-high` | Spec author (interactive) |
-| `uav-implementer` | `cursor-grok-4.5-high-fast` | Token-heavy execution |
+| `uav-implementer` | `cursor-grok-4.6-high-fast` | Token-heavy execution |
 | `uav-reviewer` | `gpt-5.6-sol-high` | Sanity check (must differ from implementer family) |
 
 See `.cursor/rules/subagent-model-pinning.mdc`. If a subagent fails to dispatch
