@@ -213,7 +213,7 @@ family. Independence may still hold (a different family is still a different fam
 re-dispatch with the correct model or accept the substitution.
 
 The same check applies to the implementer: if it returns as anything other than
-`cursor-grok-4.5-high-fast`, flag it.
+`cursor-grok-4.6-high-fast`, flag it.
 
 ## Step 8 — Adjudicate
 

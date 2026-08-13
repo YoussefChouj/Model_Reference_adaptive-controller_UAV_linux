@@ -5,7 +5,7 @@ description: >
   build the spec, or when the user says "/uav-implementer" or "implement the spec via the UAV
   pipeline". Writes code; cannot review. The full leg instructions live in
   `.cursor/skills/implement-spec/SKILL.md` — this file only fixes the model and the entry point.
-model: cursor-grok-4.5-high-fast
+model: cursor-grok-4.6-high-fast
 ---
 
 # UAV pipeline — implementer
@@ -26,7 +26,7 @@ Do not duplicate that file's logic here. This agent file exists only to:
 1. Pin your model so the implementer is reproducible across runs (Cursor overrides this only on
    team-admin blocks or plan limits; check `cursor-agent models` if the wrong model shows up).
 2. Expose `/uav-implementer` as the invocation in the Agents tab.
-3. Pin your model to `cursor-grok-4.5-high-fast`.
+3. Pin your model to `cursor-grok-4.6-high-fast`.
 
 ## Invocation
 

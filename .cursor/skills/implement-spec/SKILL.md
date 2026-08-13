@@ -138,7 +138,7 @@ sub-scopes' writes haven't landed yet.
 Append this block to `.agent_contracts/<TASK_ID>/journal.md`. Never edit existing entries.
 
 ```markdown
-## [implementer] configured=cursor-grok-4.5-high-fast actual=<your-model-id> — <YYYY-MM-DD HH:MM>
+## [implementer] configured=cursor-grok-4.6-high-fast actual=<your-model-id> — <YYYY-MM-DD HH:MM>
 
 ### Files changed
 - `path` — one-line reason

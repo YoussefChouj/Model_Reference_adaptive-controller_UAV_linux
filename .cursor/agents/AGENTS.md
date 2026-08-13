@@ -7,8 +7,11 @@ five legs can run from inside the Cursor Agents Window now — no Claude Code re
 |----------|-------|-----------|------------|-----------|
 | `uav-conductor` | `claude-opus-5-high` | no | `/uav-conductor <TASK_ID>` | Orchestrates the full pipeline; delegates to planner + implementer + reviewer |
 | `uav-planner` | `claude-opus-5-high` | no | `/uav-planner <TASK_ID>` | `.cursor/skills/planner/SKILL.md` — grilling conversation with the user, then writes spec.md |
-| `uav-implementer` | `cursor-grok-4.5-high-fast` | no | `/uav-implementer <TASK_ID>` | `.cursor/skills/implement-spec/SKILL.md` |
+| `uav-implementer` | `cursor-grok-4.6-high-fast` | no | `/uav-implementer <TASK_ID>` | `.cursor/skills/implement-spec/SKILL.md` |
 | `uav-reviewer` | `gpt-5.6-sol-high` | **yes** | `/uav-reviewer <TASK_ID>` | `.cursor/skills/review-spec/SKILL.md` |
+| `deep-research` | `cursor-grok-4.6-high-fast` | yes | `/deep-research <question>` | Mid-task research, fresh perspective when stuck, web + paper synthesis |
+
+`deep-research` is available for mid-task use — see `.cursor/rules/task-gates.mdc` §4.
 
 **`uav-conductor`** is the one-stop entry point. Type `/uav-conductor <TASK_ID>` in the
 Agents Window and it chains planner → implementer → verify → review → adjudicate
@@ -41,7 +44,7 @@ model id, Cursor fell back to a compatible model on this plan — pause and tell
 before adjudicating, since model-independence has collapsed.
 
 **Wrong family is also a failure.** If the implementer returns as anything other than
-`cursor-grok-4.5-high-fast`, or the reviewer returns as anything other than `gpt-5.6-sol-high`,
+`cursor-grok-4.6-high-fast`, or the reviewer returns as anything other than `gpt-5.6-sol-high`,
 the conductor stops and tells the user. The conductor runs the verification gate in
 parallel — it can catch the bug before the reviewer is even called. The user decides
 whether to re-dispatch with the correct model or accept the substitution.
@@ -54,7 +57,7 @@ Cursor actually dispatched. They should match; if they don't, the entry is the a
 trail of a fallback.
 
 ```markdown
-## [implementer] configured=cursor-grok-4.5-high-fast actual=cursor-grok-4.5-high-fast — 2026-08-12 10:30
+## [implementer] configured=cursor-grok-4.6-high-fast actual=cursor-grok-4.6-high-fast — 2026-08-12 10:30
 ## [reviewer]    configured=gpt-5.6-sol-high          actual=gpt-5.6-sol-high          — 2026-08-12 10:45
 ```
 

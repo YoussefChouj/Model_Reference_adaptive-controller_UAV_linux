@@ -41,7 +41,7 @@ Then wait for the user's decision. Do not silently fall back.
 |----------|------------------|-----|
 | `uav-conductor` | `claude-opus-5-high` | Planning + adjudication = top-tier reasoning |
 | `uav-planner` | `claude-opus-5-high` | Interactive grilling + spec writing |
-| `uav-implementer` | `cursor-grok-4.5-high-fast` | Token-heavy execution, cheap + fast |
+| `uav-implementer` | `cursor-grok-4.6-high-fast` | Token-heavy execution, cheap + fast |
 | `uav-reviewer` | `gpt-5.6-sol-high` | Must differ from implementer family for independence |
 
 `uav-implementer` and `uav-reviewer` run on different model families on purpose. If a
