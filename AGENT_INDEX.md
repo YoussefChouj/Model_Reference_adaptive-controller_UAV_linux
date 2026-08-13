@@ -26,6 +26,7 @@ generated, not authored.
 | Implement a change from a spec | `.agent_contracts/<id>/spec.md` (read spec) + `.agent_contracts/<id>/journal.md` (read history first). |
 | Code review | `.agent_contracts/<id>/journal.md` + `.cursor/rules/project-context.mdc` |
 | Add a new spec | `.cursor/skills/uav-planner/SKILL.md` (interactive planner) |
+| Mid-task stuck (3+ retries, same approach) | spawn `deep-research`: see `.cursor/rules/task-gates.mdc` §4 and `.cursor/agents/deep-research.md` |
 | Run the simulator | `sim/README.md`, then `.venv/bin/python sim/run.py --help` |
 | Edit firmware (`API/`, `FreeRTOS/`, `USER/`, `TASK/`, `BSP/`) | **STOP.** Linux-native agents may not edit firmware. Read `.cursor/rules/hardware-safety.mdc` and consult the operator. |
 | Make / refresh a graph | `.cursor/rules/000-core.mdc` §1, `.cursor/rules/knowledge-stack.mdc` |
@@ -37,10 +38,13 @@ generated, not authored.
 | Rule | Document |
 |---|---|
 | Knowledge stack first, then explore | `.cursor/rules/000-core.mdc` |
+| Hard rule (push guard) | `.cursor/rules/agent-environment.mdc` (origin = linux; firmware from this box is forbidden) |
+| Knowledge-stack first; prebuilt-search before install (§1b) | `.cursor/rules/000-core.mdc` |
 | Git on this box needs a timeout wrapper | `.cursor/rules/agent-environment.mdc` |
 | Don't touch firmware paths from linux agents | `.cursor/rules/hardware-safety.mdc` |
 | Push guard: this clone's `origin` is the **linux** remote | `.cursor/rules/agent-environment.mdc` |
 | Session lifecycle | `.cursor/rules/session-lifecycle.mdc` |
+| Pre-task gate, deadline, introspection when stuck | `.cursor/rules/task-gates.mdc` |
 | Embedded C conventions | `.cursor/rules/embedded-c.mdc` (auto-attaches on API/TASK/BSP/USER) |
 
 ## Knowledge layers (read in this order)
@@ -66,6 +70,7 @@ Configured models for this project — **do not override via Task `model:` param
 | `uav-planner` | `claude-opus-5-high` | Spec author (interactive) |
 | `uav-implementer` | `cursor-grok-4.6-high-fast` | Token-heavy execution |
 | `uav-reviewer` | `gpt-5.6-sol-high` | Sanity check (must differ from implementer family) |
+| `deep-research` | `cursor-grok-4.6-high-fast` | Mid-task research partner (web + paper synthesis) |
 
 See `.cursor/rules/subagent-model-pinning.mdc`. If a subagent fails to dispatch
 on its configured model, **stop and report** rather than silently falling back.

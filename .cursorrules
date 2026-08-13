@@ -1,15 +1,22 @@
 # Rules migrated → .cursor/rules/*.mdc
 
 Cursor still loads this file on every turn, so it is intentionally kept thin.
-The real rules are now scoped `.mdc` files under `.cursor/rules/`:
+The real rules are now scoped `.mdc` files under `.cursor/rules/`. See
+[`AGENT_INDEX.md`](AGENT_INDEX.md) for the **canonical entry point** an agent
+should read first, and `.cursor/rules/agent-environment.mdc` for the
+operational rules (git, push guard, paths).
 
-- `000-core.mdc`       — always-on protocol: knowledge-stack-first, think-before-coding,
-                          goal-driven loops, surgical changes, report format
-- `knowledge-stack.mdc`— full query-priority stack (ccc / graphify / wiki / decisions / interfaces / lessons)
-- `ccc-search.mdc`     — ccc/cocoindex daemon operational guide (agent-requested)
-- `prose-style.mdc`    — always-on prose principles: short, active, one-word-per-idea
-- `session-lifecycle.mdc` — always-on rules for what stays in CLAUDE.md vs. sessions_summary/
-- `embedded-c.mdc`     — STM32F4/FreeRTOS conventions + gotchas (auto-attaches on API/TASK/BSP/USER)
+- `000-core.mdc`              — always-on protocol: knowledge-stack-first, think-before-coding,
+                                goal-driven loops, surgical changes, report format
+- `agent-environment.mdc`     — git timeout wrapper, push guard (origin=linux, windows=legacy),
+                                path/python rules, recovery cheatsheet
+- `knowledge-stack.mdc`       — full query-priority stack (ccc / graphify / wiki / decisions / interfaces / lessons)
+- `ccc-search.mdc`            — ccc/cocoindex daemon operational guide (agent-requested)
+- `prose-style.mdc`           — always-on prose principles: short, active, one-word-per-idea
+- `session-lifecycle.mdc`     — always-on rules for what stays in CLAUDE.md vs. sessions_summary/
+- `task-gates.mdc`            — pre-task gate, self-defined deadline, introspection when stuck
+- `subagent-model-pinning.mdc`— forbids `model:` override on Task tool without user OK
+- `embedded-c.mdc`            — STM32F4/FreeRTOS conventions + gotchas (auto-attaches on API/TASK/BSP/USER)
 
 Custom commands: `.cursor/commands/` — type `/` in the Agent (session-start, session-end, diagnose, review, livewatch).
 
@@ -29,8 +36,10 @@ Live firmware reads: `/livewatch` — read ANY firmware variable off the running
 `OBJ/JX_FLY.axf` returns plausible garbage, not an error. See `.cursor/rules/hardware-safety.mdc`.
 
 Custom subagents: `.cursor/agents/` — `uav-conductor` (full pipeline orchestrator, Claude Opus 5
-High), `uav-planner` (Claude Opus 5 High), `uav-implementer` (Cursor Grok 4.5 High Fast), and
-`uav-reviewer` (GPT-5.6 Sol High, readonly). See `.cursor/agents/AGENTS.md` for the full index.
+High), `uav-planner` (Claude Opus 5 High), `uav-implementer` (Cursor Grok 4.6 High Fast), and
+`uav-reviewer` (GPT-5.6 Sol High, readonly), plus `deep-research` (Cursor Grok 4.6 High Fast,
+for mid-task stuck moments). See `.cursor/agents/AGENTS.md` for the full index and
+`AGENT_INDEX.md` for the canonical agent entry point.
 
 Safety hooks: `.cursor/hooks.json` runs two guards before every shell command:
 1. `knowledge-gate.js` — nudges toward ccc before raw grep
