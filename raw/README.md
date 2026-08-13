@@ -1,27 +1,47 @@
 # raw/ — Immutable Source Documents
 
-This directory contains source material for the project wiki. Files here are **never modified** — they are the ground truth that wiki pages are compiled from.
+This directory contains source material for the project wiki. Files here are **never
+modified** — they are the ground truth that wiki pages are compiled from.
 
 ## Structure
 
 ```
 raw/
-├── papers/      # Academic papers, datasheets, reference docs
-├── notes/       # Project notes, architectural decisions, interfaces
-├── web/         # Web articles, blog posts, forum discussions
-└── transcripts/ # Session transcripts, meeting notes
+└── papers/           # Papers converted via pdf-to-md pipeline
+    ├── _archived/    # Stale files: pre-pipeline outputs, old naming, source PDFs
+    │   ├── pre-pipeline/  # Converted files from before the pipeline existed
+    │   ├── neurofly_*.md   # Early Neural-Fly conversions (various tools)
+    │   └── *.pdf          # Source PDFs for reference
+    ├── *-briefing.md  # Grabbed-paper notes (source: OpenClaw wiki_inbox)
+    └── *-converted.md # Output of pdf-to-md.py (images/ and .jsonl paired)
 ```
 
-## Current Sources
+## Naming convention
 
-| File | Description |
-|------|-------------|
-| notes/decisions.md | Architectural decisions (from docs/decisions.md) |
-| notes/interfaces.md | Cross-subsystem interface contracts (from docs/interfaces.md) |
-| notes/research-topics.md | Research domain overview |
+```
+<YYYY-MM-DD>-<FirstAuthor>-<Year>-<ShortTitle>-converted.md
+<YYYY-MM-DD>-<FirstAuthor>-<Year>-<ShortTitle>-converted-images/
+<YYYY-MM-DD>-<FirstAuthor>-<Year>-<ShortTitle>-converted-raw.jsonl
+```
 
-## How to Add Sources
+The pipeline looks up existing briefings to get clean author/title names; otherwise falls
+back to the arXiv ID or bare PDF filename.
 
-1. Drop files into the appropriate subdirectory
-2. Run `/wiki` (for general knowledge) or `/project-wiki` (for code architecture)
-3. The skill will ingest and compile wiki pages automatically
+## How to add a paper
+
+1. Paper lands via `python scripts/pull_wiki_inbox.py` (auto at session start), or manually
+   drop the PDF into this directory.
+2. Convert: `python scripts/pdf-to-md.py path/to/paper.pdf`
+3. Ingest into wiki — use the `grill-paper` skill or `/wiki` command.
+
+## Archived files
+
+`_archived/` is read-only. The two sub-folders:
+
+| Folder | Contents |
+|--------|----------|
+| `pre-pipeline/` | All paper_reader output generated before `pdf-to-md.py` existed |
+| root | Source PDFs, old NeuroFly conversions |
+
+Do not edit archived files. If you need to re-convert a paper, delete its
+`*-converted*` outputs and re-run `pdf-to-md.py`.
