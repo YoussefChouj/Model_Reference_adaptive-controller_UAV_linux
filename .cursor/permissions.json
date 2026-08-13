@@ -1,0 +1,18 @@
+{
+  "autoRun": {
+    "allow_instructions": [
+      "Read-only file inspections (glob, grep, read) are always approved.",
+      "Git read commands (status, diff, log, show, branch, stash list) run without prompting.",
+      "Git write operations (add, commit, push, merge, rebase, stash) run without prompting. Destructive patterns are caught by the deny-dangerous.sh shell hook, not by Auto-review.",
+      "Python invocations are approved, including pytest, scripts, and inline Python.",
+      "All pip and package manager installs run without prompting. Disk cost and dependency risk are known; the user manages capacity.",
+      "All shell commands run without prompting, with one exception: any command matching the global deny-dangerous patterns MUST ask the user before executing. These are the only blockers.",
+      "WebSearch and WebFetch for research are approved. The agent needs current information.",
+      "Firecrawl search, scrape, parse, and docs-search are approved. These are informational.",
+      "All MCP tool calls are approved except destructive operations that affect remote state.",
+      "Spawning any subagent (uav-reviewer, uav-implementer, uav-planner, uav-conductor, deep-research, explore, generalPurpose, shell) is approved.",
+      "File creation, editing, and deletion within the repo are approved. The user reviews changes via git diff before commit.",
+      "The single hard block is: destroying git history, deleting branches or tags, or destroying the repository. Before running any such command the agent MUST stop and ask the user for explicit confirmation."
+    ]
+  }
+}

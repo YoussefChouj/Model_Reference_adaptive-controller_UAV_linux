@@ -1,0 +1,88 @@
+---
+description: Task-definition gates, mid-task introspection, and deadline discipline. Always-on.
+alwaysApply: true
+---
+
+# Task Gates — definition, deadline, and stuck protocol
+
+## 1. Pre-task confirmation (mandatory before executing)
+
+Every execution task starts with this block — no exceptions, no matter how simple the request sounds:
+
+> "You asked to [X]. Are you trying to [goal]? The simplest path might be [alternative]. Agree?"
+
+This is **not** asking for permission. It is confirming shared understanding before work starts.
+If the user confirms, execute. If the user corrects the goal, update and execute.
+If the user says "just do it", do it and stop arguing.
+
+**Why this gate exists:** The user gives solution instructions instead of goals. "Install arxiv2md" is a solution. "I want to read the paper in my browser" is the goal. The wrong solution to the right goal is still wrong.
+
+**When to skip the gate:**
+- Read-only requests (search, grep, read a file)
+- The request is already a goal statement ("explain X", "what is Y?")
+- The request is trivially correct with no simpler alternative ("run the tests")
+
+## 2. Self-defined deadline
+
+At the start of any multi-step task, state a time budget:
+
+> "This task has an estimated budget of [N] minutes. I will self-check at [milestones] and do a full introspection at [N] minutes."
+
+For a 10-step task: checkpoint every 2–3 steps, full introspection at 10 minutes.
+
+**Default budgets:**
+- Simple fix (1–3 files, known pattern): 5 min
+- Medium task (4–10 files, some exploration): 15 min
+- Hard task (architecture, new subsystem): 30 min
+
+If the task is still in progress at the deadline with no verifiable milestone hit: **stop and report**, then ask the user what to do next.
+
+## 3. Mid-task introspection protocol (stuck recognition)
+
+Trigger introspection when any of these are true:
+
+| Trigger | Condition |
+|---------|-----------|
+| Same approach tried | 3 consecutive failures or retries |
+| Circular path | Agent is re-attempting something it already attempted in this task |
+| No progress signal | 5+ tool calls with no intermediate output that advances the goal |
+| Time exceeded | Task elapsed time > self-defined deadline |
+
+**Introspection steps (in order):**
+1. State what was tried and what the result was. Be specific — not "I tried many things" but "I tried `pip install X` (failed), then `curl Y` (failed), then the workaround Z (succeeded partially)".
+2. Ask: "Is this still the right problem to be solving?"
+3. **Break the loop** — choose one:
+   - Spawn `deep-research` subagent for a fresh angle
+   - Spawn `uav-reviewer` for a sanity check on approach
+   - Do a targeted `WebSearch` on the specific failure mode
+   - Ask the user: "I've been stuck for [N] minutes on [X]. Should I try [Y] or abandon this direction?"
+4. Do not retry the same approach after introspection unless the introspection explicitly recommends it.
+
+**The loop breaks with a new action, not a new attempt at the old action.**
+
+## 4. The deep-research subagent
+
+**When to spawn:** Stuck on a technical question, needs cross-paper synthesis, needs current best-practice research, needs a second opinion before a heavy install or architectural decision.
+
+**When NOT to spawn:** The answer is in the codebase (use ccc search). The answer is in docs (read them). The user already said "just do it".
+
+The subagent is at `.cursor/agents/deep-research.md`. Invocation:
+
+```
+Task(subagent_type="deep-research", prompt="<research question from deep-research.md>")
+```
+
+## 5. The uav-reviewer subagent
+
+**When to spawn:** Mid-task sanity check on an approach, not just at end-of-implementation review. Use for architectural decisions, design choices, or when unsure if current direction is correct.
+
+**Invocation:** `Task(subagent_type="uav-reviewer", prompt="<TASK_ID or inline question>")`
+
+## 6. Known operator patterns (from 2026-08-13 session)
+
+These are **not** system prompt fields — they are triggers for the pre-task gate:
+
+- **"Convert this paper"** → ask "read in browser, or .md for an agent?" before doing anything
+- **"Install X"** → ask "what problem does X solve for you?" before pip installing
+- **"Fix the script"** → ask "is the script the right tool, or should it be replaced?"
+- **"Build a pipeline"** → ask "what does the output look like and who consumes it?" before designing anything
