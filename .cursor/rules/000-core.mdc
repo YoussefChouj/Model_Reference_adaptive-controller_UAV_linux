@@ -14,6 +14,45 @@ alwaysApply: true
 Do NOT grep/glob/read files for exploration until the stack returns nothing.
 Never read whole files — read targeted line ranges once the stack narrows the target.
 
+## 1b. Exhaustive prebuilt search BEFORE any custom install (2026-08-13 lesson)
+
+The user spent 14 min and 6.2 GB of disk, plus a Linux crash, on a half-finished
+`magic-pdf[MinerU]` install I should never have started. The user had to discover
+the alternative themselves. That is a permanent process failure and must not recur.
+
+**Rule, every session, before any `pip install` of a non-trivial package:**
+
+1. Run ≥1 `WebSearch` for the exact capability the user asked for
+ (e.g. `pdf to markdown open source`, `arxiv paper ingestion pipeline`).
+ Read the top 5–8 results. Extract tool names and rough costs.
+2. Run ≥1 `WebSearch` filtered for actively-maintained projects
+ (add the current year, filter for stars >100 and pushed within the last year).
+3. For any GitHub candidate, hit the GitHub API or repo page directly.
+   Record: stars, last-push date, license, dependency size.
+   A repo with `pushed_at` > 12 months ago, no license, or < 5 stars is a
+   **reject** unless the user explicitly asks for it.
+4. List the credible options to the user with one-line tradeoffs
+ (quality / install cost / GPU requirement / license).
+5. **Ask which to try.** Do not silently pick the heaviest one.
+
+**For PDF→Markdown specifically, the credible prebuilt options are:**
+
+| Tool | Repo | Active | License | Install cost | Quality |
+|---|---|---|---|---|---|
+| Marker | `datalab-to/marker` | ✅ | AGPL-3.0 | ~2GB w/ models | high, GPU-recommended |
+| Nougat | `facebookresearch/nougat` | ✅ | MIT | ~400MB | high on arXiv-style, slow |
+| Docling | `docling-project/docling` | ✅ | MIT | CPU fine | medium-high |
+| olmOCR | `allenai/olmocr` | ✅ | Apache-2.0 | GPU ~6GB VRAM | high |
+| Mathpix | web API | ✅ | freemium | 50 pages/mo free | highest non-LLM math |
+| MinerU / Magic-PDF | `opendatalab/MinerU` | ✅ | AGPL-3.0 | ~6GB (torch + models) | high |
+
+**Heavy-install threshold.** Any package pulling torch (>2 GB) or model weights
+(>500 MB) MUST be flagged to the user with disk cost and download time before
+install. Heavy installs have caused two consecutive Linux crashes when run from
+the user's AppImage-launched Cursor session — a documented environment hazard,
+not bad luck. If the user has not explicitly OK'd the heavy path, default to
+the lightest viable tool or a hosted API.
+
 ## 2. Think before coding — surface confusion
 - State assumptions explicitly. If uncertain, **ASK before implementing**.
 - If multiple interpretations exist, present them — don't silently pick one.
