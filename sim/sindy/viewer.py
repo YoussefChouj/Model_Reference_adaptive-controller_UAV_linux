@@ -463,7 +463,7 @@ _HTML_HEAD = """<!DOCTYPE html>
   </main>
 </div>
 
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="plotly.min.js"></script>
 <script>
 const FIG_DATA = JSON.parse({fig_json});
 const PAYLOADS = JSON.parse({payloads_json});
@@ -473,9 +473,9 @@ let initialized = false;
 
 function init() {{
   const tabs = {tab_ids_json};
-  // init activeFeatures
+  // tab_ids_json is {{"Roll":"axis_roll",...}}; values are the DOM tab ids.
   Object.values(tabs).forEach(id => {{ activeFeatures[id] = null; }});
-  switchTab(Object.keys(tabs)[0]);
+  switchTab(Object.values(tabs)[0]);
   initialized = true;
 }}
 
@@ -987,6 +987,16 @@ def view_ulog(
 
     out_html.write_text(html, encoding="utf-8")
     html_size_bytes = out_html.stat().st_size
+
+    # Copy plotly.min.js next to the HTML so the page is fully offline.
+    # Sourced from the installed ``plotly`` package — single canonical location,
+    # no need to ship a 4.5 MB file inside ``sim/sindy/``.
+    import shutil
+    import plotly
+    plotly_src = Path(plotly.__file__).parent / "package_data" / "plotly.min.js"
+    plotly_dst = out_html.parent / "plotly.min.js"
+    if plotly_src.exists() and not plotly_dst.exists():
+        shutil.copy2(plotly_src, plotly_dst)
 
     fit_meta = _summarise_fit_payloads(fit_payloads) if fit_payloads else None
     return {

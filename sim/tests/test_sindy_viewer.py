@@ -99,16 +99,20 @@ def test_viewer_runs_on_synthetic_dataset(tmp_path, monkeypatch):
     assert out_html.stat().st_size > 1024
 
 
-def test_viewer_uses_cdn_plotly(tmp_path, monkeypatch):
-    """The new HTML dashboard loads Plotly from CDN (not a local plotly.min.js)."""
+def test_viewer_loads_local_plotly(tmp_path, monkeypatch):
+    """The HTML dashboard references a local plotly.min.js sibling file."""
     datasets = {"roll": _sine_dataset("roll", n=200)}
     _patch_load_ulog(monkeypatch, datasets)
     out_html = tmp_path / "out.html"
     view_ulog(_fake_ulog_path(tmp_path, datasets), out_html)
     html = out_html.read_text(encoding="utf-8")
-    # Must include the Plotly CDN script tag.
-    assert "cdn.plot.ly" in html, "expected Plotly CDN script tag in HTML"
-    assert "plotly" in html.lower()
+    # Must reference the local plotly.min.js (no CDN).
+    assert "plotly.min.js" in html, "expected plotly.min.js script tag in HTML"
+    assert "cdn.plot.ly" not in html, "should not require CDN"
+    # The sibling plotly.min.js file should be copied next to the HTML.
+    siblings = list(tmp_path.iterdir())
+    js_files = [p for p in siblings if p.name == "plotly.min.js"]
+    assert js_files, f"expected plotly.min.js sibling in {tmp_path}, got {[p.name for p in siblings]}"
 
 
 def test_viewer_with_fit_adds_sindy_panel(tmp_path, monkeypatch):
