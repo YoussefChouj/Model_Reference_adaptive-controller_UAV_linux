@@ -10,6 +10,10 @@
 # Generated simulation run artifacts (ADR-0006 D7)
 sim/runs/
 
+# SINDy viewer output — generated on demand by `python -m sim.sindy view ...`;
+# HTML files are 3–10 MB depending on downsample. Regenerable.
+sim/sindy/viewer_output/
+
 # Firecrawl scrape caches (init by firecrawl-cli)
 .firecrawl/
 

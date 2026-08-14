@@ -13,13 +13,16 @@ Data flows:
                                                priors/<name>.json → sim validation
 """
 from sim.sindy.flight_loader import FlightDataset, load_stream_log_csv
-from sim.sindy.preprocessor import PreprocessedDataset, preprocess
+from sim.sindy.preprocessor import PreprocessedDataset, preprocess, preprocess_px4
 from sim.sindy.adapters.ulog import load_ulog
+from sim.sindy.viewer import view_ulog
 
 __all__ = [
     "FlightDataset",
     "load_stream_log_csv",
     "PreprocessedDataset",
     "preprocess",
+    "preprocess_px4",
     "load_ulog",
+    "view_ulog",
 ]

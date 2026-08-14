@@ -13,6 +13,7 @@ from sim.sindy.flight_loader import FlightDataset, load_stream_log_csv
 from sim.sindy.preprocessor import (
     PreprocessedDataset,
     preprocess,
+    preprocess_px4,
     _interpolate_inplace,
     _central_derivative,
 )
@@ -161,3 +162,34 @@ def test_central_derivative():
     # For y=2x: (6-2)/(2*1) = 2
     np.testing.assert_array_almost_equal(dXdt[:, 0], [1, 1, 1, 1, 1])
     np.testing.assert_array_almost_equal(dXdt[:, 1], [2, 2, 2, 2, 2])
+
+
+# ---------------------------------------------------------------------------
+# preprocess_px4 — PX4 single-feature preprocessor (added by sindy-real-flight-viewer)
+# ---------------------------------------------------------------------------
+
+def test_preprocess_px4_single_feature():
+    """preprocess_px4 builds X = [x] (single column), tolerates NaN e/xm.
+
+    PX4 ulog has no mrac_state.e / mrac_state.xm. The standard preprocess
+    would build [e, x, xm] and propagate NaN derivatives; preprocess_px4
+    restricts to x and produces a finite derivative column.
+    """
+    n = 200
+    t = np.linspace(0.0, 2 * math.pi, n)
+    x = np.sin(t)
+    nan_arr = np.full(n, np.nan)
+    ds = FlightDataset(
+        t=t, axis="roll", x=x, u=np.cos(t), xm=nan_arr.copy(), e=nan_arr.copy(),
+        u_nom=np.cos(t), u_ad=np.zeros(n), theta=np.zeros((n, 6)),
+        meta={"log_path": "synthetic://px4", "manifest_name": "px4"},
+    )
+
+    pp = preprocess_px4(ds)
+
+    assert isinstance(pp, PreprocessedDataset)
+    assert pp.feature_names == ["x"]
+    assert pp.X.shape == (n, 1)
+    assert np.all(np.isfinite(pp.X))
+    assert np.all(np.isfinite(pp.dXdt))
+    assert float(np.diff(pp.t).std()) < 1e-6
