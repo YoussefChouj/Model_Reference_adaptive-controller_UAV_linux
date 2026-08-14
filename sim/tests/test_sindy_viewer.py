@@ -120,9 +120,21 @@ def test_viewer_with_fit_adds_sindy_panel(tmp_path, monkeypatch):
 
     assert meta_no["fit_result"] is None
     assert meta_yes["fit_result"] is not None
-    assert meta_yes["fit_result"]["library"] == "linear"
-    assert "r2_train" in meta_yes["fit_result"]
-    assert "r2_test" in meta_yes["fit_result"]
+    # New viewer fits polynomial per-axis with setpoint; payload has
+    # ``per_axis`` (with one entry per available axis) and an optional
+    # ``joint`` cross-axis fit.
+    assert "per_axis" in meta_yes["fit_result"]
+    assert "roll" in meta_yes["fit_result"]["per_axis"]
+    roll_fit = meta_yes["fit_result"]["per_axis"]["roll"]
+    assert roll_fit["library"] == "polynomial_per_axis"
+    assert "metrics" in roll_fit
+    for key in ("r2_train", "r2_test", "rmse_train", "rmse_test",
+                "mae_train", "mae_test", "nrmse_train", "nrmse_test",
+                "n_active_terms", "n_total_terms"):
+        assert key in roll_fit["metrics"], f"missing metric {key}"
+    # Per-axis coefficients correspond to the 5-feature polynomial library.
+    assert len(roll_fit["coefs"]) == 5
+    assert len(roll_fit["feature_names"]) == 5
     assert out_with_fit.stat().st_size > out_no_fit.stat().st_size
 
 
@@ -159,12 +171,106 @@ def test_viewer_handles_missing_axes(tmp_path, monkeypatch):
     html = out_html.read_text(encoding="utf-8")
     # Plotly encodes trace names as JSON inside a <script> block; the slash
     # in "rad/s" becomes the JSON escape \u002f. Look for either form.
-    roll_present = ("roll (rad/s)" in html) or ("roll (rad\\u002fs)" in html)
-    pitch_present = ("pitch (rad/s)" in html) or ("pitch (rad\\u002fs)" in html)
-    yaw_present = ("yaw (rad/s)" in html) or ("yaw (rad\\u002fs)" in html)
+    roll_present = ("roll rate (rad/s)" in html) or ("roll rate (rad\\u002fs)" in html)
+    pitch_present = ("pitch rate (rad/s)" in html) or ("pitch rate (rad\\u002fs)" in html)
+    yaw_present = ("yaw rate (rad/s)" in html) or ("yaw rate (rad\\u002fs)" in html)
     assert roll_present, "roll trace missing from HTML"
     assert not pitch_present, "pitch trace unexpectedly present in HTML"
     assert not yaw_present, "yaw trace unexpectedly present in HTML"
+
+
+def test_viewer_fit_uses_polynomial_library_with_setpoint(tmp_path, monkeypatch):
+    """The per-axis fit uses the polynomial library ``[x, u, x^2, x*u, u^2]``."""
+    datasets = {"roll": _sine_dataset("roll", n=400)}
+    _patch_load_ulog(monkeypatch, datasets)
+
+    out_html = tmp_path / "poly.html"
+    meta = view_ulog(_fake_ulog_path(tmp_path, datasets), out_html, fit=True)
+
+    roll_fit = meta["fit_result"]["per_axis"]["roll"]
+    # Polynomial library — must include x, u and the cross-term x*u.
+    assert roll_fit["feature_names"] == ["x", "u", "x^2", "x*u", "u^2"]
+    assert len(roll_fit["coefs"]) == 5
+    # R² on a clean sinusoid with cosine setpoint should be near 1.
+    assert roll_fit["metrics"]["r2_train"] > 0.9
+    # Active terms: with the threshold default, the polynomial library
+    # usually picks up several coefficients. We don't pin the exact count,
+    # but it must be ≥ 1.
+    assert roll_fit["metrics"]["n_active_terms"] >= 1
+
+
+def test_viewer_fit_joint_appears_when_all_axes_present(tmp_path, monkeypatch):
+    """Joint cross-axis fit (27-feature polynomial in 6-vector) is built
+    when roll + pitch + yaw are all available."""
+    datasets = {
+        "roll": _sine_dataset("roll", n=300),
+        "pitch": _sine_dataset("pitch", n=300, amp=0.5, freq=1.5),
+        "yaw": _sine_dataset("yaw", n=300, amp=0.3, freq=2.0),
+    }
+    _patch_load_ulog(monkeypatch, datasets)
+
+    out_html = tmp_path / "joint.html"
+    meta = view_ulog(_fake_ulog_path(tmp_path, datasets), out_html, fit=True)
+
+    assert meta["fit_result"]["joint"] is not None
+    joint = meta["fit_result"]["joint"]
+    assert joint["library"] == "polynomial_joint"
+    # 27-feature polynomial library in [x_r, x_p, x_y, u_r, u_p, u_y].
+    assert len(joint["feature_names"]) == 27
+    # metadata serialises ndarray as nested list; check dimensions.
+    assert len(joint["coefs"]) == 27
+    assert all(len(row) == 3 for row in joint["coefs"])
+    # One scenario set with at least the full model + one drop-one.
+    assert joint["n_scenarios"] >= 2
+    # Per-axis metrics for the joint fit.
+    for ax in ("roll", "pitch", "yaw"):
+        assert ax in joint["metrics_per_axis"]
+        m = joint["metrics_per_axis"][ax]
+        assert "r2_train" in m and "rmse_train" in m
+
+
+def test_viewer_fit_precomputes_drop_one_scenarios(tmp_path, monkeypatch):
+    """Per-axis fit precomputes full-model + drop-one scenarios for the
+    buttons updatemenu (visible in the HTML; metadata reports the
+    active scenario's label)."""
+    from sim.sindy import viewer as viewer_mod
+    datasets = {"roll": _sine_dataset("roll", n=300)}
+    _patch_load_ulog(monkeypatch, datasets)
+
+    # Capture the payloads built during rendering.
+    captured = {}
+    orig = viewer_mod._build_fit_payloads
+    def spy(d, cfg):
+        p = orig(d, cfg)
+        captured["payloads"] = p
+        return p
+    monkeypatch.setattr(viewer_mod, "_build_fit_payloads", spy)
+
+    out_html = tmp_path / "sc.html"
+    view_ulog(_fake_ulog_path(tmp_path, datasets), out_html, fit=True)
+
+    roll_payload = captured["payloads"]["per_axis"]["roll"]
+    # 1 full + 5 drop-one = 6 scenarios
+    assert len(roll_payload["scenarios"]) == 6
+    labels = [s["label"] for s in roll_payload["scenarios"]]
+    assert labels[0] == "Full model"
+    assert "Without x*u" in labels
+    assert "Without x^2" in labels
+
+
+def test_viewer_handles_partial_axes_no_joint(tmp_path, monkeypatch):
+    """When pitch/yaw are missing, the joint tab is a placeholder, not a fit."""
+    datasets = {
+        "roll": _sine_dataset("roll", n=300),
+        "pitch": _sine_dataset("pitch", n=300),
+    }
+    _patch_load_ulog(monkeypatch, datasets)
+
+    out_html = tmp_path / "partial.html"
+    meta = view_ulog(_fake_ulog_path(tmp_path, datasets), out_html, fit=True)
+
+    assert meta["fit_result"]["joint"] is None
+    assert set(meta["fit_result"]["per_axis"].keys()) == {"roll", "pitch"}
 
 
 # ---------------------------------------------------------------------------
