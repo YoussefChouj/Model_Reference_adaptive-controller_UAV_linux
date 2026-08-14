@@ -99,14 +99,16 @@ def test_viewer_runs_on_synthetic_dataset(tmp_path, monkeypatch):
     assert out_html.stat().st_size > 1024
 
 
-def test_viewer_writes_plotly_minjs_when_directory_mode(tmp_path, monkeypatch):
+def test_viewer_uses_cdn_plotly(tmp_path, monkeypatch):
+    """The new HTML dashboard loads Plotly from CDN (not a local plotly.min.js)."""
     datasets = {"roll": _sine_dataset("roll", n=200)}
     _patch_load_ulog(monkeypatch, datasets)
     out_html = tmp_path / "out.html"
     view_ulog(_fake_ulog_path(tmp_path, datasets), out_html)
-    siblings = list(tmp_path.iterdir())
-    js_files = [p for p in siblings if p.name.startswith("plotly") and p.suffix == ".js"]
-    assert js_files, f"expected plotly.min.js sibling in {tmp_path}, got {[p.name for p in siblings]}"
+    html = out_html.read_text(encoding="utf-8")
+    # Must include the Plotly CDN script tag.
+    assert "cdn.plot.ly" in html, "expected Plotly CDN script tag in HTML"
+    assert "plotly" in html.lower()
 
 
 def test_viewer_with_fit_adds_sindy_panel(tmp_path, monkeypatch):
@@ -169,14 +171,13 @@ def test_viewer_handles_missing_axes(tmp_path, monkeypatch):
     assert meta["axis_coverage"] == ["roll"]
     assert out_html.exists()
     html = out_html.read_text(encoding="utf-8")
-    # Plotly encodes trace names as JSON inside a <script> block; the slash
-    # in "rad/s" becomes the JSON escape \u002f. Look for either form.
-    roll_present = ("roll rate (rad/s)" in html) or ("roll rate (rad\\u002fs)" in html)
-    pitch_present = ("pitch rate (rad/s)" in html) or ("pitch rate (rad\\u002fs)" in html)
-    yaw_present = ("yaw rate (rad/s)" in html) or ("yaw rate (rad\\u002fs)" in html)
-    assert roll_present, "roll trace missing from HTML"
-    assert not pitch_present, "pitch trace unexpectedly present in HTML"
-    assert not yaw_present, "yaw trace unexpectedly present in HTML"
+    # Check that only roll tab is present in the nav and tab container.
+    # The sidebar has nav-item elements with data-tab="axis_roll" etc.
+    assert 'data-tab="axis_roll"' in html
+    assert 'data-tab="axis_pitch"' not in html
+    assert 'data-tab="axis_yaw"' not in html
+    # KPI strip should be rendered for the roll tab.
+    assert 'kpi-strip' in html
 
 
 def test_viewer_fit_uses_polynomial_library_with_setpoint(tmp_path, monkeypatch):
@@ -217,9 +218,10 @@ def test_viewer_fit_joint_appears_when_all_axes_present(tmp_path, monkeypatch):
     assert joint["library"] == "polynomial_joint"
     # 27-feature polynomial library in [x_r, x_p, x_y, u_r, u_p, u_y].
     assert len(joint["feature_names"]) == 27
-    # metadata serialises ndarray as nested list; check dimensions.
-    assert len(joint["coefs"]) == 27
-    assert all(len(row) == 3 for row in joint["coefs"])
+    # coefs are returned as nested list (27, 3) in the per-axis summary
+    # but flattened to 81 in the top-level joint coefs field for the JSON
+    # metadata (27 features × 3 outputs).
+    assert len(joint["coefs"]) == 27 * 3
     # One scenario set with at least the full model + one drop-one.
     assert joint["n_scenarios"] >= 2
     # Per-axis metrics for the joint fit.

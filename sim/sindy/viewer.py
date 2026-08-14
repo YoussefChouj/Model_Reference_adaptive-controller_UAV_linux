@@ -1,45 +1,36 @@
-"""Interactive Plotly HTML viewer for the SINDy pipeline on PX4 ``.ulog`` data.
+"""Custom HTML dashboard builder for the SINDy viewer.
 
-Single-file viewer. Produces one self-contained HTML page with a
-**tabbed** UI:
+Produces a self-contained HTML file with:
+- Dark-navy theme (reference: dashboardkpi HTML template)
+- Gold accent for active states
+- Left sidebar with tab buttons (Roll / Pitch / Yaw / Joint)
+- KPI metric strips at the top of each tab
+- Embedded Plotly chart (figure embedded as JSON, plotly.js loaded from CDN)
+- Coefficient summary table below the chart
+- Per-feature toggle via JS (no reload needed)
 
-- **Per-axis tabs** (Roll / Pitch / Yaw, one per available axis). Top
-  panel: body-rate and setpoint traces on a shared time axis. Bottom
-  panel: a **comprehensive fit view** showing
-    - measured ``dx/dt`` vs SINDy prediction overlay,
-    - a coefficient bar chart sorted by magnitude with the dominant
-      terms highlighted,
-    - per-feature contribution traces (each togglable — see below),
-    - a metrics block reporting R², MSE, RMSE, MAE, NRMSE on train and
-      test, plus ``n_active_terms`` and the feature list.
-- **Joint tab** (only shown when roll + pitch + yaw are all available).
-  Polynomial degree-2 features in the 6-vector ``[x_r, x_p, x_y, u_r,
-  u_p, u_y]`` — 27 features. One OLS per output axis (3 outputs).
-  Same bar chart + metrics structure.
+Architecture:
+- Python generates a complete HTML string by rendering the Plotly figure
+  to JSON (via ``pio.to_json`` which handles numpy arrays), embedding it
+  as a JSON-escaped string, and wrapping it in a custom dashboard shell.
+- The JS reads the embedded JSON string, parses it with ``JSON.parse``,
+  and renders the Plotly chart in a designated div. No scenario switching
+  (all scenarios are precomputed in the JSON; JS swaps which traces are
+  visible).
 
-Togglable features
-------------------
-Two flavours:
+This approach gives us full CSS/HTML control over layout, KPI strips,
+sidebar, and typography — while keeping Plotly's interactive zoom/hover.
 
-- **Per-feature visibility** (always on). Each feature has a "contrib"
-  scatter trace showing ``coef_i * Phi_i`` over time. Clicking the
-  legend entry toggles its visibility — this is Plotly's built-in
-  behaviour. The bar chart entries also toggle.
-- **Scenario dropdown** (buttons updatemenu). For each fit we
-  precompute a small set of scenarios: the full model, plus one
-  scenario per dropped feature. Switching scenarios swaps which
-  set of bar / pred / contrib traces is visible. Capped at
-  ``MAX_SCENARIOS`` per fit to bound HTML size.
-
-The math lives in ``sim.sindy.fit_panel``. This module is purely
-Plotly rendering.
-
-The HTML is written with ``pio.write_html(..., include_plotlyjs="directory")``
-so the report works offline — a sibling ``plotly.min.js`` is written
-next to ``out_html``.
+The HTML template uses:
+- Google Fonts: DM Sans (body) + DM Serif Display (headings)
+- CSS custom properties for the color system
+- Pure CSS grid for layout
+- Vanilla JS for tab switching and feature toggles
 """
+
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -62,11 +53,804 @@ from sim.sindy.fit_panel import (
 AXES: tuple[str, ...] = ("roll", "pitch", "yaw")
 DOMINANT_K: int = 3
 MAX_SCENARIOS: int = 12
-JOINT_TOPK_BARS: int = 12
+
+# ---------------------------------------------------------------------------
+# Dark-navy HTML shell template
+# ---------------------------------------------------------------------------
+
+_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Serif+Display&display=swap');
+
+:root {
+  --navy:       #0A3476;
+  --navy-dark:  #071f4a;
+  --navy-mid:  #12428f;
+  --gold:       #FCB040;
+  --gold-light: #FDD17A;
+  --gold-pale:  #FEF0D0;
+  --white:      #ffffff;
+  --off-white:  #f7f8fc;
+  --text:       #e2e8f0;
+  --text-muted: #94a3b8;
+  --border:     rgba(255,255,255,0.10);
+  --sidebar-w:  200px;
+  --green:      #22c55e;
+  --red:        #ef4444;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--navy-dark);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.container {
+  display: flex;
+  height: 100vh;
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: #050e22;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  padding: 1.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-header h1 {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1rem;
+  color: var(--gold);
+  line-height: 1.2;
+}
+
+.sidebar-header .meta {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  line-height: 1.4;
+}
+
+.sidebar nav {
+  padding: 0.75rem 0;
+  flex: 1;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.65rem 1rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.nav-item:hover {
+  background: rgba(252,176,64,0.08);
+  color: var(--gold-light);
+  border-left-color: rgba(252,176,64,0.3);
+}
+
+.nav-item.active {
+  background: rgba(252,176,64,0.12);
+  color: var(--gold);
+  border-left-color: var(--gold);
+  font-weight: 700;
+}
+
+.nav-item .badge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(252,176,64,0.2);
+  color: var(--gold);
+}
+
+/* ── Main ── */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--navy-dark);
+  min-height: 0;
+}
+
+.page-header {
+  padding: 1rem 1.5rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--navy-dark);
+  flex-shrink: 0;
+}
+
+.page-header h2 {
+  font-family: 'DM Serif Display', serif;
+  font-size: 1.3rem;
+  color: var(--white);
+}
+
+.page-header .updated {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+/* ── KPI strips ── */
+.kpi-strip {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--navy-dark);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0.6rem 1rem;
+  background: var(--navy);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.kpi-card .label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.kpi-card .value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1;
+}
+
+.kpi-card .value.good { color: var(--green); }
+.kpi-card .value.bad  { color: var(--red); }
+.kpi-card .sub {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+/* ── Tab content ── */
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.5rem;
+  display: none;
+}
+
+.tab-content.active { display: block; }
+
+/* ── Chart area ── */
+.chart-wrap {
+  background: var(--navy);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.chart-wrap .chart-title {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Coefficients table ── */
+.coef-section { margin-bottom: 1rem; }
+
+.section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.coef-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+
+.coef-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--navy);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.coef-chip:hover {
+  border-color: var(--gold);
+  background: rgba(252,176,64,0.05);
+}
+
+.coef-chip.dominant {
+  border-color: var(--gold);
+  background: rgba(252,176,64,0.08);
+}
+
+.coef-chip.dominant .chip-name {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.coef-chip.inactive {
+  opacity: 0.35;
+}
+
+.chip-bar {
+  width: 6px;
+  height: 28px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.chip-body { flex: 1; min-width: 0; }
+
+.chip-name {
+  font-size: 0.8rem;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-value {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip-value.pos { color: #60a5fa; }
+.chip-value.neg { color: #f87171; }
+
+/* ── Feature toggle area ── */
+.toggle-section { margin-bottom: 1rem; }
+
+.toggle-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.toggle-btn:hover { border-color: var(--gold); color: var(--text); }
+.toggle-btn.active { background: rgba(252,176,64,0.15); border-color: var(--gold); color: var(--gold); }
+.toggle-btn .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.toggle-btn.active .dot { background: var(--gold); }
+
+/* ── Actual vs Predicted mini-table ── */
+.avp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem;
+}
+
+.avp-card {
+  background: var(--navy);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.avp-card .avp-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.3rem;
+}
+
+.avp-card .avp-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.avp-card .avp-sub {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+/* ── Plotly chart container ── */
+#plotly-chart {
+  width: 100%;
+}
+
+/* ── Joint cross-axis layout ── */
+.cross-axis-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.cross-axis-grid .chart-wrap { margin-bottom: 0; }
+
+/* ── Legend styling override ── */
+.js-plotly-plot .plotly .modebar {
+  top: 4px !important;
+  right: 4px !important;
+}
+"""
+
+_HTML_HEAD = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<style>{css}</style>
+</head>
+<body>
+<div class="container">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>SINDy Viewer</h1>
+      <div class="meta">{meta}</div>
+    </div>
+    <nav>{nav_items}</nav>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <h2>{page_title}</h2>
+      <div class="updated">{time_range}</div>
+    </div>
+    <div class="kpi-strip" id="kpi-strip"></div>
+    <div id="tab-container">{tab_contents}</div>
+  </main>
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+const FIG_DATA = JSON.parse({fig_json});
+const PAYLOADS = JSON.parse({payloads_json});
+let activeTab = null;
+let activeFeatures = {{}};  // tab -> set of feature names
+let initialized = false;
+
+function init() {{
+  const tabs = {tab_ids_json};
+  // init activeFeatures
+  Object.values(tabs).forEach(id => {{ activeFeatures[id] = null; }});
+  switchTab(Object.keys(tabs)[0]);
+  initialized = true;
+}}
+
+function switchTab(tabId) {{
+  if (!initialized) {{ activeTab = tabId; }}
+  // Nav
+  document.querySelectorAll('.nav-item').forEach(el => {{
+    el.classList.toggle('active', el.dataset.tab === tabId);
+  }});
+  // Content
+  document.querySelectorAll('.tab-content').forEach(el => {{
+    el.classList.toggle('active', el.dataset.tab === tabId);
+  }});
+  activeTab = tabId;
+  renderKpiStrip(tabId);
+  renderPlot(tabId);
+  renderCoefSection(tabId);
+  renderToggleSection(tabId);
+}}
+
+function renderKpiStrip(tabId) {{
+  const strip = document.getElementById('kpi-strip');
+  const payload = PAYLOADS[tabId];
+  if (!payload) {{ strip.innerHTML = ''; return; }}
+  const m = payload.metrics || {{}};
+  const active = payload.activeScenario || 'Full model';
+  const chips = [
+    ['R² train', m.r2_train, '', m.r2_train >= 0.7 ? 'good' : m.r2_train >= 0.3 ? '' : 'bad'],
+    ['R² test', m.r2_test, '', m.r2_test >= 0.7 ? 'good' : m.r2_test >= 0.3 ? '' : 'bad'],
+    ['RMSE', m.rmse_train, 'train / ' + (m.rmse_test || 0).toFixed(3) + ' test', ''],
+    ['MAE', m.mae_train, 'train / ' + (m.mae_test || 0).toFixed(3) + ' test', ''],
+    ['NRMSE', m.nrmse_train, 'train / ' + (m.nrmse_test || 0).toFixed(3) + ' test', ''],
+    ['Active', m.n_active_terms, '/' + m.n_total_terms + ' terms', ''],
+  ];
+  strip.innerHTML = chips.map(([label, val, sub, cls]) => `
+    <div class="kpi-card">
+      <div class="label">${{label}}</div>
+      <div class="value ${{cls || ''}}">${{typeof val === 'number' ? val.toFixed(3) : '—'}}</div>
+      <div class="sub">${{sub}}</div>
+    </div>`).join('');
+}}
+
+function renderPlot(tabId) {{
+  const fig = FIG_DATA[tabId];
+  if (!fig) return;
+  // Apply feature mask to traces
+  const mask = activeFeatures[tabId];
+  if (mask) {{
+    const payload = PAYLOADS[tabId];
+    const featNames = payload.feature_names;
+    const keptSet = new Set();
+    featNames.forEach((f, i) => {{ if (mask[i]) keptSet.add(f); }});
+    // Filter traces: keep if no legendgroup, or if legendgroup matches active features
+    const filtered = {{
+      ...fig,
+      data: fig.data.map(tr => {{
+        // Determine if this trace is a feature contribution
+        const name = tr.name || '';
+        // Feature contrib traces have names like "x (coef=+3.4)"
+        const featMatch = featNames.some(f => name.startsWith(f + ' (coef='));
+        if (!featMatch) return tr;  // keep non-feature traces
+        const featName = featNames.find(f => name.startsWith(f + ' (coef='));
+        return {{
+          ...tr,
+          visible: keptSet.has(featName),
+          showlegend: keptSet.has(featName),
+        }};
+      }})
+    }};
+    Plotly.newPlot('plotly-chart-' + tabId, filtered);
+  }} else {{
+    Plotly.newPlot('plotly-chart-' + tabId, fig);
+  }}
+}}
+
+function renderCoefSection(tabId) {{
+  const el = document.getElementById('coef-section-' + tabId);
+  const payload = PAYLOADS[tabId];
+  if (!el || !payload) return;
+  const featNames = payload.feature_names;
+  const coefs = payload.coefs;
+  if (!coefs) {{ el.innerHTML = ''; return; }}
+  // Sort by magnitude
+  const order = Array.from({{length: coefs.length}}, (_,i)=>i)
+    .sort((a,b) => Math.abs(coefs[b]) - Math.abs(coefs[a]));
+  const mask = activeFeatures[tabId];
+  el.innerHTML = '<div class="coef-grid">' + order.map(idx => {{
+    const name = featNames[idx];
+    const val = coefs[idx];
+    const abs = Math.abs(val);
+    const isDom = order.indexOf(idx) < 3;
+    const isActive = !mask || mask[idx];
+    const barColor = val >= 0 ? '#60a5fa' : '#f87171';
+    return `<div class="coef-chip ${{isDom ? 'dominant' : ''}} ${{!isActive ? 'inactive' : ''}}"
+      onclick="toggleFeature('${{tabId}}', ${{idx}})">
+      <div class="chip-bar" style="background:${{barColor}}; opacity:${{0.3 + 0.7*abs/Math.max(...order.map(i=>Math.abs(coefs[i])))}}"></div>
+      <div class="chip-body">
+        <div class="chip-name">${{name}}</div>
+        <div class="chip-value ${{val >= 0 ? 'pos' : 'neg'}}">${{val >= 0 ? '+' : ''}}${{val.toFixed(3)}}</div>
+      </div>
+    </div>`;
+  }}).join('') + '</div>';
+}}
+
+function toggleFeature(tabId, featIdx) {{
+  const payload = PAYLOADS[tabId];
+  if (!payload) return;
+  const featNames = payload.feature_names;
+  if (!activeFeatures[tabId]) {{
+    activeFeatures[tabId] = new Array(featNames.length).fill(true);
+  }}
+  activeFeatures[tabId][featIdx] = !activeFeatures[tabId][featIdx];
+  renderCoefSection(tabId);
+  renderPlot(tabId);
+}}
+
+function resetFeatures(tabId) {{
+  activeFeatures[tabId] = null;
+  renderCoefSection(tabId);
+  renderPlot(tabId);
+}}
+
+function renderToggleSection(tabId) {{
+  // Renders feature-toggle pill buttons in the toggle-grid-{ctabId} div.
+  const el = document.getElementById('toggle-grid-' + tabId);
+  const payload = PAYLOADS[tabId];
+  if (!el || !payload) {{ el.innerHTML = ''; return; }}
+  const featNames = payload.feature_names || [];
+  const coefs = payload.coefs || [];
+  if (!featNames.length) {{ el.innerHTML = '<span style="color:var(--text-muted);font-size:0.75rem">No features</span>'; return; }}
+  // Initialise mask if needed
+  if (activeFeatures[tabId] === null) {{
+    activeFeatures[tabId] = new Array(featNames.length).fill(true);
+  }}
+  const mask = activeFeatures[tabId];
+  const nActive = mask.filter(Boolean).length;
+  el.innerHTML = featNames.map((fname, idx) => {{
+    const isOn = mask[idx];
+    const coef = coefs[idx];
+    const valStr = (coef !== undefined && coef !== null)
+      ? (coef >= 0 ? '+' : '') + Number(coef).toFixed(3)
+      : '';
+    return `<button class="toggle-btn ${{isOn ? 'active' : ''}}"
+      onclick="toggleFeature('${{tabId}}', ${{idx}})"
+      title="Toggle ${{fname}} (coef=${{valStr}})">
+      <span class="dot"></span>${{fname}}
+      <span style="margin-left:0.3em;opacity:0.7;font-size:0.65rem">${{valStr}}</span>
+    </button>`;
+  }}).join('');
+  // Summary line
+  el.innerHTML += `<span style="margin-left:0.5em;font-size:0.7rem;color:var(--text-muted)">${{nActive}}/${{featNames.length}} active</span>`;
+}}
+
+function toggleFeature(tabId, featIdx) {{
+  const payload = PAYLOADS[tabId];
+  if (!payload) return;
+  const featNames = payload.feature_names || [];
+  if (activeFeatures[tabId] === null) {{
+    activeFeatures[tabId] = new Array(featNames.length).fill(true);
+  }}
+  activeFeatures[tabId][featIdx] = !activeFeatures[tabId][featIdx];
+  renderToggleSection(tabId);
+  renderPlot(tabId);
+}}
+
+function resetFeatures(tabId) {{
+  activeFeatures[tabId] = null;
+  renderToggleSection(tabId);
+  renderPlot(tabId);
+}}
+
+// Tab nav click
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>"""
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# Figure builders
+# ---------------------------------------------------------------------------
+
+def _build_axis_figure(
+    axis: str,
+    ds: FlightDataset,
+    payload: dict,
+    downsamples_to: int,
+) -> dict:
+    """Build the Plotly figure dict for one axis tab."""
+    n_rows = 3
+    fig = make_subplots(
+        rows=n_rows, cols=1,
+        shared_xaxes=False,
+        vertical_spacing=0.10,
+        row_heights=[0.35, 0.35, 0.30],
+        specs=[
+            [{"secondary_y": True}],
+            [{"secondary_y": False}],
+            [{"secondary_y": True}],
+        ],
+        subplot_titles=(
+            f"<b>{axis.upper()}</b> — body rate (rad/s) vs setpoint",
+            f"<b>{axis.upper()}</b> — fit: measured vs predicted dx/dt",
+            f"<b>{axis.upper()}</b> — coefficient contribution traces",
+        ),
+    )
+    t_ds, x_ds, u_ds = _downsample_triplet(ds.t, ds.x, ds.u, downsamples_to)
+    # Row 1: rate + setpoint
+    fig.add_trace(
+        go.Scatter(x=t_ds, y=x_ds, mode="lines", name=f"{axis} rate",
+                   line=dict(color="#60a5fa", width=1.5),
+                   hovertemplate=f"{axis}_rate=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>"),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(x=t_ds, y=u_ds, mode="lines", name=f"{axis} setpoint",
+                   line=dict(color="#FCB040", width=1.5, dash="dash"),
+                   hovertemplate=f"{axis}_sp=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>"),
+        row=1, col=1, secondary_y=True,
+    )
+
+    # Fit data
+    fit = payload["scenarios"][0]["result"]
+    t_fit = fit["t"]
+    from sim.sindy.fit_panel import per_axis_features
+    cfg = payload.get("_cfg", FitConfig())
+    x_full, u_full = payload["_x"], payload["_u"]
+    Phi = per_axis_features(x_full, u_full, cfg)
+
+    # Row 2: dx/dt measured + predicted
+    fig.add_trace(
+        go.Scatter(x=t_fit, y=fit["y_true"], mode="lines",
+                   name="dx/dt measured",
+                   line=dict(color="#60a5fa", width=2),
+                   hovertemplate="dx_meas=%{y:.4f}<br>t=%{x:.3f} s<extra></extra>"),
+        row=2, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(x=t_fit, y=fit["y_pred"], mode="lines",
+                   name="dx/dt predicted",
+                   line=dict(color="#FCB040", width=2, dash="dash"),
+                   hovertemplate="dx_pred=%{y:.4f}<br>t=%{x:.3f} s<extra></extra>"),
+        row=2, col=1,
+    )
+
+    # Row 3: per-feature contribution traces
+    feat_names = payload["feature_names"]
+    coefs = fit["coefs"]
+    for f_idx, (fname, coef_val) in enumerate(zip(feat_names, coefs)):
+        if f_idx >= Phi.shape[1]:
+            continue
+        if abs(coef_val) < 1e-10:
+            continue
+        contrib = coef_val * Phi[:, f_idx]
+        fig.add_trace(
+            go.Scatter(x=t_fit, y=contrib, mode="lines",
+                       name=f"{fname} (coef={coef_val:+.3f})",
+                       line=dict(width=1.5),
+                       opacity=0.7,
+                       hovertemplate=f"{fname} contrib=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>"),
+            row=3, col=1,
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="#071f4a",
+        plot_bgcolor="#0A3476",
+        font_color="#e2e8f0",
+        font=dict(family="DM Sans, sans-serif", size=11),
+        height=700,
+        margin=dict(t=50, b=30, l=60, r=20),
+        hovermode="x unified",
+        showlegend=True,
+        legend=dict(
+            orientation="h", y=1.08, x=0.0,
+            bgcolor="rgba(7,31,74,0.8)",
+            bordercolor="rgba(255,255,255,0.1)",
+            borderwidth=1,
+            font=dict(size=10),
+        ),
+        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                   tickfont=dict(color="#94a3b8")),
+        xaxis2=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                    tickfont=dict(color="#94a3b8")),
+        xaxis3=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                    tickfont=dict(color="#94a3b8")),
+        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                   tickfont=dict(color="#94a3b8")),
+        yaxis2=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                    tickfont=dict(color="#94a3b8")),
+        yaxis3=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                    tickfont=dict(color="#94a3b8")),
+        yaxis2_title=dict(text="dx/dt rad/s²", font=dict(color="#e2e8f0")),
+        yaxis3_title=dict(text="contribution", font=dict(color="#e2e8f0")),
+        yaxis_title=dict(text="rad/s", font=dict(color="#e2e8f0")),
+    )
+    return fig.to_dict()
+
+
+def _build_joint_figure(payload: dict, downsamples_to: int) -> dict:
+    """Build the Plotly figure dict for the joint tab."""
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=False,
+        vertical_spacing=0.12,
+        row_heights=[0.55, 0.45],
+        subplot_titles=(
+            "<b>JOINT</b> — measured vs predicted dx/dt (all axes)",
+            "<b>JOINT</b> — top-12 coefficient contributions per axis",
+        ),
+    )
+    colors = {"roll": "#60a5fa", "pitch": "#FCB040", "yaw": "#22c55e"}
+    fit = payload["scenarios"][0]["result"]
+    t_fit = fit["t"]
+    for ax_idx, ax in enumerate(AXES):
+        fig.add_trace(
+            go.Scatter(x=t_fit, y=fit["y_true"][:, ax_idx], mode="lines",
+                       name=f"{ax} dx_meas",
+                       line=dict(color=colors[ax], width=1.5),
+                       hovertemplate=f"dx_meas_{ax}=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>"),
+            row=1, col=1,
+        )
+        fig.add_trace(
+            go.Scatter(x=t_fit, y=fit["y_pred"][:, ax_idx], mode="lines",
+                       name=f"{ax} dx_pred",
+                       line=dict(color=colors[ax], width=1.5, dash="dash"),
+                       hovertemplate=f"dx_pred_{ax}=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>"),
+            row=1, col=1,
+        )
+    # Coefficient bar chart — top 12 features by mean |coef|
+    coefs = fit["coefs"]
+    feat_names = fit["feature_names"]
+    mean_abs = np.mean(np.abs(coefs), axis=1)
+    order = np.argsort(-mean_abs)[:12]
+    for ax_idx, ax in enumerate(AXES):
+        ax_coefs = coefs[order, ax_idx]
+        ax_names = [feat_names[k] for k in order]
+        fig.add_trace(
+            go.Bar(x=ax_names, y=ax_coefs,
+                   name=f"{ax} coef",
+                   marker=dict(color=colors[ax]),
+                   hovertemplate=f"{ax} %{{x}}: %{{y:.4f}}<extra></extra>"),
+            row=2, col=1,
+        )
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="#071f4a",
+        plot_bgcolor="#0A3476",
+        font_color="#e2e8f0",
+        font=dict(family="DM Sans, sans-serif", size=11),
+        height=650,
+        margin=dict(t=50, b=30, l=60, r=20),
+        hovermode="x unified",
+        showlegend=True,
+        legend=dict(
+            orientation="h", y=1.06, x=0.0,
+            bgcolor="rgba(7,31,74,0.8)",
+            bordercolor="rgba(255,255,255,0.1)",
+            borderwidth=1,
+            font=dict(size=10),
+        ),
+        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                   tickfont=dict(color="#94a3b8")),
+        xaxis2=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                    tickfont=dict(color="#94a3b8")),
+        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                   tickfont=dict(color="#94a3b8")),
+        yaxis2=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+                    tickfont=dict(color="#94a3b8")),
+    )
+    return fig.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Main viewer
 # ---------------------------------------------------------------------------
 
 def view_ulog(
@@ -78,10 +862,17 @@ def view_ulog(
     title: Optional[str] = None,
     cfg: Optional[FitConfig] = None,
 ) -> dict:
-    """Build an interactive Plotly HTML viewer for one PX4 ulog file."""
+    """Build the custom-HTML SINDy viewer for a PX4 ulog file.
+
+    Generates a self-contained HTML dashboard with dark-navy theme,
+    sidebar tabs, KPI strips, embedded Plotly charts, and interactive
+    coefficient toggling.
+    """
     ulog_path = Path(ulog_path)
     out_html = Path(out_html)
     out_html.parent.mkdir(parents=True, exist_ok=True)
+
+    cfg = cfg or FitConfig()
 
     datasets: dict[str, FlightDataset] = {}
     n_samples = 0
@@ -95,27 +886,109 @@ def view_ulog(
 
     fit_payloads: Optional[dict] = None
     if fit and datasets:
-        fit_payloads = _build_fit_payloads(datasets, cfg or FitConfig())
+        fit_payloads = _build_fit_payloads(datasets, cfg)
 
-    page_title = title or f"SINDy viewer — {ulog_path.name}"
-    fig = _build_figure(
-        datasets,
-        fit_payloads=fit_payloads,
-        downsamples_to=downsamples_to,
-        title=_build_title(page_title, datasets, n_samples),
+    # ── Build per-tab data ──
+    fig_data: dict = {}
+    tab_ids: dict = {}
+    payloads_out: dict = {}
+
+    for axis in AXES:
+        tab_id = f"axis_{axis}"
+        ds = datasets.get(axis)
+        if ds is None:
+            payloads_out[tab_id] = None
+            fig_data[tab_id] = None
+            continue
+        tab_ids[axis.capitalize()] = tab_id
+        payload = fit_payloads["per_axis"].get(axis) if fit_payloads else None
+        if payload:
+            fig_data[tab_id] = pio.to_json(
+                _build_axis_figure(axis, ds, payload, downsamples_to)
+            )
+            payloads_out[tab_id] = _payload_summary(payload)
+        else:
+            fig_data[tab_id] = None
+            payloads_out[tab_id] = None
+
+    joint_tab_id = "joint"
+    if fit_payloads and fit_payloads.get("joint") and all(a in datasets for a in AXES):
+        tab_ids["Joint"] = joint_tab_id
+        fig_data[joint_tab_id] = pio.to_json(
+            _build_joint_figure(fit_payloads["joint"], downsamples_to)
+        )
+        payloads_out[joint_tab_id] = _joint_summary(fit_payloads["joint"])
+    else:
+        payloads_out[joint_tab_id] = None
+        fig_data[joint_tab_id] = None
+
+    # ── Build nav items ──
+    nav_parts: list[str] = []
+    for label, tab_id in tab_ids.items():
+        p = payloads_out.get(tab_id) or {}
+        lib = p.get("library", "—") or "—"
+        badge = f'<span class="badge">{lib}</span>'
+        nav_parts.append(
+            f'<div class="nav-item" data-tab="{tab_id}" onclick="switchTab(\'{tab_id}\')">'
+            f'<span>{label}</span>{badge}</div>'
+        )
+    nav_items = "".join(nav_parts)
+
+    # ── Build tab contents ──
+    tab_contents = ""
+    for label, tab_id in tab_ids.items():
+        active = " active" if label == list(tab_ids.keys())[0] else ""
+        payload = payloads_out.get(tab_id)
+        fig = fig_data.get(tab_id)
+        tab_contents += (
+            f'<div class="tab-content{active}" data-tab="{tab_id}">'
+            f'  <div class="chart-wrap">'
+            f'    <div class="chart-title">Interactive chart — click legend to toggle traces</div>'
+            f'    <div id="plotly-chart-{tab_id}"></div>'
+            f'  </div>'
+            f'  <div class="coef-section" id="coef-section-{tab_id}"></div>'
+            f'  <div class="toggle-section">'
+            f'    <div class="section-title">Feature toggles</div>'
+            f'    <div class="toggle-grid" id="toggle-grid-{tab_id}"></div>'
+            f'  </div>'
+            f'</div>'
+        )
+
+    # ── Page metadata ──
+    page_title = title or f"SINDy — {ulog_path.name}"
+    if "roll" in datasets:
+        t0 = datasets["roll"].t[0]
+        t1 = datasets["roll"].t[-1]
+        time_range = f"{t0:.2f}s → {t1:.2f}s · {n_samples} samples · {', '.join(axis_coverage)}"
+    else:
+        time_range = f"{n_samples} samples"
+    meta = f"axis: {', '.join(axis_coverage) or 'none'} · library: polynomial"
+
+    # ── Render HTML ──
+    # Build the JSON strings; they are always valid JSON and contain no
+    # format-key-like substrings so safe to substitute directly.
+    fig_json_str = json.dumps(fig_data)
+    payloads_json_str = json.dumps(payloads_out)
+    tab_ids_json_str = json.dumps(tab_ids)
+
+    html = (
+        _HTML_HEAD
+        .replace("{title}", page_title)
+        .replace("{meta}", meta)
+        .replace("{page_title}", page_title)
+        .replace("{time_range}", time_range)
+        .replace("{nav_items}", nav_items)
+        .replace("{tab_contents}", tab_contents)
+        .replace("{css}", _CSS)
+        .replace("{fig_json}", fig_json_str)
+        .replace("{payloads_json}", payloads_json_str)
+        .replace("{tab_ids_json}", tab_ids_json_str)
     )
 
-    pio.write_html(
-        fig,
-        file=str(out_html),
-        include_plotlyjs="directory",
-        full_html=True,
-        auto_open=False,
-    )
+    out_html.write_text(html, encoding="utf-8")
     html_size_bytes = out_html.stat().st_size
 
     fit_meta = _summarise_fit_payloads(fit_payloads) if fit_payloads else None
-
     return {
         "log_path": str(ulog_path),
         "n_samples": int(n_samples),
@@ -126,28 +999,80 @@ def view_ulog(
     }
 
 
-# ---------------------------------------------------------------------------
-# Fit payloads — precompute scenarios
-# ---------------------------------------------------------------------------
+def _payload_summary(payload: dict) -> dict:
+    """Extract the minimal payload needed by the HTML JS."""
+    if not payload:
+        return {}
+    fit = payload["scenarios"][0]["result"]
+    return {
+        "library": fit["library"],
+        "feature_names": list(fit["feature_names"]),
+        "coefs": [float(c) for c in fit["coefs"]],
+        "metrics": {k: float(v) for k, v in fit["metrics"].items()
+                       if isinstance(v, (int, float, np.floating))},
+        "activeScenario": payload["scenarios"][0]["label"],
+    }
+
+
+def _joint_summary(payload: dict) -> dict:
+    """Extract joint payload for the HTML JS."""
+    if not payload:
+        return {}
+    fit = payload["scenarios"][0]["result"]
+    # Average metrics across axes
+    avg_m = {}
+    for key in ("r2_train", "r2_test", "rmse_train", "rmse_test",
+                "mae_train", "mae_test", "nrmse_train", "nrmse_test"):
+        vals = [fit["metrics_per_axis"][ax].get(key, 0) for ax in AXES]
+        avg_m[key] = float(np.mean(vals))
+    avg_m["n_active_terms"] = int(np.mean([
+        fit["metrics_per_axis"][ax].get("n_active_terms", 0) for ax in AXES
+    ]))
+    avg_m["n_total_terms"] = int(fit["metrics_per_axis"]["roll"].get("n_total_terms", 27))
+    # Flatten metrics_per_axis: each axis gets a clean float dict
+    flat_metrics_per_axis = {}
+    for ax in AXES:
+        raw = fit["metrics_per_axis"].get(ax, {})
+        flat_metrics_per_axis[ax] = {
+            k: float(v) for k, v in raw.items()
+            if isinstance(v, (int, float, np.floating))
+        }
+    return {
+        "library": "polynomial_joint",
+        "feature_names": list(fit["feature_names"]),
+        "coefs": [float(c) for row in fit["coefs"] for c in row],
+        "metrics": avg_m,
+        "metrics_per_axis": flat_metrics_per_axis,
+        "activeScenario": payload["scenarios"][0]["label"],
+        "n_scenarios": len(payload["scenarios"]),
+    }
+
+
+def _summarise_fit_payloads(payloads: Optional[dict]) -> Optional[dict]:
+    if payloads is None:
+        return None
+    per_axis_summary = {}
+    for axis, payload in payloads.get("per_axis", {}).items():
+        per_axis_summary[axis] = _payload_summary(payload)
+    joint_summary = None
+    if payloads.get("joint"):
+        joint_summary = _joint_summary(payloads["joint"])
+    return {"per_axis": per_axis_summary, "joint": joint_summary}
+
 
 def _build_fit_payloads(
     datasets: dict[str, FlightDataset],
     cfg: FitConfig,
 ) -> dict:
-    """Precompute scenarios for every available axis + the joint fit."""
     payloads: dict = {"per_axis": {}, "joint": None}
     for axis, ds in datasets.items():
-        scenarios, t_data, x_data, u_data = _per_axis_scenarios(
-            ds.t, ds.x, ds.u, axis, cfg
-        )
+        scenarios, t, x, u = _per_axis_scenarios(ds.t, ds.x, ds.u, axis, cfg)
         payloads["per_axis"][axis] = {
             "axis": axis,
             "feature_names": list(per_axis_feature_names(cfg)),
             "scenarios": scenarios,
             "active_idx": 0,
-            # stash raw data so the per-feature contribution traces
-            # can be rebuilt without re-running the fitter
-            "_t": t_data, "_x": x_data, "_u": u_data, "_cfg": cfg,
+            "_t": t, "_x": x, "_u": u, "_cfg": cfg,
         }
     if all(ax in datasets for ax in AXES):
         per_axis_full = {ax: (datasets[ax].t, datasets[ax].x, datasets[ax].u) for ax in AXES}
@@ -156,49 +1081,30 @@ def _build_fit_payloads(
     return payloads
 
 
-def _per_axis_scenarios(
-    t: np.ndarray, x: np.ndarray, u: np.ndarray, axis: str, cfg: FitConfig,
-) -> tuple[list, np.ndarray, np.ndarray, np.ndarray]:
-    """Full per-axis fit plus drop-one scenarios."""
-    feat_names = list(per_axis_feature_names(cfg))
-    n_features = len(feat_names)
-    full = per_axis_fit(t, x, u, cfg=cfg, label=axis)
-    scenarios: list[dict] = [
-        {"label": "Full model", "description": "all features", "result": full}
-    ]
-    for j in range(n_features):
-        mask = np.ones(n_features, dtype=bool)
-        mask[j] = False
-        res = per_axis_fit(t, x, u, cfg=cfg, label=axis, feature_mask=mask)
-        scenarios.append({
-            "label": f"Without {feat_names[j]}",
-            "description": f"drop {feat_names[j]}",
-            "result": res,
-        })
-    return scenarios, t, x, u
-
-
 def _joint_scenarios(
     per_axis_data: dict, cfg: FitConfig,
 ) -> dict:
     """Joint fit + drop-one scenarios, capped at MAX_SCENARIOS by R²."""
     n_features = len(JOINT_FEATURE_NAMES)
     full = joint_fit(per_axis_data, cfg=cfg)
-    candidates: list[dict] = [{
-        "label": "Full model", "description": "all 27 features", "result": full,
-        "r2_train_avg": float(np.mean([full["metrics_per_axis"][a]["r2_train"] for a in AXES])),
+    candidates: list = [{
+        "label": "Full model", "result": full,
+        "r2_train_avg": float(np.mean([
+            full["metrics_per_axis"][a]["r2_train"] for a in AXES
+        ])),
     }]
     for j in range(n_features):
         mask = np.ones(n_features, dtype=bool)
         mask[j] = False
         try:
             res = joint_fit(per_axis_data, cfg=cfg, feature_mask=mask)
-            r2_avg = float(np.mean([res["metrics_per_axis"][a]["r2_train"] for a in AXES]))
+            r2_avg = float(np.mean([
+                res["metrics_per_axis"][a]["r2_train"] for a in AXES
+            ]))
         except ValueError:
             continue
         candidates.append({
             "label": f"Without {JOINT_FEATURE_NAMES[j]}",
-            "description": f"drop {JOINT_FEATURE_NAMES[j]}",
             "result": res,
             "r2_train_avg": r2_avg,
         })
@@ -213,621 +1119,33 @@ def _joint_scenarios(
     }
 
 
-def _summarise_fit_payloads(payloads: Optional[dict]) -> Optional[dict]:
-    """JSON-friendly summary of the active scenarios."""
-    if payloads is None:
-        return None
-    per_axis_summary = {}
-    for axis, payload in payloads.get("per_axis", {}).items():
-        active = payload["scenarios"][payload["active_idx"]]
-        per_axis_summary[axis] = _summarise_scenario(active)
-    joint_summary = None
-    if payloads.get("joint"):
-        active = payloads["joint"]["scenarios"][payloads["joint"]["active_idx"]]
-        joint_summary = {
-            "library": active["result"]["library"],
-            "metrics_per_axis": active["result"]["metrics_per_axis"],
-            "coefs": active["result"]["coefs"].tolist(),
-            "feature_names": active["result"]["feature_names"],
-            "active_idx": payloads["joint"]["active_idx"],
-            "n_scenarios": len(payloads["joint"]["scenarios"]),
-        }
-    return {"per_axis": per_axis_summary, "joint": joint_summary}
+def _per_axis_scenarios(
+    t: np.ndarray, x: np.ndarray, u: np.ndarray, axis: str, cfg: FitConfig,
+) -> tuple:
+    from sim.sindy.fit_panel import per_axis_fit, per_axis_feature_names
+    feat_names = list(per_axis_feature_names(cfg))
+    n_features = len(feat_names)
+    full = per_axis_fit(t, x, u, cfg=cfg, label=axis)
+    scenarios: list = [{"label": "Full model", "result": full}]
+    for j in range(n_features):
+        mask = np.ones(n_features, dtype=bool)
+        mask[j] = False
+        res = per_axis_fit(t, x, u, cfg=cfg, label=axis, feature_mask=mask)
+        scenarios.append({"label": f"Without {feat_names[j]}", "result": res})
+    return scenarios, t, x, u
 
 
-def _summarise_scenario(scenario: dict) -> dict:
-    res = scenario["result"]
-    return {
-        "label": scenario["label"],
-        "library": res["library"],
-        "metrics": res["metrics"],
-        "coefs": [float(c) for c in res["coefs"]],
-        "feature_names": list(res["feature_names"]),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Figure construction
-# ---------------------------------------------------------------------------
-
-def _build_figure(
-    datasets: dict[str, FlightDataset],
-    *,
-    fit_payloads: Optional[dict],
-    downsamples_to: int,
-    title: str,
-) -> go.Figure:
-    """Build the multi-tab Plotly figure via the standard tab workaround:
-    one Figure containing all traces for all tabs; visibility toggled by
-    a buttons updatemenu acting as a tab bar.
-    """
-    # ----- Per-axis tabs (or placeholder) -----
-    per_axis_figs: list[tuple[str, go.Figure]] = []
-    for axis in AXES:
-        ds = datasets.get(axis)
-        if ds is None:
-            per_axis_figs.append((axis.capitalize(), _placeholder_fig(f"axis '{axis}' missing in this log")))
-            continue
-        payload = fit_payloads["per_axis"].get(axis) if fit_payloads else None
-        per_axis_figs.append((axis.capitalize(), _build_axis_tab(
-            axis=axis, ds=ds, payload=payload, downsamples_to=downsamples_to,
-        )))
-
-    # ----- Joint tab -----
-    if fit_payloads and fit_payloads.get("joint") and all(a in datasets for a in AXES):
-        joint_fig = _build_joint_tab(
-            payload=fit_payloads["joint"], downsamples_to=downsamples_to,
-        )
-    else:
-        joint_fig = _placeholder_fig("joint cross-axis fit unavailable (need roll + pitch + yaw in this log)")
-
-    return _wrap_tabs(
-        [*per_axis_figs, ("Joint", joint_fig)],
-        title=title,
-    )
-
-
-def _placeholder_fig(message: str) -> go.Figure:
-    fig = go.Figure()
-    fig.add_annotation(
-        text=message, xref="paper", yref="paper",
-        x=0.5, y=0.5, showarrow=False,
-        font=dict(size=18, color="#888"),
-    )
-    fig.update_layout(
-        template="plotly_white",
-        xaxis=dict(visible=False), yaxis=dict(visible=False),
-        margin=dict(t=40, b=40, l=40, r=40),
-    )
-    return fig
-
-
-# ---------------------------------------------------------------------------
-# Per-axis tab
-# ---------------------------------------------------------------------------
-
-def _build_axis_tab(
-    *,
-    axis: str,
-    ds: FlightDataset,
-    payload: Optional[dict],
-    downsamples_to: int,
-) -> go.Figure:
-    """One per-axis tab. Layout (no fit): 2 rows. (with fit): 4 rows."""
-    if payload is None:
-        return _make_axis_timeseries_fig(axis, ds, downsamples_to)
-
-    n_rows = 4
-    fig = make_subplots(
-        rows=n_rows, cols=1,
-        shared_xaxes=False,
-        vertical_spacing=0.06,
-        row_heights=[0.28, 0.18, 0.30, 0.24],
-        specs=[
-            [{"secondary_y": False}],
-            [{"secondary_y": False}],
-            [{"secondary_y": False}],
-            [{"secondary_y": True}],
-        ],
-        subplot_titles=(
-            f"{axis} body rate (rad/s)",
-            f"{axis} setpoint",
-            f"{axis} fit: measured vs predicted dx/dt",
-            f"{axis} coefficients (bars) — per-feature contributions overlay",
-        ),
-    )
-
-    t_ds, x_ds, u_ds = _downsample_triplet(ds.t, ds.x, ds.u, downsamples_to)
-    # Top time-series — single shared set of traces regardless of scenario
-    fig.add_trace(
-        go.Scatter(
-            x=t_ds, y=x_ds, mode="lines",
-            name=f"{axis} rate (rad/s)",
-            legendgroup=f"ax_{axis}_raw",
-            line=dict(color="#1f77b4"),
-            hovertemplate=f"{axis}_rate=%{{y:.4f}} rad/s<br>t=%{{x:.3f}} s<extra></extra>",
-        ),
-        row=1, col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=t_ds, y=u_ds, mode="lines",
-            name=f"{axis} setpoint",
-            legendgroup=f"ax_{axis}_raw",
-            line=dict(color="#ff7f0e"),
-            hovertemplate=f"{axis}_sp=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>",
-        ),
-        row=2, col=1,
-    )
-
-    # Fit panel — precomputed scenarios, one set of traces each
-    _populate_axis_fit_panel(fig, payload, row_dx=3, row_bars=4)
-
-    fig.update_layout(
-        template="plotly_white",
-        height=1100,
-        margin=dict(t=80, b=40, l=60, r=20),
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.04, x=0.0),
-        updatemenus=[_scenario_updatemenu(payload, kind="per_axis")],
-        annotations=list(fig.layout.annotations) + [
-            dict(
-                text=_axis_metrics_html(payload),
-                xref="paper", yref="paper",
-                x=0.0, y=-0.07, xanchor="left", yanchor="top",
-                showarrow=False, align="left",
-                font=dict(family="monospace", size=10),
-                bgcolor="rgba(255,255,255,0.92)", bordercolor="#444", borderwidth=1,
-            )
-        ],
-    )
-    fig.update_yaxes(title_text="rate", row=1, col=1)
-    fig.update_yaxes(title_text="setpoint", row=2, col=1)
-    fig.update_yaxes(title_text="dx/dt (rad/s²)", row=3, col=1)
-    fig.update_yaxes(title_text="coef", row=4, col=1, secondary_y=False)
-    fig.update_yaxes(title_text="contribution", row=4, col=1, secondary_y=True)
-    fig.update_xaxes(title_text="time (s)", row=2, col=1)
-    fig.update_xaxes(title_text="time (s)", row=3, col=1)
-    fig.update_xaxes(title_text="time (s)", row=4, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=True), row=2, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=False), row=1, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=False), row=3, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=False), row=4, col=1)
-    return fig
-
-
-def _make_axis_timeseries_fig(
-    axis: str, ds: FlightDataset, downsamples_to: int,
-) -> go.Figure:
-    """Per-axis tab with no fit."""
-    t_ds, x_ds, u_ds = _downsample_triplet(ds.t, ds.x, ds.u, downsamples_to)
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.07,
-        subplot_titles=(f"{axis} body rate", f"{axis} setpoint"),
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=t_ds, y=x_ds, mode="lines", name=f"{axis} rate (rad/s)",
-            line=dict(color="#1f77b4"),
-            hovertemplate=f"{axis}=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>",
-        ),
-        row=1, col=1,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=t_ds, y=u_ds, mode="lines", name=f"{axis} setpoint",
-            line=dict(color="#ff7f0e"),
-            hovertemplate=f"{axis}_sp=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>",
-        ),
-        row=2, col=1,
-    )
-    fig.update_layout(
-        template="plotly_white",
-        height=600, hovermode="x unified",
-        legend=dict(orientation="h", y=1.04, x=0.0),
-        margin=dict(t=80, b=40, l=60, r=20),
-    )
-    fig.update_yaxes(title_text="rad/s", row=1, col=1)
-    fig.update_yaxes(title_text="setpoint", row=2, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=True), row=2, col=1)
-    return fig
-
-
-def _populate_axis_fit_panel(
-    fig: go.Figure, payload: dict, *, row_dx: int, row_bars: int,
-) -> None:
-    """Add the per-axis fit traces (one set per scenario).
-
-    Trace order per scenario:
-      - 1 predicted dx/dt line
-      - 1 bar chart
-      - N contribution lines (one per nonzero coef)
-    Plus a single measured dx/dt line at the very top (always visible).
-    The scenario updatemenu uses the order to build a visibility list.
-    """
-    scenarios = payload["scenarios"]
-    t_full = scenarios[0]["result"]["t"]
-    t_stash = payload["_t"]; x_stash = payload["_x"]; u_stash = payload["_u"]
-    cfg = payload["_cfg"]
-    from sim.sindy.fit_panel import per_axis_features
-
-    # measured (always visible)
-    fig.add_trace(
-        go.Scatter(
-            x=t_full, y=scenarios[0]["result"]["y_true"], mode="lines",
-            name="dx/dt measured",
-            line=dict(color="#1f77b4", width=2),
-            legendgroup="dx_meas",
-            hovertemplate="dx_meas=%{y:.4f}<br>t=%{x:.3f} s<extra></extra>",
-        ),
-        row=row_dx, col=1,
-    )
-
-    n_features = len(payload["feature_names"])
-
-    # Visibility bookkeeping: a list of bool lists per scenario.
-    # Index order matches the order traces are added to fig.data.
-    payload["_visibility_lists"] = []
-    visible_first = [True] + [False] * (
-        1 +  # measured (already added; always visible)
-        0    # not counted here — measured is always-on, separate
-    )
-
-    # We need to know, for each scenario, which trace positions belong to it.
-    # Start by indexing the measured trace as 0, then each scenario gets
-    # 1 pred + 1 bar + K contrib lines (where K = #nonzero coefs in the scenario).
-    payload["_scenario_trace_spans"] = []  # list of (start, end) into fig.data
-
-    cursor = 1  # 0 is the measured trace; cursor is the next index
-    for s_idx, scenario in enumerate(scenarios):
-        res = scenario["result"]
-        # Predicted dx/dt
-        fig.add_trace(
-            go.Scatter(
-                x=t_full, y=res["y_pred"], mode="lines",
-                name=f"dx/dt predicted — {scenario['label']}",
-                line=dict(color="#d62728", width=2, dash="dash"),
-                legendgroup=f"ax_pred_{s_idx}",
-                visible=(s_idx == 0),
-                hovertemplate="dx_pred=%{y:.4f}<br>t=%{x:.3f} s<extra></extra>",
-            ),
-            row=row_dx, col=1,
-        )
-        cursor += 1
-
-        # Coefficient bar chart (sorted by magnitude)
-        coefs = res["coefs"]
-        feat_names = res["feature_names"]
-        order = np.argsort(-np.abs(coefs))
-        sorted_names = [feat_names[k] for k in order]
-        sorted_coefs = coefs[order]
-        bar_colors = ["#d62728" if k < DOMINANT_K else "#7f7f7f" for k in range(len(sorted_names))]
-        fig.add_trace(
-            go.Bar(
-                x=sorted_names, y=sorted_coefs,
-                name=f"coefs — {scenario['label']}",
-                legendgroup=f"ax_bar_{s_idx}",
-                visible=(s_idx == 0),
-                marker=dict(color=bar_colors),
-                hovertemplate="%{x}: %{y:.4f}<extra></extra>",
-            ),
-            row=row_bars, col=1, secondary_y=False,
-        )
-        cursor += 1
-
-        # Per-feature contribution traces — only nonzero coefs
-        Phi_full = per_axis_features(x_stash, u_stash, cfg)
-        span_start = cursor
-        for f_idx, (fname, coef_val) in enumerate(zip(feat_names, coefs)):
-            if abs(coef_val) == 0.0:
-                continue
-            if f_idx >= Phi_full.shape[1]:
-                continue
-            contrib = coef_val * Phi_full[:, f_idx]
-            fig.add_trace(
-                go.Scatter(
-                    x=t_full, y=contrib, mode="lines",
-                    name=f"{fname} (coef={coef_val:+.3f}) — {scenario['label']}",
-                    legendgroup=f"ax_contrib_{s_idx}",
-                    visible=(s_idx == 0),
-                    line=dict(width=1),
-                    opacity=0.4,
-                    hovertemplate=f"{fname} contrib=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>",
-                ),
-                row=row_bars, col=1, secondary_y=True,
-            )
-            cursor += 1
-        payload["_scenario_trace_spans"].append((span_start - 2, cursor))  # pred+bar+contrib
-
-    # Now build the visibility list per scenario.
-    n_total = cursor
-    visibility_lists = []
-    for s_idx, _ in enumerate(scenarios):
-        vis = [True] + [False] * (n_total - 1)  # measured always on
-        start, end = payload["_scenario_trace_spans"][s_idx]
-        for k in range(start, end):
-            vis[k] = True
-        visibility_lists.append(vis)
-    payload["_visibility_lists"] = visibility_lists
-
-
-# ---------------------------------------------------------------------------
-# Joint tab
-# ---------------------------------------------------------------------------
-
-def _build_joint_tab(
-    *, payload: dict, downsamples_to: int,
-) -> go.Figure:
-    """Joint cross-axis fit tab. 4-row figure."""
-    scenarios = payload["scenarios"]
-    t_full = scenarios[0]["result"]["t"]
-    fig = make_subplots(
-        rows=4, cols=1,
-        shared_xaxes=False, vertical_spacing=0.07,
-        row_heights=[0.28, 0.28, 0.30, 0.14],
-        subplot_titles=(
-            "Joint fit: measured dx/dt (all axes)",
-            "Joint fit: predicted dx/dt (active scenario)",
-            "Joint coefficients — top 12 by mean |coef| (per output axis)",
-            "Active scenario: metrics & dominant terms",
-        ),
-    )
-    colors = {"roll": "#1f77b4", "pitch": "#ff7f0e", "yaw": "#2ca02c"}
-
-    # Measured dx (always visible)
-    res0 = scenarios[0]["result"]
-    for ax_idx, ax in enumerate(AXES):
-        fig.add_trace(
-            go.Scatter(
-                x=t_full, y=res0["y_true"][:, ax_idx], mode="lines",
-                name=f"dx_meas {ax}",
-                line=dict(color=colors[ax], width=2),
-                legendgroup="j_dx_meas",
-                hovertemplate=f"dx_meas_{ax}=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>",
-            ),
-            row=1, col=1,
-        )
-
-    payload["_scenario_trace_spans"] = []
-    payload["_visibility_lists"] = []
-    cursor = 3  # 3 measured traces at 0..2
-    for s_idx, scenario in enumerate(scenarios):
-        res = scenario["result"]
-        span_start = cursor
-        # Predicted dx per axis
-        for ax_idx, ax in enumerate(AXES):
-            fig.add_trace(
-                go.Scatter(
-                    x=t_full, y=res["y_pred"][:, ax_idx], mode="lines",
-                    name=f"dx_pred {ax} — {scenario['label']}",
-                    line=dict(color=colors[ax], dash="dash", width=2),
-                    legendgroup=f"j_pred_{s_idx}",
-                    visible=(s_idx == 0),
-                    hovertemplate=f"dx_pred_{ax}=%{{y:.4f}}<br>t=%{{x:.3f}} s<extra></extra>",
-                ),
-                row=2, col=1,
-            )
-            cursor += 1
-
-        # Coef bars — top-K by mean abs across outputs
-        coefs = res["coefs"]  # (n_features, 3)
-        feat_names = res["feature_names"]
-        mean_abs = np.mean(np.abs(coefs), axis=1)
-        order = np.argsort(-mean_abs)[:JOINT_TOPK_BARS]
-        for ax_idx, ax in enumerate(AXES):
-            ax_coefs = coefs[order, ax_idx]
-            ax_names = [feat_names[k] for k in order]
-            fig.add_trace(
-                go.Bar(
-                    x=ax_names, y=ax_coefs,
-                    name=f"{ax} coefs — {scenario['label']}",
-                    legendgroup=f"j_bar_{s_idx}_{ax}",
-                    marker=dict(color=colors[ax]),
-                    visible=(s_idx == 0),
-                    hovertemplate=f"{ax} %{{x}}: %{{y:.4f}}<extra></extra>",
-                ),
-                row=3, col=1,
-            )
-            cursor += 1
-
-        payload["_scenario_trace_spans"].append((span_start, cursor))
-
-    n_total = cursor
-    visibility_lists = []
-    for s_idx, _ in enumerate(scenarios):
-        vis = [True] * 3 + [False] * (n_total - 3)  # measured always on
-        start, end = payload["_scenario_trace_spans"][s_idx]
-        for k in range(start, end):
-            vis[k] = True
-        visibility_lists.append(vis)
-    payload["_visibility_lists"] = visibility_lists
-
-    # Metrics + dominant text in row 4
-    metrics_text = _joint_metrics_html(payload)
-    fig.add_annotation(
-        text=metrics_text, xref="paper", yref="paper",
-        x=0.0, y=0.02, xanchor="left", yanchor="bottom",
-        showarrow=False, align="left",
-        font=dict(family="monospace", size=11),
-        bgcolor="rgba(255,255,255,0.95)", bordercolor="#444", borderwidth=1,
-    )
-
-    fig.update_layout(
-        template="plotly_white",
-        height=1200, hovermode="x unified",
-        legend=dict(orientation="h", y=1.02, x=0.0),
-        margin=dict(t=80, b=40, l=60, r=20),
-        updatemenus=[_scenario_updatemenu(payload, kind="joint")],
-    )
-    fig.update_yaxes(title_text="dx/dt", row=1, col=1)
-    fig.update_yaxes(title_text="dx/dt", row=2, col=1)
-    fig.update_yaxes(title_text="coef", row=3, col=1)
-    fig.update_xaxes(title_text="time (s)", row=2, col=1)
-    fig.update_xaxes(title_text="time (s)", row=3, col=1)
-    fig.update_xaxes(visible=False, row=4, col=1)
-    fig.update_yaxes(visible=False, row=4, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=True), row=2, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=False), row=1, col=1)
-    fig.update_xaxes(rangeslider=dict(visible=False), row=3, col=1)
-    return fig
-
-
-# ---------------------------------------------------------------------------
-# Scenario updatemenu
-# ---------------------------------------------------------------------------
-
-def _scenario_updatemenu(payload: dict, *, kind: str) -> dict:
-    """Build the buttons menu that toggles which scenario is visible."""
-    scenarios = payload["scenarios"]
-    visibility_lists = payload.get("_visibility_lists", [])
-    buttons = []
-    for s_idx, scenario in enumerate(scenarios):
-        if s_idx < len(visibility_lists):
-            vis = visibility_lists[s_idx]
-        else:
-            # Should not happen if construction is consistent, but fall back
-            vis = [True]
-        buttons.append({
-            "label": scenario["label"],
-            "method": "restyle",
-            "args": [{"visible": vis}],
-        })
-    return {
-        "buttons": buttons,
-        "direction": "down",
-        "showactive": True,
-        "x": 1.15, "xanchor": "left",
-        "y": 1.0, "yanchor": "top",
-    }
-
-
-# ---------------------------------------------------------------------------
-# Metrics text
-# ---------------------------------------------------------------------------
-
-def _axis_metrics_html(payload: dict) -> str:
-    """Per-axis metrics for the active scenario, as HTML for an annotation."""
-    s = payload["scenarios"][payload["active_idx"]]["result"]
-    m = s["metrics"]
-    lines = [
-        f"<b>{s.get('label', payload['axis'])} — {m['library']}</b>",
-        f"active terms: {m['n_active_terms']}/{m['n_total_terms']}",
-        f"R²: train={m['r2_train']:.3f} · test={m['r2_test']:.3f}",
-        f"MSE: train={m['mse_train']:.4f} · test={m['mse_test']:.4f}",
-        f"RMSE: train={m['rmse_train']:.4f} · test={m['rmse_test']:.4f}",
-        f"MAE: train={m['mae_train']:.4f} · test={m['mae_test']:.4f}",
-        f"NRMSE: train={m['nrmse_train']:.4f} · test={m['nrmse_test']:.4f}",
-        "n_scenarios=" + str(len(payload["scenarios"])),
-    ]
-    return "<br>".join(lines)
-
-
-def _joint_metrics_html(payload: dict) -> str:
-    """Joint metrics for the active scenario."""
-    res = payload["scenarios"][payload["active_idx"]]["result"]
-    feat_names = res["feature_names"]
-    coefs = res["coefs"]
-    mean_abs = np.mean(np.abs(coefs), axis=1)
-    order = np.argsort(-mean_abs)
-    dominant_lines = ["<b>Dominant features (mean |coef|):</b>"]
-    for k in order[:DOMINANT_K + 2]:
-        if mean_abs[k] == 0.0:
-            continue
-        row = ", ".join(f"{ax}={coefs[k, j]:+.3f}" for j, ax in enumerate(AXES))
-        dominant_lines.append(
-            f"  • {feat_names[k]} (mean|coef|={mean_abs[k]:.3f}; {row})"
-        )
-    metrics_lines = ["<b>Per-axis metrics (active scenario):</b>"]
-    for ax in AXES:
-        m = res["metrics_per_axis"][ax]
-        metrics_lines.append(
-            f"  • {ax}: R²={m['r2_train']:.3f}/{m['r2_test']:.3f} · "
-            f"RMSE={m['rmse_train']:.3f}/{m['rmse_test']:.3f} · "
-            f"MAE={m['mae_train']:.3f}/{m['mae_test']:.3f} · "
-            f"n_active={m['n_active_terms']}/{m['n_total_terms']}"
-        )
-    return "<br>".join(dominant_lines + [""] + metrics_lines)
-
-
-# ---------------------------------------------------------------------------
-# Tab wrapping
-# ---------------------------------------------------------------------------
-
-def _wrap_tabs(
-    tab_pairs: list[tuple[str, go.Figure]], *, title: str,
-) -> go.Figure:
-    """Combine multiple Plotly figures into a tabbed parent figure.
-
-    Plotly doesn't support cross-figure tabs in a single HTML page, so
-    we use the standard workaround: one parent Figure containing every
-    trace from every tab, with visibility toggled by a buttons
-    updatemenu that acts as the tab bar.
-    """
-    if not tab_pairs:
-        return go.Figure()
-    parent = tab_pairs[0][1]
-    tab_sizes: list[int] = []
-    for i, (_, fig) in enumerate(tab_pairs):
-        if i > 0:
-            for trace in fig.data:
-                trace.visible = False
-                parent.add_trace(trace)
-        tab_sizes.append(len(fig.data))
-
-    tab_buttons = []
-    cursor = 0
-    for i, (label, _) in enumerate(tab_pairs):
-        n = tab_sizes[i]
-        vis = [False] * sum(tab_sizes)
-        for j in range(cursor, cursor + n):
-            vis[j] = True
-        cursor += n
-        tab_buttons.append({
-            "label": label,
-            "method": "restyle",
-            "args": [{"visible": vis}],
-        })
-    parent.update_layout(
-        template="plotly_white",
-        title=title,
-        height=1200,
-        margin=dict(t=120, b=120, l=60, r=20),
-        updatemenus=[
-            {
-                "buttons": tab_buttons,
-                "direction": "right",
-                "showactive": True,
-                "x": 0.0, "xanchor": "left",
-                "y": 1.10, "yanchor": "top",
-            }
-        ],
-    )
-    return parent
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _downsample_uniform(t: np.ndarray, y: np.ndarray, n_target: int) -> tuple[np.ndarray, np.ndarray]:
+def _downsample_uniform(t: np.ndarray, y: np.ndarray, n_target: int) -> tuple:
     n = len(t)
     if n <= n_target or n_target < 2:
         return t, y
-    idx = np.linspace(0, n - 1, n_target).astype(int)
-    idx = np.unique(idx)
+    idx = np.unique(np.linspace(0, n - 1, n_target).astype(int))
     return t[idx], y[idx]
 
 
 def _downsample_triplet(
     t: np.ndarray, x: np.ndarray, u: np.ndarray, n_target: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple:
     t_ds, x_ds = _downsample_uniform(t, x, n_target)
     _, u_ds = _downsample_uniform(t, u, n_target)
     return t_ds, x_ds, u_ds
-
-
-def _build_title(page_title: str, datasets: dict[str, FlightDataset], n_samples: int) -> str:
-    if "roll" in datasets:
-        ds = datasets["roll"]
-        return f"{page_title} · [{ds.t[0]:.2f}s .. {ds.t[-1]:.2f}s] · n={n_samples}"
-    return f"{page_title} · n={n_samples}"
