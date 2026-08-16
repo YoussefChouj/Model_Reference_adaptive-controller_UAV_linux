@@ -14,10 +14,19 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Iterator
 
 from elftools.elf.elffile import ELFFile
+
+# PT_LOAD flag constants (from elf.h / pyelftools)
+PF_X = 0x1
+PF_W = 0x2
+PF_R = 0x4
+
+# DWARF constant
+DW_TAG_volatile_type = "DW_TAG_volatile_type"
 
 # DWARF DW_ATE_* base-type encodings -> struct format char, keyed by (encoding, size)
 _ENCODING = {
@@ -49,6 +58,16 @@ class Symbol:
         return struct.unpack("<" + self.fmt, raw[: struct.calcsize(self.fmt)])[0]
 
 
+@dataclass(frozen=True)
+class WritableField:
+    """A RAM-resident member that can be written (subject to caller policy)."""
+    name: str          # dotted path, e.g. "mrac_state.pitch.What[0]"
+    address: int       # absolute RAM address
+    c_type: str        # C type as string, e.g. "float"
+    size_bytes: int    # sizeof, e.g. 4
+    parent: str        # enclosing struct, e.g. "mrac_state.pitch"
+
+
 class _Type:
     """Minimal resolved-type view: total size, and how to interpret it."""
     __slots__ = ("die", "size", "fmt", "kind")
@@ -63,15 +82,46 @@ class _Type:
 class SymbolResolver:
     """Resolves dotted/indexed variable paths against a firmware ELF's DWARF."""
 
-    def __init__(self, elf_path: str | Path):
-        self.elf_path = Path(elf_path)
-        self._f = open(self.elf_path, "rb")
-        elf = ELFFile(self._f)
-        if not elf.has_dwarf_info():
+    def __init__(self, elf_path: str | Path | BytesIO):
+        self._from_stream = False
+        if isinstance(elf_path, BytesIO):
+            self._f = elf_path
+            self.elf_path = Path("<BytesIO>")
+            self._from_stream = True
+        else:
+            self.elf_path = Path(elf_path)
+            self._f = open(self.elf_path, "rb")
+        self._elf = ELFFile(self._f)
+        if not self._elf.has_dwarf_info():
             raise ValueError(f"{elf_path} has no DWARF debug info")
-        self._dwarf = elf.get_dwarf_info()
+        self._dwarf = self._elf.get_dwarf_info()
         self._var_index: dict[str, object] = {}   # name -> variable DIE
         self._build_var_index()
+
+        # Compute writable RAM bounds from PT_LOAD segments (p_flags & PF_W).
+        # Use p_vaddr (runtime address) not p_paddr (load address); for ARM
+        # bare-metal the two differ when the .data section is loaded from
+        # flash and copied into RAM at startup.
+        self._ram_lo = None
+        self._ram_hi = None
+        for seg in self._elf.iter_segments():
+            if seg.header.p_type == "PT_LOAD" and (seg.header.p_flags & PF_W):
+                lo = seg.header.p_vaddr
+                hi = lo + seg.header.p_memsz
+                if self._ram_lo is None or lo < self._ram_lo:
+                    self._ram_lo = lo
+                if self._ram_hi is None or hi > self._ram_hi:
+                    self._ram_hi = hi
+
+        # Cache: base_name -> list[WritableField]
+        self._writable_cache: dict[str | None, list[WritableField]] = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+        return False
 
     # ---- public API -----------------------------------------------------
 
@@ -112,6 +162,135 @@ class SymbolResolver:
             n = _array_count(typ.die)
             return [f"[{i}]" for i in range(n)] if n is not None else []
         return []
+
+    def writable_members(self, base_name: str) -> list[WritableField]:
+        """Returns every scalar or array-element member of `base_name` whose
+        DWARF location describes a RAM address (DW_AT_location is DW_OP_addr).
+
+        - Members with ``const`` qualifier → EXCLUDED.
+        - Members in .text or with DW_OP_reg location → EXCLUDED.
+        - Members with ``volatile`` → EXPLICITLY INCLUDED (caller decides policy).
+        - If ``base_name`` is "" (empty string), walks ALL top-level globals.
+
+        Results are cached per instance.
+        """
+        cache_key: str | None = base_name if base_name else None
+        if cache_key in self._writable_cache:
+            return self._writable_cache[cache_key]
+
+        results: list[WritableField] = []
+        if base_name:
+            base, _ = _parse_path(base_name)
+            die = self._var_index.get(base)
+            if die is None:
+                self._writable_cache[cache_key] = []
+                return []
+            var_typ = self._resolve_type(die.get_DIE_from_attribute("DW_AT_type"))
+            var_addr = _var_address(die)
+            results = self._collect_writable(var_addr, var_typ, base_name, base)
+        else:
+            for name, die in self._var_index.items():
+                if self._is_const(die):
+                    continue
+                if not _is_addr_location(die.attributes["DW_AT_location"].value):
+                    continue
+                addr = _var_address(die)
+                if not self._in_ram(addr):
+                    continue
+                var_typ = self._resolve_type(die.get_DIE_from_attribute("DW_AT_type"))
+                if var_typ.kind == "scalar":
+                    results.append(WritableField(
+                        name=name,
+                        address=addr,
+                        c_type=_c_type_name(die),
+                        size_bytes=var_typ.size,
+                        parent="",
+                    ))
+                elif var_typ.kind in ("struct", "array"):
+                    results.extend(
+                        self._collect_writable(addr, var_typ, name, name)
+                    )
+
+        results.sort(key=lambda w: w.address)
+        self._writable_cache[cache_key] = results
+        return results
+
+    def _collect_writable(self, addr: int, typ: _Type, path: str, parent: str
+                          ) -> list[WritableField]:
+        """Recursively collect writable fields under addr/typ, building dotted paths."""
+        out: list[WritableField] = []
+        if typ.kind == "scalar":
+            out.append(WritableField(
+                name=path,
+                address=addr,
+                c_type=typ.die.attributes["DW_AT_name"].value.decode()
+                       if typ.die and "DW_AT_name" in typ.die.attributes
+                       else _c_type_fallback(typ),
+                size_bytes=typ.size,
+                parent=parent,
+            ))
+        elif typ.kind == "struct":
+            for m in typ.die.iter_children():
+                if m.tag != "DW_TAG_member":
+                    continue
+                mname = m.attributes.get("DW_AT_name")
+                if not mname:
+                    continue
+                mname_str = mname.value.decode()
+                moff = m.attributes.get("DW_AT_data_member_location")
+                off = _member_offset(moff.value) if moff else 0
+                mtyp = self._resolve_type(m.get_DIE_from_attribute("DW_AT_type"))
+                if mtyp.kind == "scalar":
+                    if not self._in_ram(addr + off):
+                        continue
+                    out.append(WritableField(
+                        name=f"{path}.{mname_str}",
+                        address=addr + off,
+                        c_type=mtyp.die.attributes["DW_AT_name"].value.decode()
+                               if mtyp.die and "DW_AT_name" in mtyp.die.attributes
+                               else _c_type_fallback(mtyp),
+                        size_bytes=mtyp.size,
+                        parent=path,
+                    ))
+                else:
+                    out.extend(
+                        self._collect_writable(addr + off, mtyp, f"{path}.{mname_str}", path)
+                    )
+        elif typ.kind == "array":
+            elem = self._resolve_type(typ.die.get_DIE_from_attribute("DW_AT_type"))
+            n = _array_count(typ.die)
+            if n is not None:
+                for i in range(n):
+                    out.extend(
+                        self._collect_writable(addr + i * elem.size, elem,
+                                              f"{path}[{i}]", path)
+                    )
+        return out
+
+    def _in_ram(self, addr: int) -> bool:
+        """True when addr falls within any writable PT_LOAD segment."""
+        return (self._ram_lo is not None
+                and self._ram_hi is not None
+                and self._ram_lo <= addr < self._ram_hi)
+
+    def _is_const(self, die) -> bool:
+        """True when the variable or its type chain has a const qualifier."""
+        # Check the variable's type chain. get_DIE_from_attribute raises KeyError
+        # when the DIE has no DW_AT_type (e.g. implicit-sized typedefs or
+        # void-typed parameters); fall back to a chain walk that tolerates
+        # missing attributes.
+        t_attr = die.attributes.get("DW_AT_type")
+        if t_attr is None:
+            return False
+        t = die.get_DIE_from_attribute("DW_AT_type")
+        while t is not None:
+            if t.tag == "DW_TAG_const_type":
+                return True
+            t_attr = t.attributes.get("DW_AT_type")
+            if t_attr is None:
+                return False
+            t = t.get_DIE_from_attribute("DW_AT_type")
+        return False
 
     def close(self):
         self._f.close()
@@ -283,3 +462,57 @@ def _array_size(array_die, resolver: SymbolResolver) -> int:
                 if isinstance(ub, int):
                     total *= ub + 1
     return total
+
+
+def _c_type_name(die) -> str:
+    """Return the C type name for a leaf type DIE.
+
+    Follows typedef chain; returns the name of the underlying base type.
+    """
+    while die is not None and die.tag in (
+        "DW_TAG_typedef", "DW_TAG_volatile_type",
+        "DW_TAG_const_type", "DW_TAG_restrict_type",
+    ):
+        die = die.get_DIE_from_attribute("DW_AT_type")
+    if die is None:
+        return "?"
+    name_at = die.attributes.get("DW_AT_name")
+    if name_at:
+        return name_at.value.decode()
+    # Fallback for anonymous base types.
+    tag = die.tag
+    if tag == "DW_TAG_base_type":
+        enc = die.attributes.get("DW_AT_encoding")
+        sz = die.attributes.get("DW_AT_byte_size")
+        if enc and sz:
+            enc_v, sz_v = enc.value, sz.value
+            if _ENCODING.get((enc_v, sz_v)) == "f":
+                return "float"
+            if _ENCODING.get((enc_v, sz_v)) == "d":
+                return "double"
+            if enc_v == 0x05:
+                return f"int{sz_v*8}_t"
+            if enc_v == 0x07:
+                return f"uint{sz_v*8}_t"
+            if enc_v == 0x06:
+                return "signed char"
+            if enc_v == 0x08:
+                return "unsigned char"
+    return "?"
+
+
+def _c_type_fallback(typ: _Type) -> str:
+    """Return a C type name from a resolved _Type, without re-walking typedefs."""
+    if typ.fmt == "f":
+        return "float"
+    if typ.fmt == "d":
+        return "double"
+    if typ.fmt in ("b", "h", "i", "q"):
+        sz = typ.size
+        return f"int{sz * 8}_t"
+    if typ.fmt in ("B", "H", "I", "Q"):
+        sz = typ.size
+        return f"uint{sz * 8}_t"
+    if typ.fmt == "?":
+        return "bool"
+    return "?"
