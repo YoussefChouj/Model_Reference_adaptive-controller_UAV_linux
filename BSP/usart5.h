@@ -3,7 +3,6 @@
 
 #include "stm32f4xx.h"
 #include "main.h"
-#include "param.h"
 
 /*����5ͨ�Ż��峤��*/
 #define UART5_RX_STREAM         DMA1_Stream0
@@ -11,15 +10,6 @@
 #define USART5_RXDMA_LEN           256
 #define USART5_RXMB_LEN            256
 #define USART5_SUBSCRIBE_RX_LEN    256
-
-/* New MAVLink-shaped param protocol (agent-05). Wire format:
- *   [0xCC] [0xDD] [CMD] [LEN] [payload] [CRC8]
- *   CMD 0x21 PARAM_SET:  LEN=36, payload=[name(32B, NUL-padded)] [value(4B LE float)]
- *   CMD 0x22 PARAM_GET:  LEN=32, payload=[name(32B, NUL-padded)]
- *   Reply: same CMD, same LEN, payload=[name(32B)] [value(4B LE)] [status(1B)]
- *   CRC8 covers everything before the CRC byte (indices 0..LEN+3). */
-#define CMD_PARAM_SET  0x21U
-#define CMD_PARAM_GET  0x22U
 
 void UART5_Configuration(void);
 void Handle_UART5_GroundStation_Command(void);

@@ -1,6 +1,5 @@
 #include "usart5.h"
 #include "subscribe.h"   /* SUBSCRIBE_CMD / SUBSCRIBE_STREAM_CMD payload shapes */
-#include "param.h"      /* Param_Set / Param_Get (agent-05) */
 
 /**
  * @module  usart5.c
@@ -131,12 +130,6 @@ extern volatile uint8_t gs_cmd_head;
 extern volatile uint8_t gs_cmd_tail;
 extern volatile uint32_t gs_cmd_drop_count;
 
-/* USART3 TX functions — called from the param handler in ParseGsCommandFrames.
- * Declared extern here so usart5.c can send a param reply on the same UART
- * the request arrived on (the ISR in TASK/stm32f4xx_it.c owns the call). */
-extern uint8_t Usart3_Stream_TxSend(const uint8_t* buf, uint16_t len);
-extern uint8_t Usart3_Stream_Busy(void);
-
 /* Second DMA1_Stream7 turn for the 0x07 / 0x7F reply. Caller (API/subscribe.c
  * via Send_Task) is responsible for ensuring the live telemetry DMA has
  * completed; the existing pattern in Send_Groundstation_Telemetry_UART4 is
@@ -262,102 +255,9 @@ static void ParseGsCommandFrames(const uint8_t* mailbox, uint16_t total,
 		else if (mailbox[offset] == 0xCC && mailbox[offset + 1U] == 0xDD)
 		{
 			uint8_t cmd_id = mailbox[offset + 2U];
+			uint8_t index  = mailbox[offset + 3U];
 
-			/* CMD 0x21 PARAM_SET — MAVLink-shaped, variable-length.
-			 * Wire: [0xCC][0xDD][0x21][LEN=36][name(32B, NUL-pad)][value(4B LE)][CRC8]
-			 * Reply: same header, payload=[name(32B)][value(4B)][status(1B)].
-			 * Reply sent on the same UART the request arrived on.
-			 * Both 0x21 and 0x22 reuse the same frame layout — only the CMD byte
-			 * differs, so both handlers share one static reply buffer and CRC path. */
-			if (cmd_id == CMD_PARAM_SET || cmd_id == CMD_PARAM_GET)
-			{
-				/* LEN is at mailbox[offset + 3]; expected values:
-				 *   0x21 (SET): 36 = 32 (name) + 4 (value)
-				 *   0x22 (GET): 32 = 32 (name) */
-				uint8_t expected_len = (cmd_id == CMD_PARAM_SET) ? (PARAM_NAME_LEN + 4U) : PARAM_NAME_LEN;
-				uint8_t frame_len = (uint8_t)(4U + expected_len + 1U); /* 4 header + payload + CRC */
-				uint8_t len = mailbox[offset + 3U];
-
-				if (len == expected_len && (uint16_t)(offset + frame_len) <= total)
-				{
-					uint8_t calc_crc = 0U;
-					uint16_t k;
-					for (k = 0U; k < frame_len - 1U; k++) {
-						calc_crc ^= mailbox[offset + k];
-					}
-					if (calc_crc == mailbox[offset + (uint16_t)(frame_len - 1U)])
-					{
-					float param_value = 0.0f;
-					float reply_value = 0.0f;
-					uint8_t status = PARAM_STATUS_NOT_FOUND;
-					static uint8_t s_reply_buf[64];
-					/* Extract name — fixed 32-byte NUL-padded field. */
-						char name_buf[PARAM_NAME_LEN];
-						uint8_t n;
-						for (n = 0U; n < PARAM_NAME_LEN; n++) {
-							name_buf[n] = (char)mailbox[offset + 4U + n];
-						}
-
-						if (cmd_id == CMD_PARAM_SET)
-						{
-							/* value: bytes 4+PARAM_NAME_LEN .. 4+PARAM_NAME_LEN+3, LE float */
-							union { uint8_t b[4]; float f; } vu;
-							vu.b[0] = mailbox[offset + 4U + PARAM_NAME_LEN + 0U];
-							vu.b[1] = mailbox[offset + 4U + PARAM_NAME_LEN + 1U];
-							vu.b[2] = mailbox[offset + 4U + PARAM_NAME_LEN + 2U];
-							vu.b[3] = mailbox[offset + 4U + PARAM_NAME_LEN + 3U];
-							param_value = vu.f;
-							status = Param_Set(name_buf, param_value);
-							if (status == PARAM_STATUS_OK) {
-								reply_value = param_value; /* echo back the written value */
-							}
-						}
-						else
-						{
-							status = Param_Get(name_buf, &reply_value);
-						}
-
-						/* Build reply frame in a static buffer. Frame layout mirrors request:
-						 * [0xCC][0xDD][CMD][LEN][name(32)][value(4)][status(1)][CRC8] */
-					{
-						uint8_t reply_len = (uint8_t)(PARAM_NAME_LEN + 4U + 1U); /* 37 */
-							uint8_t ri;
-							uint8_t crc2 = 0U;
-
-							s_reply_buf[0] = 0xCC;
-							s_reply_buf[1] = 0xDD;
-							s_reply_buf[2] = cmd_id;
-							s_reply_buf[3] = reply_len;
-							for (ri = 0U; ri < PARAM_NAME_LEN; ri++) {
-								s_reply_buf[4U + ri] = (uint8_t)name_buf[ri];
-							}
-							{
-								union { uint8_t b[4]; float f; } rv;
-								rv.f = reply_value;
-								s_reply_buf[4U + PARAM_NAME_LEN + 0U] = rv.b[0];
-								s_reply_buf[4U + PARAM_NAME_LEN + 1U] = rv.b[1];
-								s_reply_buf[4U + PARAM_NAME_LEN + 2U] = rv.b[2];
-								s_reply_buf[4U + PARAM_NAME_LEN + 3U] = rv.b[3];
-							}
-							s_reply_buf[4U + PARAM_NAME_LEN + 4U] = status;
-							/* CRC8 covers header + payload */
-							for (ri = 0U; ri < (uint8_t)(4U + reply_len); ri++) {
-								crc2 ^= s_reply_buf[ri];
-							}
-							s_reply_buf[4U + reply_len] = crc2;
-							(void)Usart3_Stream_TxSend(s_reply_buf, (uint16_t)(5U + reply_len));
-						}
-					}
-				}
-				offset += frame_len;
-			}
-			/* CMD 0x22 falls through here only if it was not a param GET (which is handled above);
-			 * the generic 9-byte handler below intentionally ignores 0x21/0x22 since they are
-			 * variable-length and have their own parsing above. */
-			else if (cmd_id != CMD_PARAM_SET && cmd_id != CMD_PARAM_GET)
-			{
-				uint8_t index  = mailbox[offset + 3U];
-				union {
+			union {
 				float f;
 				uint8_t b[4];
 			} val;
@@ -392,7 +292,6 @@ static void ParseGsCommandFrames(const uint8_t* mailbox, uint16_t total,
 			offset += 1U;
 		}
 	}
-}
 }
 
 /* UART5 ingress wrapper. Source of truth for the 0xCC 0xDE subscribe path --

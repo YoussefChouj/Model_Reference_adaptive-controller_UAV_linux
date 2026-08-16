@@ -1,7 +1,5 @@
 #include "Ano_OF.h"
 
-static void AnoOF_DataAnl(uint8_t *data, uint8_t len);
-
 _ano_of_st ano_of;
 static uint8_t _datatemp[50];
 static float check_time_ms[3];
