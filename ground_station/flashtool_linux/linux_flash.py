@@ -16,13 +16,18 @@ from typing import Optional
 from pyocd.core.helpers import ConnectHelper
 
 
-TARGET = "stm32f407zg"      # matches CMSIS DFP part number
+TARGET = "stm32f407zgtx"  # Chip is STM32F407ZG (ZGTx package), per uVision project
 # HID CMSIS-DAP bridges (e.g. ATK-HS-V3 wireless) reorder/defer responses under load.
 # Force single in-flight packets and disable deferred transfers — see pyocd issue #1257.
 # Without these, DAP_TRANSFER_BLOCK returns "response is for command 05" mid-flash,
 # and the read path replays a cached buffer.
+#
+# The cortex_m fallback target is unusable for flash on this hardware — its
+# flash algorithm returns success without committing bytes to flash. The
+# STM32F407xx DFP (pyocd pack install stm32f407) provides a real flash algo
+# that actually writes. See DEC-pending for the host-side install steps.
 _PROBE_CONFIG = {
-    "target_override": "cortex_m",
+    "target_override": TARGET,
     "connect_mode": "attach",
     "resume_on_disconnect": False,
     "cmsis_dap.deferred_transfers": 0,
@@ -124,10 +129,16 @@ def flash(hex_path: Path, frequency_hz: int = 5_000_000) -> FlashResult:
             target = session.target
             board = session.board
 
-            # Flash erase + program
+            # Flash erase + program.
+            #
+            # The wireless bridge HID endpoint has a flaky write pipeline: erase
+            # either succeeds outright or silently no-ops (with pyocd reporting
+            # success). Pre-erasing explicitly here means FileProgrammer sees
+            # 0xFFFFs and does no sector-level erase decisions of its own; that
+            # reduces the surface area of bridge write failures.
             target.mass_erase()
             from pyocd.flash.file_programmer import FileProgrammer
-            fp = FileProgrammer(session)
+            fp = FileProgrammer(session, chip_erase=False, smart_flash=True)
             fp.program(str(hex_path), file_format="hex")
             # Total bytes programmed is exposed via the progress counter after commit.
             bytes_prog = int(fp.progress.total_byte_count)

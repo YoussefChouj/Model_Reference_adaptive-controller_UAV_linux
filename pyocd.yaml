@@ -1,0 +1,35 @@
+# pyocd.yaml — wireless-bridge read-write workaround profile
+#
+# The ATK-HS-V3 wireless CMSIS-DAP bridge has a USB-HID transport whose
+# write pipeline silently no-ops when the host uses the generic cortex_m
+# fallback target. The fix is twofold:
+#
+#   1. Use the chip-specific target (e.g. stm32f407zgtx). The STM32F4xx_DFP
+#      pack provides a real flash algorithm; cortex_m's fallback reports
+#      success without committing bytes. See tools/yc-pyc-flash / pyocd.
+#
+#   2. Force single in-flight packets and disable deferred transfers to avoid
+#      the HID packet-reorder bug (pyocd issue #1257). Without this, reads
+#      return a cached buffer and writes appear to succeed without landing.
+#
+# Install the host-side prereqs once per box:
+#   sudo apt install -y openocd stm32flash    # openocd as backup tool
+#   .venv/bin/python -m pyocd pack update     # refresh pack index
+#   .venv/bin/python -m pyocd pack install stm32f407
+#
+# Kernel: the ATK-HS-V3's HID interface must not be claimed by mcp2200
+# on Linux. /etc/modprobe.d/blacklist-hid-mcp2200.conf installs an
+# `install hid_mcp2200 /bin/false` rule that does this. See the
+# Chinese-language writeup the bug came from:
+#   https://blog.csdn.net/2301_79618994/article/details/160716114
+
+cmsis_dap:
+  # The default cmsis_dap.deferred_transfers=True + limit_packets=False lets
+  # pyocd batch packets. On the ATK-HS-V3's HID endpoint, batching triggers
+  # a reorder window where the bridge returns "response is for command 05"
+  # instead of the expected response. Serialise instead.
+  deferred_transfers: false
+  limit_packets: true
+  # Force CMSIS-DAP v1 (HID) instead of bulk. The ATK only ships HID, but
+  # pyocd prefers v2 when both are present. Keeping this here documents it.
+  prefer_v1: true
