@@ -1433,6 +1433,89 @@ class SerialBridge:
         crc = _xor_crc8(header_and_payload[2:])
         return header_and_payload + bytes([crc])
 
+    # ------------------------------------------------------------------
+    # MAVLink-shaped PARAM_SET / PARAM_GET (agent-05)
+    # Wire format: [0xCC][0xDD][CMD][LEN][name(32B,NUL-pad)][value(4B LE)][CRC8]
+    # CMD 0x21=SET, CMD 0x22=GET.
+    # Reply: [0xCC][0xDD][CMD][LEN][name(32B)][value(4B LE)][status(1B)][CRC8]
+    # ------------------------------------------------------------------
+
+    def set_param(self, name: str, value: float, timeout_s: float = 1.0) -> tuple[bool, str]:
+        """Send PARAM_SET and return (success, message)."""
+        import struct as _struct
+
+        name_bytes = name.encode("utf-8")[:32].ljust(32, b"\x00")
+        payload = name_bytes + _struct.pack("<f", float(value))
+        frame = bytes([self.CMD_0, self.CMD_1, 0x21, len(payload)]) + payload
+        crc = _xor_crc8(frame)
+        frame += bytes([crc])
+
+        self._serial.write(frame)
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            n = self._serial.in_waiting
+            if n == 0:
+                time.sleep(0.01)
+                continue
+            raw = self._serial.read(n)
+            idx = raw.find(bytes([self.CMD_0, self.CMD_1]))
+            if idx < 0:
+                continue
+            candidate = raw[idx:]
+            if len(candidate) < 5 + 32:
+                continue
+            reply_name_bytes = candidate[4 : 4 + 32]
+            reply_name = reply_name_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
+            if reply_name != name:
+                continue
+            val_bytes = candidate[4 + 32 : 4 + 32 + 4]
+            reply_value, = _struct.unpack("<f", val_bytes)
+            status = candidate[4 + 32 + 4]
+            if status == 0:
+                return True, f"set {name}={value}"
+            else:
+                return False, f"{name} not in firmware param registry"
+        return False, "timeout waiting for PARAM_SET reply"
+
+    def get_param(self, name: str, timeout_s: float = 1.0) -> tuple[bool, float]:
+        """Send PARAM_GET and return (success, value)."""
+        import struct as _struct
+
+        name_bytes = name.encode("utf-8")[:32].ljust(32, b"\x00")
+        payload = name_bytes
+        frame = bytes([self.CMD_0, self.CMD_1, 0x22, len(payload)]) + payload
+        crc = _xor_crc8(frame)
+        frame += bytes([crc])
+
+        self._serial.write(frame)
+
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            n = self._serial.in_waiting
+            if n == 0:
+                time.sleep(0.01)
+                continue
+            raw = self._serial.read(n)
+            idx = raw.find(bytes([self.CMD_0, self.CMD_1]))
+            if idx < 0:
+                continue
+            candidate = raw[idx:]
+            if len(candidate) < 5 + 32:
+                continue
+            reply_name_bytes = candidate[4 : 4 + 32]
+            reply_name = reply_name_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
+            if reply_name != name:
+                continue
+            val_bytes = candidate[4 + 32 : 4 + 32 + 4]
+            reply_value, = _struct.unpack("<f", val_bytes)
+            status = candidate[4 + 32 + 4]
+            if status == 0:
+                return True, reply_value
+            else:
+                return False, 0.0
+        return False, 0.0
+
 
 def test_com_ports_listen(
     ports: Optional[List[str]] = None,
