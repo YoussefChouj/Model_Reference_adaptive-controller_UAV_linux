@@ -22,7 +22,26 @@ from .registry import Registry
 from .symbols import SymbolResolver, WritableField
 from .transport import LiveTransportError, SwdCmsisDap, Uart5LongRange
 
-_DEFAULT_ELF = Path(__file__).resolve().parents[2] / "OBJ" / "JX_FLY.axf"
+def _default_elf() -> Path:
+    """Default firmware ELF — Linux/CMake build first, then Windows/Keil fallback.
+
+    On Linux-running boxes: `firmware/build/JX_FLY.elf` (CMake output).
+    On Windows-only boxes: `OBJ/JX_FLY.axf` (Keil uVision output).
+    The first existing path wins; if neither exists, callers fail with FileNotFoundError
+    pointing at the candidate list.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates = [
+        repo_root / "firmware" / "build" / "JX_FLY.elf",
+        repo_root / "OBJ" / "JX_FLY.axf",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[0]  # let downstream fail with a clear path
+
+
+_DEFAULT_ELF = _default_elf()
 _DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "config.yaml"
 
 
@@ -397,7 +416,7 @@ def _fmt(v):
 def build_parser():
     p = argparse.ArgumentParser(prog="livewatch", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--elf", default=str(_DEFAULT_ELF), help="firmware ELF (default OBJ/JX_FLY.axf)")
+    p.add_argument("--elf", default=str(_DEFAULT_ELF), help="firmware ELF (auto-detects firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("names", help="list resolvable base symbols")

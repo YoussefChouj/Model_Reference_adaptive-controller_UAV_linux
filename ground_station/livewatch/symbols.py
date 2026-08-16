@@ -2,7 +2,8 @@
 
 Turns a dotted/indexed name like  "s_ekf.x[3]"  or  "mrac_state.roll.What[0]"
 into a concrete (address, C type) by walking the firmware ELF's DWARF info.
-No hardware needed - this is pure static analysis of OBJ/JX_FLY.axf.
+No hardware needed - this is pure static analysis of the active firmware ELF
+(Linux/CMake: firmware/build/JX_FLY.elf; Windows/Keil: OBJ/JX_FLY.axf).
 
 Why DWARF and not the .map: the .map only lists *base* symbols (s_ekf @ 0x...cb4,
 572 B). Field offsets and array-element sizes come from the type info, which only

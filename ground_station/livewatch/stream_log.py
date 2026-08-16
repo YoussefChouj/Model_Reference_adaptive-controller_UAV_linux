@@ -49,6 +49,7 @@ from .stream import (
 )
 from .symbols import SymbolResolver
 from .transport import LiveTransportError, UdpDataPort, pop_frame
+from .cli import _default_elf
 
 _TRANSPORTS = {"usart3": TRANSPORT_USART3, "uart5": TRANSPORT_UART5}
 DEFAULT_FRAMES = Path(__file__).with_name("log_frames.md")
@@ -120,7 +121,9 @@ def columns_for(schema) -> list[str]:
 
 
 def run(control_port, data_port, ranges, divider, transport, seconds, out_path,
-        elf="OBJ/JX_FLY.axf", usart3_baud=921600, quiet=False):
+        elf=None, usart3_baud=921600, quiet=False):
+    if elf is None:
+        elf = str(_default_elf())
     import serial
 
     req = build_stream_request(ranges, divider, transport, usart3_baud)
@@ -275,7 +278,9 @@ def load_frames(path=DEFAULT_FRAMES):
 
 
 def run_groups(control_port, data_port, groups, transport, seconds, out_path,
-               elf="OBJ/JX_FLY.axf", usart3_baud=921600, quiet=False):
+               elf=None, usart3_baud=921600, quiet=False):
+    if elf is None:
+        elf = str(_default_elf())
     """Subscribe several slots at different rates; one CSV per slot.
 
     Separate files because the slots tick at different rates -- interleaving
@@ -406,7 +411,7 @@ def main(argv=None):
                     help="USART3 baud used ONLY for the link-budget check; "
                          "nothing on the wire changes. Mirrors USART3_BAUD in "
                          "BSP/usart3.h")
-    ap.add_argument("--elf", default="OBJ/JX_FLY.axf")
+    ap.add_argument("--elf", default=None, help="firmware ELF (auto-detects firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
     ap.add_argument("--frames", default=None, metavar="FILE",
                     help="Markdown frame table to log when neither --symbol nor "
                          "--group is given (default: %s)" % DEFAULT_FRAMES.name)

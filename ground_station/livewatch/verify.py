@@ -1,8 +1,9 @@
 """Prove the ELF matches the firmware actually running on the target.
 
-Every livewatch read resolves a NAME to an ADDRESS out of OBJ/JX_FLY.axf. If that
-ELF is not the build that is flashed, the addresses are wrong and the tool returns
-plausible-looking garbage rather than an error -- a float is a float whatever it
+Every livewatch read resolves a NAME to an ADDRESS out of the active firmware ELF
+(Linux/CMake: ``firmware/build/JX_FLY.elf``; Windows/Keil: ``OBJ/JX_FLY.axf``). If
+that ELF is not the build that is flashed, the addresses are wrong and the tool
+returns plausible-looking garbage rather than an error -- a float is a float whatever it
 points at. That is the one way a strictly read-only tool can still mislead you, and
 it is not hypothetical: the 2026-07-26 rebuild shifted .bss by 12 bytes and silently
 invalidated two pinned test goldens.

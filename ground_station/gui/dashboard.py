@@ -3356,8 +3356,14 @@ class Dashboard:
         dpg.set_value("inp_livelog_vars", "")
 
     def _livelog_current_elf(self) -> Path:
-        # ELF is one level up from ground_station/ (project root), under OBJ/.
-        # `_DEFAULT_ELF` in cli.py uses the same parents[2]/OBJ/JX_FLY.axf.
+        # ELF candidates: Linux/CMake first, Windows/Keil fallback.
+        # Mirrors `_default_elf()` in livewatch.cli.
+        for candidate in (
+            self.repo_root / "firmware" / "build" / "JX_FLY.elf",
+            self.repo_root.parent / "OBJ" / "JX_FLY.axf",
+        ):
+            if candidate.exists():
+                return candidate
         return self.repo_root.parent / "OBJ" / "JX_FLY.axf"
 
     def _livelog_transport(self):

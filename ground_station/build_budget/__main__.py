@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--livewatch-elf", type=Path, default=None,
-        help="OBJ/JX_FLY.axf — enables live HWM read over the read-only probe.",
+        help="firmware ELF (auto-detects firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf) — enables live HWM read over the read-only probe.",
     )
     parser.add_argument(
         "--stack-threshold-pct", type=float, default=None,

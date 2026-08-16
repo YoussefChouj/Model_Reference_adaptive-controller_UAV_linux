@@ -2,7 +2,8 @@
 
 Tests are split into two categories:
 1. Unit tests — test pure logic (dataclass, helpers, cache, bounds) without any ELF.
-2. Integration tests — require OBJ/JX_FLY.axf (Windows box only), skip gracefully when absent.
+2. Integration tests — require a real firmware ELF (Linux: firmware/build/JX_FLY.elf;
+   Windows: OBJ/JX_FLY.axf). Skip gracefully when absent.
 """
 from __future__ import annotations
 
@@ -86,7 +87,7 @@ class TestCacheLogic:
         """base_name='' should be cached under None key."""
         elf_path = Path(__file__).resolve().parents[2] / "OBJ" / "JX_FLY.axf"
         if not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available on this machine")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             # Two calls with '' should hit the cache
             first = r.writable_members("")
@@ -100,7 +101,15 @@ class TestCacheLogic:
 # ---------------------------------------------------------------------------
 
 def _real_elf_path() -> Path | None:
-    return Path(__file__).resolve().parents[2] / "OBJ" / "JX_FLY.axf"
+    """Return the first existing firmware ELF (Linux/CMake first, then Windows/Keil)."""
+    repo = Path(__file__).resolve().parents[2]
+    for candidate in (
+        repo / "firmware" / "build" / "JX_FLY.elf",
+        repo / "OBJ" / "JX_FLY.axf",
+    ):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 class TestWritableMembersRealELF:
@@ -109,7 +118,7 @@ class TestWritableMembersRealELF:
     def test_mrac_state_writable(self):
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available (Windows-only build artifact)")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             if "mrac_state" not in r.names():
                 pytest.skip("mrac_state not in ELF")
@@ -125,7 +134,7 @@ class TestWritableMembersRealELF:
     def test_all_globals_sorted(self):
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available (Windows-only build artifact)")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             fields = r.writable_members("")
             assert len(fields) > 0
@@ -136,7 +145,7 @@ class TestWritableMembersRealELF:
         """Verify const-qualified globals are excluded from writable_members."""
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             names = {f.name for f in r.writable_members("")}
             # const globals that are known to exist in the firmware:
@@ -150,7 +159,7 @@ class TestWritableMembersRealELF:
         """s_ekf is RAM-resident and should appear in the global writable set."""
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             if "s_ekf" not in r.names():
                 pytest.skip("s_ekf not in ELF")
@@ -164,7 +173,7 @@ class TestWritableMembersRealELF:
         """PT_LOAD writable segments set _ram_lo and _ram_hi."""
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             assert r._ram_lo is not None
             assert r._ram_hi is not None
@@ -200,7 +209,7 @@ class TestWritableMembersUnit:
         """Simulate a const-qualified variable in _is_const()."""
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             # Find a variable and verify _is_const returns False for writable vars
             if not r._var_index:
@@ -212,7 +221,7 @@ class TestWritableMembersUnit:
         """For a real ELF, _ram_lo/_ram_hi should cover SRAM1/SRAM2 range."""
         elf_path = _real_elf_path()
         if elf_path is None or not elf_path.exists():
-            pytest.skip("OBJ/JX_FLY.axf not available")
+            pytest.skip("firmware ELF not available (firmware/build/JX_FLY.elf or OBJ/JX_FLY.axf)")
         with SymbolResolver(elf_path) as r:
             # STM32F4: SRAM1 = 0x20000000..0x20020000, SRAM2 = 0x2007C000..
             # Writable PT_LOAD should cover at least 0x20000000

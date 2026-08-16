@@ -121,6 +121,13 @@ Adapter fails on modern PX4 field-name schemas: hints `["[roll","[pitch","[yaw",
 
 ## Workflow altitude
 
+This repo is **Linux-native**. The Unix workstation is the development, build, and
+bench-attached machine. There is no Windows dependencies that need to be maintained
+for the `/lab-session` rebuild — it uses `arm-none-eabi-gcc` (CMake) to build
+`firmware/build/JX_FLY.elf`. Tooling that defaults to `OBJ/JX_FLY.axf` (Keil
+Windows path) auto-detects the Linux ELF first; the Keil path is preserved for
+compatibility but not used.
+
 Pick the right entry point for the task:
 
 | Command | Use when |

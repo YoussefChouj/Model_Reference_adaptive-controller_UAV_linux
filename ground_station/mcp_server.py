@@ -94,7 +94,7 @@ async def livewatch_read(
     name="livewatch_verify",
     title="livewatch verify",
     description=(
-        "Prove OBJ/JX_FLY.axf matches the firmware running on the target "
+        "Prove the active firmware ELF matches the firmware running on the target "
         "before trusting any livewatch_read. Reads flash over SWD. "
         "Exits 0 on match, 2 on stale ELF. Requires hardware."
     ),

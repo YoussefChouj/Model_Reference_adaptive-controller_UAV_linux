@@ -20,7 +20,8 @@ disarmed drone stays disarmed and motors cannot spin. Safe to run with props on.
 
 ## Usage
 
-Offline (pure DWARF, no hardware — works any time `OBJ/JX_FLY.axf` exists):
+Offline (pure DWARF, no hardware — works any time `firmware/build/JX_FLY.elf` exists
+or, on Windows/Keil, `OBJ/JX_FLY.axf`):
 
 ```
 python -m ground_station.livewatch groups            # curated watch groups
@@ -47,7 +48,7 @@ Names are DWARF paths: base symbol, then `.member` and `[index]` (e.g. `s_ekf.x[
 
 ```python
 from ground_station.livewatch import LiveReader
-with LiveReader("OBJ/JX_FLY.axf") as lr:
+with LiveReader("firmware/build/JX_FLY.elf") as lr:  # or OBJ/JX_FLY.axf on Windows/Keil
     plan = lr.plan(["s_ekf.x[0]", "s_ekf.x[3]", "s_ekf.nis"])
     print(lr.sample(plan))               # {'s_ekf.x[0]': ..., ...}
     for row in lr.stream(["s_ekf.nis"], hz=50, duration=5):
