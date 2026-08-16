@@ -349,6 +349,42 @@ over the existing `0xCC 0xDD` style, so the host side can re-use
 `pymavlink` directly. Document the choice in `agent-05` when the
 spec is written.
 
+## Stale-wiki finding (2026-08-16, post-research)
+
+`agent-04b` ("fix `usart3_send()` defects") was conceived from
+`wiki/concepts/uart-peripheral-map.md`. The wiki is **stale** in two
+specific ways:
+
+1. The wiki says `str_USART[16]` is a *local* whose address is
+   handed to DMA1_Stream3. **The current code
+   (`TASK/send_data.c:489`) makes it `static`.** The dead-stack
+   defect is fixed.
+2. The wiki says a busy-wait throttles `Send_Task` to 60 Hz.
+   **The current code uses a continuous TX ring
+   (`BSP/usart3.c:202-326`, `Usart3_Stream_TxSend`)** with no busy-wait
+   on the producer side. The producer copies bytes into the ring,
+   arms the DMA, returns. The DMA IRQ drains back to back.
+
+The whole TX side was already redesigned for the MicoAir WiFi Link
+swap (2026-08-09, comments in `TASK/send_data.c:484-602` and
+`BSP/usart3.c:14-25, 176-201`).
+
+Also: USART3 is **already a bidirectional 0xCC 0xDD command
+ingress** (`BSP/usart3.c:12-25`, `TASK/stm32f4xx_it.c:115-141`,
+wired 2026-08-09). The dispatch path is `Handle_USART3_GroundStation_Command`
+mirroring the UART5 path.
+
+**Conclusion:** `agent-04b` is **already done** — there is no
+firmware work. The wiki needs a `## Stale` annotation or a
+rewrite. The actual work that remains for agent-05 is **adding
+new CMD codes (0x21 PARAM_SET, 0x22 PARAM_GET) to the existing
+parser**, which is a small spec — not the "fix USART3" spec the
+plan described.
+
+The implementer of agent-05 should verify this finding against the
+actual source and report it in the journal — do not blindly assume
+the wiki is right.
+
 ## Tracking
 
 Each spec above is a single ticket under `.agent_contracts/<TASK_ID>/spec.md`.
