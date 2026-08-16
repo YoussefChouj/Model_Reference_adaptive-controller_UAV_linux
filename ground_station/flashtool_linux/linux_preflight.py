@@ -31,10 +31,30 @@ class LinuxPreflightResult:
 
 
 def toolchain_present() -> LinuxPreflightResult:
-    """Is arm-none-eabi-gcc on PATH?"""
+    """Is arm-none-eabi-gcc on PATH?
+
+    Mirrors the candidate search in ``ground_station.flashtool_linux.linux_build._env``
+    so the preflight and the build agree. ``shutil.which`` only sees ``$PATH``;
+    ``scripts/setup_linux_toolchain.sh`` installs the toolchain under
+    ``~/.local/arm-toolchain/bin`` which is not on PATH by default. Without
+    this, every flash is BLOCKED even after a successful build.
+    """
     path = shutil.which("arm-none-eabi-gcc")
     if path:
         return LinuxPreflightResult(ok=True, failed=[], details={})
+
+    from pathlib import Path
+    home = Path.home()
+    candidates = [
+        home / ".local" / "arm-toolchain" / "bin",                              # setup_linux_toolchain.sh
+        home / "opt" / "arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi" / "bin",  # ARM GNU tarball
+        Path("/opt/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi/bin"),     # system-wide tarball
+        Path("/usr/bin"),                                                       # apt: gcc-arm-none-eabi
+    ]
+    for d in candidates:
+        if (d / "arm-none-eabi-gcc").exists():
+            return LinuxPreflightResult(ok=True, failed=[], details={})
+
     return LinuxPreflightResult(
         ok=False,
         failed=["arm-none-eabi-gcc"],

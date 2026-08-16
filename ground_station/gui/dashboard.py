@@ -559,13 +559,23 @@ class Dashboard:
 
     def _detect_serial_ports(self, fallback: Optional[str] = None) -> Tuple[List[str], Optional[str]]:
         """Return discovered serial ports and optional user-facing error text."""
-        default_port = fallback or "COM3"
+        # Platform-aware default: Windows still uses COMx; Linux ships /dev/tty* devices.
+        if fallback is None:
+            default_port = "COM3" if os.name == "nt" else "/dev/ttyUSB0"
+        else:
+            default_port = fallback
         try:
             from serial.tools import list_ports  # type: ignore
 
             ports = [p.device for p in list_ports.comports()]
-            # Keep deterministic ordering for readability (COM2, COM3, COM10...).
-            ports.sort(key=lambda x: (re.sub(r"\d+", "", x), int(re.findall(r"\d+", x)[0]) if re.findall(r"\d+", x) else 0))
+            # Sort by prefix (alpha) then trailing number so e.g. COM2/COM3/COM10 line up
+            # sensibly. On Linux the same rule ranks /dev/ttyUSB0 < /dev/ttyUSB1.
+            def _sort_key(x: str) -> Tuple[str, int]:
+                digits = re.findall(r"\d+", x)
+                num = int(digits[0]) if digits else 0
+                return (re.sub(r"\d+", "", x), num)
+
+            ports.sort(key=_sort_key)
             if default_port not in ports:
                 ports.insert(0, default_port)
             return ports or [default_port], None
