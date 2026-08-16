@@ -1,55 +1,52 @@
-"""``python -m sim.sindy view <ulog> [<out_html>] [--fit] [--title TITLE] [--downsample N]``
+"""CLI for the SINDy pipeline (legacy).
 
-Subcommand-driven CLI for the SINDy module. Currently only ``view`` is
-implemented.
+The previous ``view`` subcommand rendered a static HTML viewer; that has
+been superseded by the interactive Streamlit dashboard at
+:mod:`sim.dashboard`. Run it with::
+
+    .venv/bin/python -m streamlit run sim/dashboard/app.py
+
+The CLI is kept here so existing scripts that invoke ``python -m sim.sindy``
+do not fail with a confusing ImportError; the command now points the
+operator at the dashboard.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from pathlib import Path
-
-
-def _cmd_view(args: argparse.Namespace) -> int:
-    from sim.sindy.viewer import view_ulog
-
-    out_html = args.out_html
-    if out_html is None:
-        out_html = (
-            Path("sim/sindy/viewer_output")
-            / (Path(args.ulog).stem + ".html")
-        )
-    out_html = Path(out_html)
-    meta = view_ulog(
-        args.ulog,
-        out_html,
-        fit=args.fit,
-        downsamples_to=args.downsample,
-        title=args.title,
-    )
-    print(json.dumps(meta, indent=2, default=str))
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m sim.sindy")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(
+        prog="python -m sim.sindy",
+        description=(
+            "Legacy CLI entrypoint. The interactive dashboard is now the "
+            "recommended way to explore a log file:\n"
+            "    .venv/bin/python -m streamlit run sim/dashboard/app.py"
+        ),
+    )
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("view", help="(removed — use the Streamlit dashboard)").set_defaults(
+        func=lambda _a: _print_redirect(),
+    )
 
-    p_view = sub.add_parser("view", help="Render a Plotly HTML viewer for a PX4 ulog")
-    p_view.add_argument("ulog", help="Path to a PX4 .ulog file")
-    p_view.add_argument("out_html", nargs="?", default=None,
-                        help="Destination HTML path (default: sim/sindy/viewer_output/<basename>.html)")
-    p_view.add_argument("--fit", action="store_true",
-                        help="Also run preprocess_px4 + linear SINDy on roll axis")
-    p_view.add_argument("--title", default=None,
-                        help="Optional HTML title override")
-    p_view.add_argument("--downsample", type=int, default=5000,
-                        help="Max samples per trace after downsample (default 5000)")
-    p_view.set_defaults(func=_cmd_view)
-
+    if argv is not None and len(argv) == 0:
+        argv = ["--help"]
     args = parser.parse_args(argv)
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 0
     return int(args.func(args))
+
+
+def _print_redirect() -> int:
+    print(
+        "The static `view` HTML renderer has been replaced by the\n"
+        "interactive Streamlit dashboard. Run:\n"
+        "    .venv/bin/python -m streamlit run sim/dashboard/app.py\n",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":

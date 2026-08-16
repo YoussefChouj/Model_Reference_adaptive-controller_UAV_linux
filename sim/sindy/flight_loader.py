@@ -28,32 +28,49 @@ _SUPPORTED_AXES = ("roll", "pitch", "yaw", "z")
 
 # Mapping from canonical field name → list of regexes that match column names.
 # Tested in order; first match wins.
+#
+# Column name styles supported:
+#   - DWARF path  : mrac_state.roll.e   (stream_log default)
+#   - prefixed    : roll.e, roll_e       (legacy with axis prefix)
+#   - flat        : e, xm, u_nom        (sim/runs CSV — no axis prefix)
 _FIELD_PATTERNS: dict[str, list[re.Pattern]] = {
     "e": [
         re.compile(r"^mrac_state\.(\w+)\.e$"),
         re.compile(r"^(\w+)\.e$"),
         re.compile(r"^(\w+)_e$"),
+        re.compile(r"^e$"),                      # flat — sim CSV
     ],
     "u_nom": [
         re.compile(r"^mrac_state\.(\w+)\.u_nom$"),
         re.compile(r"^(\w+)\.u_nom$"),
         re.compile(r"^(\w+)_u_nom$"),
+        re.compile(r"^u_nom$"),                   # flat — sim CSV
     ],
     "u_ad": [
         re.compile(r"^mrac_state\.(\w+)\.u_ad$"),
         re.compile(r"^(\w+)\.u_ad$"),
         re.compile(r"^(\w+)_u_ad$"),
+        re.compile(r"^u_ad$"),                    # flat — sim CSV
     ],
     "xm": [
         re.compile(r"^mrac_state\.(\w+)\.xm$"),
         re.compile(r"^(\w+)\.xm$"),
         re.compile(r"^(\w+)_xm$"),
+        re.compile(r"^xm$"),                       # flat — sim CSV
     ],
     "theta": [
         re.compile(r"^mrac_state\.(\w+)\.Theta\[(\d+)\]$"),
         re.compile(r"^mrac_state\.(\w+)\.theta_(\d+)$"),
         re.compile(r"^(\w+)\.theta_(\d+)$"),
         re.compile(r"^(\w+)_theta_(\d+)$"),
+        re.compile(r"^theta_(\d+)$"),             # flat — sim CSV: theta_0..theta_5
+    ],
+    # Plant state x (bare, no axis prefix — used when xm and e are present)
+    "x": [
+        re.compile(r"^mrac_state\.(\w+)\.x$"),
+        re.compile(r"^(\w+)\.x$"),
+        re.compile(r"^(\w+)_x$"),
+        re.compile(r"^x$"),                        # flat — sim CSV
     ],
 }
 
@@ -187,31 +204,56 @@ def load_stream_log_csv(
         col_to_axis: dict[str, str] = {}    # col_name → axis
         theta_cols: dict[str, dict[int, str]] = {}  # axis → {index: col_name}
 
+        # Flat-column fields: no axis prefix, no capture group.
+        # Determined by simple set membership instead of regex.
+        _FLAT_FIELDS = {"e", "xm", "u_nom", "u_ad", "x"}
+
         for col in cols:
             if col in ("t_src_ms", "t_host_s", "seq"):
                 continue
 
             matched_axis: Optional[str] = None
             matched_field: Optional[str] = None
+            m: Optional[re.Match] = None
 
-            for field_name, patterns in _FIELD_PATTERNS.items():
-                for pat in patterns:
-                    m = pat.match(col)
-                    if m:
-                        matched_axis = m.group(1)
-                        matched_field = field_name
+            # 1. Flat column (no axis prefix — e.g. sim/runs CSV).
+            if col in _FLAT_FIELDS:
+                matched_field = col
+                matched_axis = axis
+
+            # 2a. Axis-prefixed column — group(1) must be a real axis.
+            #     Excludes flat theta_0..5 (group is a digit).
+            if not matched_field:
+                for field_name, patterns in _FIELD_PATTERNS.items():
+                    for pat in patterns:
+                        m = pat.match(col)
+                        if m and m.lastindex and m.lastindex >= 1:
+                            # Flat theta_0..5 has digit as group(1) — not an axis.
+                            if m.group(1) in _SUPPORTED_AXES:
+                                matched_field = field_name
+                                matched_axis = m.group(1)
+                                break
+                    if matched_field:
                         break
-                if matched_field:
-                    break
 
-            if matched_axis and matched_field:
+            # 2b. Flat theta_0..5 — no axis, group(1) is a digit index.
+            if not matched_field and col.startswith("theta_"):
+                try:
+                    idx = int(col.rsplit("_", 1)[-1])
+                    theta_cols.setdefault(axis, {})[idx] = col
+                    axes_found[axis].add("theta")
+                    continue
+                except ValueError:
+                    pass
+
+            if matched_field:
                 if matched_field == "theta":
-                    idx = int(m.groups()[-1]) if m else int(col[-1])
+                    idx = int(m.group(m.lastindex)) if m.lastindex else int(col.rsplit("_", 1)[-1])
                     theta_cols.setdefault(matched_axis, {})[idx] = col
                 else:
                     col_to_field[col] = matched_field
-                    col_to_axis[col] = matched_axis
-                    axes_found[matched_axis].add(matched_field)
+                    col_to_axis[col] = matched_axis or axis
+                    axes_found[col_to_axis[col]].add(matched_field)
 
         # Determine which axis to extract.
         present = [a for a, fields in axes_found.items() if fields]
@@ -252,9 +294,19 @@ def load_stream_log_csv(
         xm_list: list[float] = []
         theta_rows: list[list[float]] = []
 
+        # Detect timestamp column: stream_log uses t_src_ms (ms),
+        # sim runs use bare t (seconds).
+        if "t_src_ms" in cols:
+            t_scale = 1.0 / 1000.0   # ms → s
+            t_col = "t_src_ms"
+        elif "t" in cols:
+            t_scale = 1.0            # already seconds
+            t_col = "t"
+        else:
+            raise ValueError(f"no timestamp column found in {path}. Columns: {list(cols)[:10]}")
+
         for row in reader:
-            t_ms = float(row["t_src_ms"])
-            t_list.append(t_ms / 1000.0)
+            t_list.append(float(row[t_col]) * t_scale)
 
             def _f(col_name: str) -> float:
                 val = row.get(col_name, "")

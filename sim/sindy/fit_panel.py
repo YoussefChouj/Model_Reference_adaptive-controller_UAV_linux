@@ -79,6 +79,84 @@ PER_AXIS_FEATURES_NO_BIAS: tuple[str, ...] = (
 )
 PER_AXIS_FEATURES_WITH_BIAS: tuple[str, ...] = ("1",) + PER_AXIS_FEATURES_NO_BIAS
 
+# ---------------------------------------------------------------------------
+# Extended feature library — tiered into semantically meaningful groups.
+# Each group maps to a column sub-slice of PER_AXIS_EXTENDED.
+# ---------------------------------------------------------------------------
+
+# Tier 1 — MRAC regressor basis (mirrors API/mrac.c Phi[] structure)
+#   Phi[0] = 1.0          bias
+#   Phi[1] = x             plant state — linear damping
+#   Phi[2] = x*tanh(x)    nonlinear drag / aerodynamic damping
+#   Phi[3] = cross_coup    gyroscopic cross-coupling term (x_other * u_self)
+#   Phi[4] = u_nom         baseline PID feedforward
+#   Phi[5] = xm            reference model state feedforward
+MRAC_FEATURES: tuple[str, ...] = (
+    "1 (bias)",
+    "x (plant state)",
+    "x·tanh(x) (nonlin drag)",
+    "cross-coupling",
+    "u_nom (baseline PID)",
+    "xm (ref model)",
+)
+
+# Tier 2 — polynomial up to degree 2 (x, u, x², x·u, u²)
+POLY_FEATURES: tuple[str, ...] = (
+    "x",
+    "u",
+    "x^2",
+    "x*u",
+    "u^2",
+)
+
+# Tier 3 — nonlinear / saturation features
+# tanh(x) saturation: useful when the plant operates near rate limits.
+NONLIN_FEATURES: tuple[str, ...] = (
+    "tanh(x)",
+    "|x|",
+    "x^3",
+    "u^3",
+    "x*u^2",
+    "x^2*u",
+    "sign(u)",
+)
+
+# Tier 4 — cross with reference model state xm
+# Note: xm also appears as the last MRAC basis term — we keep one copy there
+# and reference it here rather than duplicating the column (avoids collinearity in OLS).
+# The cross-xm group intentionally omits a bare "xm" entry since it lives in MRAC.
+XM_FEATURES: tuple[str, ...] = (
+    "x*xm",
+    "u*xm",
+    "xm^2",
+)
+
+# Full ordered library (user can toggle any subset via the dashboard).
+# Naming convention: group prefix so the multiselect widget groups them visually.
+PER_AXIS_EXTENDED: tuple[str, ...] = (
+    *MRAC_FEATURES,   # 6
+    *POLY_FEATURES,   # 5
+    *NONLIN_FEATURES, # 7
+    *XM_FEATURES,     # 3
+)
+
+assert len(PER_AXIS_EXTENDED) == 6 + 5 + 7 + 3, (
+    f"PER_AXIS_EXTENDED has {len(PER_AXIS_EXTENDED)} entries; "
+    "expected 6 MRAC + 5 poly + 7 nonlin + 3 xm = 21"
+)
+
+# ---------------------------------------------------------------------------
+# Group membership (for UI grouping / color coding)
+# ---------------------------------------------------------------------------
+FEATURE_GROUPS: dict[str, list[str]] = {
+    "MRAC basis":       list(MRAC_FEATURES),
+    "Polynomial":       list(POLY_FEATURES),
+    "Nonlinear":         list(NONLIN_FEATURES),
+    "Cross-xm":          list(XM_FEATURES),
+}
+
+FEATURE_GROUP_ORDER = ("MRAC basis", "Polynomial", "Nonlinear", "Cross-xm")
+
 # 6-vector: [x_r, x_p, x_y, u_r, u_p, u_y]
 # Linear (6) + quadratic (C(6+2-1, 2) = 21) = 27 features, no constant.
 JOINT_INPUT_NAMES: tuple[str, ...] = ("x_r", "x_p", "x_y", "u_r", "u_p", "u_y")
@@ -136,14 +214,22 @@ class FitConfig:
         zero. Default 0.05. Smaller threshold ⇒ denser solution.
     max_iter
         STLSQ iterations. Default 5.
+    feature_library
+        Which feature library to use. Options:
+        - ``"poly"`` (default): 5 polynomial features [1?, x, u, x², xu, u²]
+        - ``"extended"``: 22 features across 4 tiers (MRAC basis, polynomial,
+          nonlinear, cross-xm). Best for exploratory SINDy on rich flight data.
     """
-    include_bias: bool = False
+    include_bias: bool = True
     train_fraction: float = 0.8
     seed: int = 42
     threshold: float = 0.05
     max_iter: int = 5
+    feature_library: str = "extended"  # "poly" | "extended"
 
     def __post_init__(self) -> None:
+        if self.feature_library not in ("poly", "extended"):
+            raise ValueError(f"feature_library must be 'poly' or 'extended'; got {self.feature_library!r}")
         if not 0.0 < self.train_fraction < 1.0:
             raise ValueError(f"train_fraction must be in (0, 1); got {self.train_fraction}")
         if self.threshold < 0.0:
@@ -158,22 +244,88 @@ class FitConfig:
 
 def per_axis_feature_names(cfg: FitConfig) -> tuple[str, ...]:
     """Return the per-axis feature names in the order Φ expects them."""
+    if cfg.feature_library == "extended":
+        return PER_AXIS_EXTENDED
+    # "poly" library: drop MRAC/extended-only features, keep poly basis
     if cfg.include_bias:
         return PER_AXIS_FEATURES_WITH_BIAS
     return PER_AXIS_FEATURES_NO_BIAS
 
 
-def per_axis_features(x: np.ndarray, u: np.ndarray, cfg: FitConfig) -> np.ndarray:
-    """Build the per-axis polynomial feature matrix Φ ∈ R^(N × n_features).
+def per_axis_features(
+    x: np.ndarray,
+    u: np.ndarray,
+    cfg: FitConfig,
+    *,
+    xm: np.ndarray | None = None,
+    u_nom: np.ndarray | None = None,
+) -> np.ndarray:
+    """Build the feature matrix Φ ∈ R^(N × n_features).
 
-    Columns: ``[1?, x, u, x^2, x*u, u^2]``. The bias column is included
-    iff ``cfg.include_bias``. ``x`` and ``u`` must be 1-D arrays of equal
-    length. Output dtype is float64.
+    ``x`` and ``u`` must be 1-D arrays of equal length.
+    ``xm`` and ``u_nom`` are optional; when provided they unlock the extended
+    library's cross-xm and u_nom columns respectively.
+
+    Extended library column order (21 total):
+      MRAC:  [1, x, x·tanh(x), cross_coup, u_nom, xm]
+      Poly:  [x, u, x², x·u, u²]
+      Nonlin:[tanh(x), |x|, x³, u³, x·u², x²·u, sign(u)]
+      Cross: [x·xm, u·xm, xm²]
     """
     x = np.asarray(x, dtype=np.float64).reshape(-1)
     u = np.asarray(u, dtype=np.float64).reshape(-1)
+
     if x.shape != u.shape:
         raise ValueError(f"x and u must have the same shape; got {x.shape} vs {u.shape}")
+
+    # Guard against NaN/Inf in input data (common in pre-MRAC logs)
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    u = np.nan_to_num(u, nan=0.0, posinf=0.0, neginf=0.0)
+
+    if cfg.feature_library == "extended":
+        tanh_x = np.tanh(x)
+        safe_sign_u = np.where(np.abs(u) < 1e-6, 0.0, np.sign(u))
+        cols: list[np.ndarray] = [
+            np.ones_like(x),                # 0:  "1 (bias)"
+            x,                              # 1:  "x (plant state)"
+            x * tanh_x,                     # 2:  "x·tanh(x) (nonlin drag)"
+            np.zeros_like(x),               # 3:  "cross-coupling"  (requires cross-axis x_other)
+            np.zeros_like(x),               # 4:  "u_nom (baseline PID)"  (filled if u_nom passed)
+            np.zeros_like(x),               # 5:  "xm (ref model)"  (filled if xm passed)
+            x,                              # 6:  "x"
+            u,                              # 7:  "u"
+            x * x,                          # 8:  "x^2"
+            x * u,                          # 9:  "x*u"
+            u * u,                          # 10: "u^2"
+            tanh_x,                         # 11: "tanh(x)"
+            np.abs(x),                      # 12: "|x|"
+            x * x * x,                      # 13: "x^3"
+            u * u * u,                      # 14: "u^3"
+            x * u * u,                      # 15: "x*u^2"
+            x * x * u,                      # 16: "x^2*u"
+            safe_sign_u,                    # 17: "sign(u)"
+        ]
+        if u_nom is not None and len(u_nom) == len(x):
+            u_nom_arr = np.asarray(u_nom, dtype=np.float64).reshape(-1)
+            # Replace NaN with 0 (log had no u_nom telemetry)
+            u_nom_arr = np.nan_to_num(u_nom_arr, nan=0.0, posinf=0.0, neginf=0.0)
+            cols[4] = u_nom_arr
+        if xm is not None and len(xm) == len(x):
+            xm_arr = np.asarray(xm, dtype=np.float64).reshape(-1)
+            # Replace NaN with 0 (log had no xm telemetry — this is common for
+            # pre-MRAC logs; the xm columns will be zeros and STLSQ will drop them)
+            xm_arr = np.nan_to_num(xm_arr, nan=0.0, posinf=0.0, neginf=0.0)
+            cols[5] = xm_arr                 # 5:  "xm (ref model)"
+            cols.extend([                    # 18-20: cross-xm
+                x * xm_arr,                 # 18: "x*xm"
+                u * xm_arr,                 # 19: "u*xm"
+                xm_arr * xm_arr,            # 20: "xm^2"
+            ])
+        else:
+            cols.extend([np.zeros_like(x)] * 3)
+        return np.column_stack(cols)
+
+    # "poly" library: [1?, x, u, x², xu, u²]
     cols = [x, u, x * x, x * u, u * u]
     if cfg.include_bias:
         cols = [np.ones_like(x), *cols]
@@ -237,15 +389,28 @@ def _stlsq(
 
     Returns the (n_features,) coefficient vector. Coefs in dropped
     columns are returned as 0 (not NaN).
+
+    Uses ``scipy.linalg.lstsq`` with a moderate condition-number threshold
+    so near-rank-deficient sub-problems (e.g. the extended 21-feature library
+    with near-constant columns) are handled gracefully without catastrophic
+    failure.
     """
+    import scipy.linalg
+
     n_features = Phi.shape[1]
     keep = np.ones(n_features, dtype=bool)
     coef = np.zeros(n_features, dtype=np.float64)
+
+    def _ols(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """OLS with scipy (handles rank-deficient / ill-conditioned systems)."""
+        c, *_ = scipy.linalg.lstsq(A, b, cond=1e-6, overwrite_a=False, overwrite_b=False)
+        return np.asarray(c, dtype=np.float64)
+
     for _ in range(max_iter):
         if not keep.any():
             return coef
         A = Phi[:, keep]
-        c, *_ = np.linalg.lstsq(A, y, rcond=None)
+        c = _ols(A, y)
         full = np.zeros(n_features, dtype=np.float64)
         full[keep] = c
         new_keep = np.abs(full) >= threshold
@@ -256,7 +421,7 @@ def _stlsq(
         coef = full
     # Final refit on the converged support.
     if keep.any():
-        c, *_ = np.linalg.lstsq(Phi[:, keep], y, rcond=None)
+        c = _ols(Phi[:, keep], y)
         full = np.zeros(n_features, dtype=np.float64)
         full[keep] = c
         coef = full
@@ -354,6 +519,8 @@ def per_axis_fit(
     cfg: FitConfig | None = None,
     feature_mask: Sequence[bool] | None = None,
     label: str = "",
+    xm: np.ndarray | None = None,
+    u_nom: np.ndarray | None = None,
 ) -> dict:
     """Fit one axis with the polynomial library.
 
@@ -372,6 +539,12 @@ def per_axis_fit(
         to refitting with that column masked out.
     label
         Free-form label (e.g. "roll"); stored in the result.
+    xm
+        Reference model state (rad/s). Required for the "extended" library's
+        cross-xm features (x·xm, u·xm, xm, xm²). Ignored for "poly" library.
+    u_nom
+        Baseline PID output (Nm). Required for the "extended" library's u_nom
+        column. Ignored for "poly" library.
 
     Returns
     -------
@@ -398,7 +571,7 @@ def per_axis_fit(
 
     dx = _central_diff(x, t)
     full_names = list(per_axis_feature_names(cfg))
-    Phi = per_axis_features(x, u, cfg)
+    Phi = per_axis_features(x, u, cfg, xm=xm, u_nom=u_nom)
     n_features = Phi.shape[1]
     if feature_mask is None:
         mask = np.ones(n_features, dtype=bool)
