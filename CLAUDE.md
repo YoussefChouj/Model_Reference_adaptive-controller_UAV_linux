@@ -6,8 +6,15 @@
 
 ## Session State
 
-**Last Updated**: 2026-08-12
+**Last Updated**: 2026-08-17
 **Goal**: Prior-transfer wave 1 serial pipeline: `prior-01` → `prior-08` → `prior-11` → `prior-05`. Thesis framing held pending user reading session. **Primary claim = dense trajectory tracking**; airframe-invariant dimensionless priors are *instrumental* ([ADR-0014](docs/adr/0014-dimensionless-priors-and-declared-regressor-variants.md)). Terms in [docs/glossary.md](docs/glossary.md); specs in [`.agent_contracts/prior_transfer/`](.agent_contracts/prior_transfer/README.md).
+
+**Knowledge-stack restore spec authored 2026-08-17** — `.agent_contracts/agent-restore-ccc-and-graphify/spec.md`.
+Restores `ccc` (CocoIndex + Qwen3-Embedding-8B via OpenRouter) and `graphify`
+(graph rebuild pipeline). Embeddings are layer 3, ripgrep is layer 1.
+Open Q before implementing; track via digest [2026-08-17-digest.md](sessions_summary/2026-08-17-digest.md).
+
+**agent-01 ulog reader shipped 2026-08-17.** `ground_station/ulog_reader.py` + `ulog_query.py` + `tests/test_ulog_reader.py` + `tests/fixtures/sample.ulg`. Spec: `.agent_contracts/agent-01-ulog-reader/spec.md`.
 
 **chore/agent-workflow-hardening MERGED 2026-08-11.** The branch brought in:
 
