@@ -2,6 +2,7 @@
 #include "creat_task.h"
 #include "mrac.h"
 #include "gyro_filter.h"
+#include "param.h"
 
 /* DEBUG-telemetry-bisect: instrumentation kept for future use. Flip to `#if 1`
  * to re-enable the UART5 polling checkpoints, stack-overflow hook, and the
@@ -285,6 +286,9 @@ void Stabilizer_Task(void *pvParameters)
                  // mrac_to_mixer scalers, and axis_enable flags. Without this call all
                  // configs stay zero-initialized, causing division-by-zero (u_nom = +/-inf)
                  // and NaN in u_ad that corrupts the motor throttle channel.
+    Param_Init();  // Populates the param registry (agent-05). Must run after MRAC_Init
+                   // so the MRAC config structs are initialised before the registry
+                   // captures their addresses.
     GyroFilter_Init(200.0f); // Phase-1 gyro LPF; starts DISABLED (pass-through) — see ADR-0004.
   while(1)
     {
