@@ -176,34 +176,47 @@ GitHub implementations (`rmeadomavic/ardupilot-mcp`,
 
 **LOC est.:** ~300 host-side, ~50 tests.
 
-### Day-8+: `agent-05` — MAVLink-compatible PARAM_REQUEST_READ / PARAM_SET on UART5
+### Day-8+: `agent-05` — MAVLink-compatible PARAM_REQUEST_READ / PARAM_SET on USART3
 
 **Why:** the standard primitive that every UAV research tool expects.
 Unlocks MAVSDK-Python, ardupilot-mcp, and any future drone-aware
-LLM tool.
+LLM tool. The wire is **USART3** (the long-range radio), not UART5.
+Per the user's clarification and the wiki's
+`uart-peripheral-map.md` USART3 section: UART5 is the wireless
+dongle's VCP and must stay telemetry-only.
+
+**Prerequisite:** the two firmware defects in `usart3_send()`
+(`TASK/send_data.c:318-358`) — DMA reads a dead stack frame, and
+busy-wait throttles `Send_Task` to ~60 Hz. These are documented in
+the wiki and need their own small spec (`agent-04b`) before
+USART3 can carry bidirectional traffic. Otherwise the agent-control
+path is fundamentally broken.
 
 **Scope:**
 
-1. Firmware side (in `TASK/send_data.c` or a new `TASK/param.c`):
-   - New CMD frame: `0xCC 0xDD | 0x21 | LEN_HI LEN_LO | name\n | value`
-     where `name` is a NUL-terminated C string and `value` is `float` LE.
-   - Reply frame: same `0xCC 0xDD | 0x21 | LEN | name\n | value`.
+1. Firmware side (in `TASK/send_data.c` or new `TASK/param.c`):
+   - New CMD frame on USART3, MAVLink-shaped:
+     `0xFE 0x21 | LEN | SEQ | SYSID | COMPID | msgid (PARAM_SET) | name\n | value`.
+   - Reply on USART3, same shape, msgid = PARAM_VALUE.
    - Backing store: a `volatile struct __param { ... } g_params[]`
      built from the same source-of-truth macros that `livewatch`
      walks. Initial population from the existing
      `params_manifest.json`.
+   - The USART3 RX handler is currently a stub
+     (`TASK/stm32f4xx_it.c:115-123` discards the byte). Wire it
+     to a `param_set` dispatcher.
 2. Host side (`ground_station/comm/serial_bridge.py`):
    - New `set_param(name: str, value: float)` method, using the
-     existing `_write_lock`.
+     existing `_write_lock` and a new `USART3_PATH` constant.
    - New `get_param(name: str) -> float`.
-   - Optional: a `pymavlink`-compatible wrapper that emits
-     `PARAM_REQUEST_READ` / `PARAM_SET` messages over the same wire.
-     PX4's `Tools/bench_test/bench/param_stress.py` is the
-     reference.
+   - `pymavlink` wrapper that emits `PARAM_REQUEST_READ` /
+     `PARAM_SET` over the wire. PX4's
+     `Tools/bench_test/bench/param_stress.py` is the reference.
 3. Tests: offline (no hardware) using a synthetic param store;
    bench-test guarded by DISARMED.
 
-**LOC est.:** ~400 host-side + ~200 firmware-side, ~150 tests.
+**LOC est.:** ~400 host-side + ~300 firmware-side (incl. the USART3
+fix), ~150 tests.
 
 ### Day-9: `agent-06` — Sobol / Bayesian sweep runner
 
@@ -282,6 +295,10 @@ a flight-replay tool that no other repo has wired together.
   HITL build is its own project. Defer.
 * **Betaflight MSP-style sliders.** Our protocol is a single binary
   protocol; bolting MSP on is unjustified complexity.
+* **Re-pointing Frame A/B telemetry to USART3.** USART3 tops out at
+  ~960 B/s at 9600 baud — Frame A/B is 8.6 kB/s. Won't fit. Stay
+  with UART5 for telemetry. USART3 is for low-rate agent commands
+  only.
 
 ## Open questions to resolve before `agent-05`
 
@@ -290,28 +307,47 @@ a flight-replay tool that no other repo has wired together.
    generate it from a single header? Today there is no central
    registry; today there are ~7 hand-edited values. Defer until
    the count grows past 20.
-2. **Two-way radio (MAVLink) or just UART5 wired?** Today the bench
-   is wired. Radio adds a path but not a primitive. Defer until
-   flight-range testing becomes a need.
+2. **Radio range vs UART5 wired?** Decided: agent-control on
+   USART3 (long-range). UART5 stays telemetry-only.
 3. **What does the firmware treat as authoritative for a parameter?**
    Is `g_mrac_state.pitch.What_lower_limit` a `#define`, a global
    initialised at boot, or a runtime-mutable `volatile`? Decide
    before wiring `set_param`; otherwise writes silently no-op.
+4. **Prerequisite `agent-04b`: fix `usart3_send()` first.**
+   The wiki documents two defects in `usart3_send()`
+   (`TASK/send_data.c:318-358`):
+   - DMA reads a dead stack frame (`str_USART[16]` is local but
+     `extern`'d in `send_data.h:19`).
+   - Busy-wait throttles `Send_Task` to ~60 Hz.
+   Without fixing these, USART3 cannot carry agent traffic and
+   `Send_Task` is also capped. ~30 LOC fix in firmware.
 
-## Decision points (ask the user)
+## Decisions
 
-Before any of `agent-03` onward, confirm:
+**User-confirmed 2026-08-16:**
 
-1. **Is `livewatch patch` desired with the `--i-understand` gate?**
-   This is the only write-side change in the plan. The hardware-safety
-   rule must be amended.
-2. **Firmware-side param interface — UART5 vs MAVLink-only?** UART5
-   is what's there; MAVLink would require a new wire format on the
-   firmware. Recommend UART5 with a MAVLink-shaped frame so future
-   MAVSDK wiring is a host-side change only.
-3. **Build environment for firmware changes.** Linux toolchain is
-   CMake + GCC. Windows is Keil + ARMCC. Any firmware-side change
-   here means: edit once, both pipelines rebuild. Confirm.
+1. **`livewatch patch` with the `--i-understand` gate is approved.**
+   The read-only contract in `hardware-safety.mdc` is amended to
+   carve out a named-symbol RAM write primitive, gated on
+   `--i-understand` + ARM_DISARMED. The carve-out is a
+   `hardware-safety.mdc` revision, separate spec.
+2. **Build environment for firmware changes: Linux first.**
+   Linux pipeline (CMake + arm-none-eabi-gcc) is the primary
+   iteration loop. Windows Keil/ARMCC mirror is downstream.
+3. **Param/agent-control wire: USART3, not UART5.**
+   The user's clarification: UART5 is wired through the wireless
+   CMSIS-DAP dongle (limited rate/range) and must remain telemetry.
+   USART3 goes to the long-range radio module — that is the
+   agent-control channel. The firmware-side defects documented in
+   `wiki/concepts/uart-peripheral-map.md` (`usart3_send()` reads a
+   dead stack frame + busy-wait caps `Send_Task` at 60 Hz) must be
+   fixed first — they are not part of agent-05 itself, but they
+   block any USART3 work.
+
+**Still open:** the frame layout on USART3. Recommend MAVLink-shaped
+over the existing `0xCC 0xDD` style, so the host side can re-use
+`pymavlink` directly. Document the choice in `agent-05` when the
+spec is written.
 
 ## Tracking
 
