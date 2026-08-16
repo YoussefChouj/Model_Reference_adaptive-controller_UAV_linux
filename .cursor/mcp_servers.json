@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "drone-bench": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "ground_station.mcp_server"]
+    }
+  }
+}
