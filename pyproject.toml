@@ -1,0 +1,9 @@
+[project]
+name = "drone-bench"
+version = "0.1.0"
+description = "MCP server for the UAV bench toolchain"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+mcp-drone = "ground_station.mcp_server:main"
