@@ -26,15 +26,32 @@ on the task at hand — bug hunting, acceptance testing, calibration sweeps.
 Before `tasks.py flash`, run all four checks in order. Any failure → abort.
 
 ```bash
-.venv/bin/python tasks.py doctor                              # toolchain + probe
-.venv/bin/python -m ground_station.livewatch verify           # ELF on disk = on target
-.venv/bin/python -m ground_station.livewatch freshness s_ekf.x[3] \
-    --samples 5 --delay-ms 20 --require-monotonic             # bridge is fresh
-.venv/bin/python -m ground_station.livewatch read DroneStatus.ARM_Status  # DISARMED
+.venv/bin/python tasks.py doctor                                            # toolchain + probe
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf verify     # ELF on disk = on target
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf \
+    freshness s_ekf.x[3] --samples 5 --delay-ms 20 --require-monotonic       # bridge is fresh
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf \
+    read DroneStatus.ARM_Status                                              # DISARMED
 ```
 
 ARM_Status must equal DISARMED. Any other value (ARMED, FAULT, INIT) is a
 hard abort. The user disarms via RC; the agent does not bypass this check.
+
+## Linux box setup — once per clone
+
+The wireless ATK-HS-V3 has two known Linux-side bugs that silently break
+flash. Run both fixes before the first pre-flight:
+
+```bash
+.venv/bin/python -m pyocd pack install stm32f407        # cortex_m fallback no-ops flashes
+sudo cp etc-modprobe-d/blacklist-hid-mcp2200.conf /etc/modprobe.d/
+sudo modprobe -r hid_mcp2200                            # unbinds the bridge's HID interface
+# Replug the bridge once.
+```
+
+Verify with `cat /sys/bus/hid/devices/0003:04D8:00DF.*/uevent | head -1`
+expecting `DRIVER=hid-generic`. Trace:
+`sessions_summary/2026-08-16-wireless-bridge-flash-dual-bug.md`.
 
 ## Wireless-bridge caveat
 

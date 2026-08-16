@@ -28,8 +28,30 @@ sudo scripts/setup_linux_toolchain.sh
 .venv/bin/python tasks.py flash
 
 # Verify
-.venv/bin/python tasks.py verify
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf verify
 ```
+
+## Wireless bridge (ATK-HS-V3) — once per box
+
+The wireless Microchip ATK-HS-V3 needs two kernel/Python fixes to land
+flash writes successfully on Linux. See `docs/lab-runbook.md` "Pipeline
+readiness" for the full procedure; the short version is:
+
+```bash
+# pyocd's cortex_m fallback target silently no-ops on flash. Install the
+# chip-specific pack so the real flash algorithm is loaded.
+.venv/bin/python -m pyocd pack update
+.venv/bin/python -m pyocd pack install stm32f407
+
+# Without this modprobe rule, the bridge's HID endpoints get claimed by
+# hid_mcp2200 and writes silently drop. After install, replug the bridge.
+sudo cp etc-modprobe-d/blacklist-hid-mcp2200.conf /etc/modprobe.d/
+sudo modprobe -r hid_mcp2200
+```
+
+If `tasks.py flash` faults with "IPSR=3" mid-write on the ATK-HS-V3, the
+working fallback is `pyocd flash --target stm32f407zgtx firmware/build/JX_FLY.hex`.
+Same DFP, same .hex, different entry point.
 
 ## Layout
 
@@ -64,8 +86,12 @@ The flash tool follows the same safety contract as `ground_station.livewatch`:
 - `connect_mode=attach` — connect without halting the core.
 - `resume_on_disconnect=False` — leave target state untouched on disconnect.
 - `reset_type=system` — NVIC AIRCR.SYSRESETREQ (no halt).
+- `target_override=stm32f407zgtx` — chip-specific target (DFP-installed) for
+  the write path; `cortex_m` for livewatch reads only.
+- `cmsis_dap.deferred_transfers=0` + `cmsis_dap.limit_packets=1` —
+  serialize the wireless bridge's HID endpoint to avoid the packet-reorder bug.
 - No memory-write API exposed.
-- Flash path goes through `target.mass_erase()` + `board.program()` only.
+- Flash path goes through `target.mass_erase()` + `FileProgrammer().program()` only.
 
 See `docs/linux-pipeline-references.md` for the primary-source documentation
 behind every non-obvious decision in this pipeline.

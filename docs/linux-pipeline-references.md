@@ -45,22 +45,53 @@ so no symbol is defined twice.
 
 ## 3. pyocd session options
 
-**Source**: pyocd `docs/options.md` (main branch, July 2026). The four
-options we depend on:
+**Source**: pyocd `docs/options.md` (main branch, July 2026). The options we
+depend on:
 
 | Option | Value | Why |
 |---|---|---|
 | `connect_mode` | `attach` | Connect without halting the running core. Other modes (`halt`, `pre-reset`, `under-reset`) all halt. |
 | `resume_on_disconnect` | `False` | Don't resume cores on disconnect; leave target state untouched. |
 | `reset_type` | `system` | NVIC AIRCR.SYSRESETREQ. Pyocd's default already chooses `system`, but we set it explicitly so a future pyocd default change cannot quietly switch to `core`. |
-| `target_override` | `cortex_m` | Fallback target when no CMSIS Pack is found for `stm32f407zg`. |
+| `target_override` | `stm32f407zgtx` | Chip-specific target. The generic `cortex_m` fallback target has no real flash algorithm — it pretends to program and reports success without committing bytes. Install the STM32F4xx_DFP pack first: `pyocd pack install stm32f407`. |
+| `cmsis_dap.deferred_transfers` | `0` | pyocd issue #1257. Wireless HID CMSIS-DAP bridges reorder/defer responses under load; without this, reads return cached buffers and writes silently drop. |
+| `cmsis_dap.limit_packets` | `1` | Same root cause; one in-flight packet at a time. |
 
 `target.system_reset()` is the no-halt reset path; `target.reset()` halts the
 core. We use the former everywhere.
 
 For the read-only path (`ground_station.livewatch`), `attach` +
 `resume_on_disconnect=False` is also correct and is what livewatch's reader
-uses. The flashtool_linux package follows the same contract.
+uses. The flashtool_linux package follows the same contract. `target_override`
+stays `cortex_m` in the livewatch path because the reader never issues flash
+commands — but the flags above for the write path are still required for
+bridge-side reads to be fresh.
+
+## 3a. Kernel: ATK-HS-V3 HID driver binding
+
+**Source**: Linux kernel hid driver claim order (Linux 6.8, Ubuntu Jammy/Hirsute
+documented behaviour), and the CSDN writeup at
+<https://blog.csdn.net/2301_79618994/article/details/160716114>.
+
+The ATK-HS-V3 (Microchip 04d8:00df) is a composite device with two CDC-ACM
+serial interfaces and one HID interface for CMSIS-DAP. The HID class claimed
+by `hid_mcp2200` matches a misleading descriptor in this device, so on a
+default kernel the bridge's HID endpoints get bound to `hid_mcp2200` instead
+of `hid-generic`. Pyocd opens the device via `libusb`, but the underlying
+HID-protocol commands get routed to a driver that doesn't speak CMSIS-DAP —
+writes succeed without the bridge carrying them across SWD.
+
+Fix once per box:
+
+```bash
+sudo cp etc-modprobe-d/blacklist-hid-mcp2200.conf /etc/modprobe.d/
+sudo modprobe -r hid_mcp2200   # drop the current binding
+# Replug the bridge so udev re-binds it under hid-generic.
+# Verify: cat /sys/bus/hid/devices/0003:04D8:00DF.*/uevent | head -1
+#         -> DRIVER=hid-generic
+```
+
+The `install hid_mcp2200 /bin/false` rule survives replugs.
 
 ---
 

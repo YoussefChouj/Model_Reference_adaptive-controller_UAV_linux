@@ -42,20 +42,57 @@ report; do not attempt a workaround.
 # 1. Toolchain + probe enumerated
 .venv/bin/python tasks.py doctor
 
-# 2. ELF on disk matches the build actually flashed (catches stale ELF)
-.venv/bin/python -m ground_station.livewatch verify
+# 2. ELF on disk matches the build actually flashed (catches stale ELF).
+#    On Linux the ELF is firmware/build/JX_FLY.elf (CMake); Windows default
+#    is OBJ/JX_FLY.axf (Keil). Pass --elf before the subcommand.
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf verify
 
 # 3. Bridge is fresh, not cached (USB-wired: usually passes immediately;
 #    wireless: --samples 5 --delay-ms 20 --require-monotonic)
-.venv/bin/python -m ground_station.livewatch freshness s_ekf.x[3] \
-    --samples 5 --delay-ms 20 --require-monotonic
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf \
+    freshness s_ekf.x[3] --samples 5 --delay-ms 20 --require-monotonic
 
 # 4. Drone is DISARMED
-.venv/bin/python -m ground_station.livewatch read DroneStatus.ARM_Status
+.venv/bin/python -m ground_station.livewatch --elf firmware/build/JX_FLY.elf \
+    read DroneStatus.ARM_Status
 ```
 
 ARM_Status must equal DISARMED. Any other value (ARMED, FAULT, INIT) is a hard
 abort. The user disarms via RC; you do not bypass this check.
+
+## One-time box setup
+
+The first lab session on a fresh Linux box needs three kernel/Python prereqs
+in place, otherwise flash silently no-ops:
+
+```bash
+# CMSIS Pack for the chip. Without this, pyocd uses a cortex_m fallback
+# whose flash algorithm pretends to program and reports success without
+# committing bytes to flash.
+.venv/bin/python -m pyocd pack update
+.venv/bin/python -m pyocd pack install stm32f407
+
+# Bridge HID driver. The ATK-HS-V3 (Microchip 04d8:00df) ships a 2-channel
+# CDC-ACM + HID device. Without an explicit modprobe block, Linux's
+# hid_mcp2200 grabs the HID interface before pyocd can open it; writes are
+# silently dropped.
+sudo cp etc-modprobe-d/blacklist-hid-mcp2200.conf /etc/modprobe.d/
+sudo modprobe -r hid_mcp2200
+# Replug the bridge once. Verify the binding moved to hid-generic:
+#   cat /sys/bus/hid/devices/0003:04D8:00DF.*/uevent | head -1
+#   # -> DRIVER=hid-generic
+```
+
+Without both, `tasks.py flash` exits 0 but the FC keeps running its prior
+firmware. Diagnose with:
+
+```bash
+.venv/bin/python -m pyocd list --targets | grep stm32f407     # DFP installed?
+.venv/bin/python -m pyocd list                                  # probe seen?
+cat /sys/bus/hid/devices/0003:04D8:00DF.*/uevent | head -1     # driver correct?
+```
+
+Root cause trace: `sessions_summary/2026-08-16-wireless-bridge-flash-dual-bug.md`.
 
 ## Iterating inside an authorized loop
 
@@ -87,6 +124,19 @@ Re-run only the steps that depend on what changed:
 
 `livewatch verify` is cheap (~hundreds of ms); run it after every flash rather
 than guessing whether the build landed.
+
+### Flash fallback when `tasks.py flash` glitches
+
+On the ATK-HS-V3 wireless bridge, `tasks.py flash` can hit an "IPSR=3" fault
+mid-flash while the bridge uploads the flash algorithm to RAM. The escape
+hatch is the direct pyocd CLI, which uses the same DFP-backed target:
+
+```bash
+.venv/bin/python -m pyocd flash --target stm32f407zgtx firmware/build/JX_FLY.hex
+```
+
+This is the working path on the bench today. Re-attempt `tasks.py flash` only
+if pyocd upstream lands a fix for the bridge algo-upload path.
 
 ## Wireless-bridge caveat
 
@@ -124,9 +174,14 @@ NOT:
 - spin motors
 - bypass the DISARMED check under any pressure
 - write to RAM, peripherals, or registers via livewatch (read-only path only)
-- run `pyocd`, `openocd`, `st-flash`, `st-util`, `JLink*`, or
-  `ground_station.flashtool` directly — only `tasks.py flash` and
-  `livewatch` are permitted
+- run `openocd`, `st-flash`, `st-util`, `JLink*`, or
+  `ground_station.flashtool` (the Windows Keil wrapper) directly — only
+  `tasks.py flash` and `livewatch` are permitted on the standard path.
+- The exception is the ATK-HS-V3 flash fallback above:
+  `pyocd flash --target stm32f407zgtx firmware/build/JX_FLY.hex`. The
+  same DFP, the same .hex, the same flash algorithm — only the entry
+  point differs. Use it as a documented escape hatch when
+  `tasks.py flash` faults on the bridge's algo upload.
 - modify `OBJ/`, `*.hex`, or `*.axf` — those are build outputs
 
 ## What this skill is NOT
