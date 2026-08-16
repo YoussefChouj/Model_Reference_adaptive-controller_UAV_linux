@@ -17,10 +17,16 @@ from pyocd.core.helpers import ConnectHelper
 
 
 TARGET = "stm32f407zg"      # matches CMSIS DFP part number
+# HID CMSIS-DAP bridges (e.g. ATK-HS-V3 wireless) reorder/defer responses under load.
+# Force single in-flight packets and disable deferred transfers — see pyocd issue #1257.
+# Without these, DAP_TRANSFER_BLOCK returns "response is for command 05" mid-flash,
+# and the read path replays a cached buffer.
 _PROBE_CONFIG = {
     "target_override": "cortex_m",
     "connect_mode": "attach",
     "resume_on_disconnect": False,
+    "cmsis_dap.deferred_transfers": 0,
+    "cmsis_dap.limit_packets": 1,
 }
 
 
@@ -120,7 +126,11 @@ def flash(hex_path: Path, frequency_hz: int = 5_000_000) -> FlashResult:
 
             # Flash erase + program
             target.mass_erase()
-            bytes_prog = int(board.program(hex_path, smart_flash=True))
+            from pyocd.flash.file_programmer import FileProgrammer
+            fp = FileProgrammer(session)
+            fp.program(str(hex_path), file_format="hex")
+            # Total bytes programmed is exposed via the progress counter after commit.
+            bytes_prog = int(fp.progress.total_byte_count)
 
             # Post-flash system reset (NVIC AIRCR.SYSRESETREQ, no core halt).
             # reset_type='system' on session ensures both the implicit and

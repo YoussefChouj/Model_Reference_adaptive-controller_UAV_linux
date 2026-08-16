@@ -152,11 +152,16 @@ class SwdCmsisDap(LiveTransport):
 
     def connect(self) -> "SwdCmsisDap":
         from pyocd.core.helpers import ConnectHelper
+        # HID CMSIS-DAP bridges (e.g. ATK-HS-V3 wireless) reorder/defer responses
+        # under load. Force single in-flight packets and disable deferred transfers
+        # — see pyocd issue #1257. Without these, reads return a stale cached buffer.
         self._session = ConnectHelper.session_with_chosen_probe(
             options={
                 "target_override": "cortex_m",
                 "connect_mode": "attach",
                 "resume_on_disconnect": False,
+                "cmsis_dap.deferred_transfers": 0,
+                "cmsis_dap.limit_packets": 1,
             }
         )
         if self._session is None:
