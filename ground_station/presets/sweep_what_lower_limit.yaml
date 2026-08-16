@@ -1,0 +1,16 @@
+# Sample sweep preset — sweep What_lower_limit[0] on the pitch axis.
+# Output: 100 iterations, Sobol schedule, observes tracking_rmse from
+# telemetry over a 1 s window after a 2 s settling time.
+params:
+  - name: mrac_state.pitch.What_lower_limit[0]
+    lo: 0.0
+    hi: 0.5
+observable:
+  source: telemetry
+  name: tracking_rmse
+  window: [0.0, 1.0]
+schedule: sobol
+optimizer: none
+n_samples: 100
+settling_time_s: 2.0
+output_dir: ground_station/logs/sweeps/what_lower_limit
