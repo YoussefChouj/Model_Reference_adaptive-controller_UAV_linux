@@ -184,6 +184,47 @@ class SwdCmsisDap(LiveTransport):
         return [bytes(self.target.read_memory_block8(r.start, r.size))
                 for r in plan.regions]
 
+    # ------------------------------------------------------------------
+    # Write paths — gated by patch.py; never exposed by read-only path.
+    # All write methods go through write_memory_block32 (32-bit aligned).
+    # ------------------------------------------------------------------
+
+    def write_memory_block32(self, address: int, values: list[int]) -> None:
+        """Write a list of 32-bit words to `address`.
+
+        Args:
+            address: 4-byte-aligned RAM address.
+            values: list of uint32 values to write.
+
+        Raises:
+            RuntimeError: if the SWD transaction fails.
+        """
+        if self.target is None:
+            raise LiveTransportError("swd-write: not connected")
+        try:
+            self.target.write_memory_block32(address, values)
+        except Exception as exc:
+            raise RuntimeError(f"swd-write: write_memory_block32(0x{address:08X}, "
+                               f"{len(values)} words) failed: {exc}") from exc
+
+    def write16(self, address: int, value: int) -> None:
+        """Write a 16-bit value; adjusts address for odd halfwords per ARM AAPCS."""
+        if self.target is None:
+            raise LiveTransportError("swd-write: not connected")
+        if address & 0x03 == 0x02:
+            self.target.write_memory(address, struct.pack("<H", value & 0xFFFF))
+        else:
+            raise ValueError(
+                f"write16 requires a halfword-aligned address (0x02 mask); "
+                f"got 0x{address:08X}"
+            )
+
+    def write8(self, address: int, value: int) -> None:
+        """Write a single byte."""
+        if self.target is None:
+            raise LiveTransportError("swd-write: not connected")
+        self.target.write_memory(address, struct.pack("<B", value & 0xFF))
+
 
 class Uart5LongRange(LiveTransport):
     """Full-duplex 115200-baud UART5 observer with a request-then-reassemble read."""
@@ -361,6 +402,25 @@ class Uart5LongRange(LiveTransport):
         if offset != len(payload):
             raise LiveTransportError("uart5-read: trailing bytes after address+value tuples")
         return out
+
+    # ------------------------------------------------------------------
+    # Write paths — not supported over UART5.
+    # ------------------------------------------------------------------
+
+    def write_memory_block32(self, address: int, values: list[int]) -> None:
+        raise NotImplementedError(
+            "UART5 transport is read-only. Use the SWD transport for writes."
+        )
+
+    def write16(self, address: int, value: int) -> None:
+        raise NotImplementedError(
+            "UART5 transport is read-only. Use the SWD transport for writes."
+        )
+
+    def write8(self, address: int, value: int) -> None:
+        raise NotImplementedError(
+            "UART5 transport is read-only. Use the SWD transport for writes."
+        )
 
 
 # ----------------------------------------------------------------------
