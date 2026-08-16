@@ -149,3 +149,222 @@ hardware-in-the-loop step (probe must be physically attached).
 - https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
 
 (Stored as local references; no live-link guarantee.)
+
+---
+
+## 7. MAVSDK offboard (agent-06)
+
+**Source**: `mavsdk` Python package, installed from PyPI. The `System` class
+wraps a MAVSDK gRPC server (bundled in the wheel); all plugin classes
+(`Offboard`, `Action`) are synchronous wrappers over async gRPC stubs.
+
+Install: `pip install mavsdk` (the wheel includes the MAVSDK server binary).
+
+Connect: `OffboardController("serial:///dev/ttyUSB0:921600")`.
+
+**The 20 Hz heartbeat requirement.** PX4 exits offboard if no setpoint
+arrives within ~0.5 s. `OffboardController` sends a 0-velocity body
+setpoint at 20 Hz (50 ms period) via `_offboard_heartbeat()` from the
+moment `start_offboard()` is called until `stop_offboard()` or
+`disconnect()` is called. Do not call `set_position_ned()` once and
+expect the drone to hold — it will drift back to the previous mode.
+
+**Caveat — wire-protocol.** The host-side class is `agent-06`'s scope.
+The firmware side (CMD 0x21 / 0x22 MAVLink messages over USART3) is
+`agent-05`'s scope. This doc entry covers only the host.
+
+**API surface** (all async):
+
+| Method | MAVSDK call |
+|---|---|
+| `connect()` | `System.connect(system_address)` |
+| `arm()` | `System.action.arm()` |
+| `disarm()` | `System.action.disarm()` |
+| `start_offboard()` | `System.offboard.start()` |
+| `stop_offboard()` | `System.offboard.stop()` |
+| `set_position_ned()` | `System.offboard.set_position_ned(PositionNedYaw(...))` |
+| `set_velocity_body()` | `System.offboard.set_velocity_body(VelocityBodyYawspeed(...))` |
+| `takeoff()` | `arm()` + `set_position_ned(0,0,-alt,0)` |
+| `land()` | `System.action.land()` |
+| `goto()` | arm + start_offboard + set_position_ned |
+
+---
+
+## Sweep runner (agent-07)
+
+Sweeps a parameter space on the bench without rebuilding firmware.  Schedules
+samples with Sobol (low-discrepancy), Latin hypercube, or uniform random;
+optimises with Nelder-Mead or a Gaussian-process surrogate (scikit-optimize,
+optional).  Observable is read from telemetry (live dict lookup) or livewatch
+(RAM read).
+
+### YAML preset schema
+
+```yaml
+params:
+  - name: mrac_state.pitch.What_lower_limit[0]   # DWARF-dotted name
+    lo: 0.0
+    hi: 0.5
+observable:
+  source: telemetry      # "telemetry" | "livewatch"
+  name: tracking_rmse   # telemetry field name or DWARF path
+  window: [0.0, 1.0]    # informational — runner reads value at settle time
+schedule: sobol         # "sobol" | "random" | "latin"
+optimizer: none         # "none" | "bayesian" | "nelder"
+n_samples: 100
+settling_time_s: 2.0
+output_dir: ground_station/logs/sweeps/what_lower_limit
+```
+
+### Invocation
+
+```bash
+# Validate a preset without touching hardware
+python -m ground_station.sweep_runner --validate \
+  ground_station/presets/sweep_what_lower_limit.yaml
+
+# Run a sweep (requires agent-05 MAVLink param wire transport)
+python -m ground_station.sweep_runner \
+  ground_station/presets/sweep_what_lower_limit.yaml
+```
+
+### Output
+
+Each run writes a UUID-tagged subdirectory under `output_dir`:
+
+```
+output_dir/<run_id>/
+  samples.csv    # one row per iteration: param columns + observable
+  summary.md     # run metadata, best params, best observable value
+```
+
+The CSV is **append-safe**: if a sweep is interrupted, re-running the same
+preset appends fresh rows to the existing `samples.csv`.
+
+### Caveats
+
+- Requires **agent-05** MAVLink param wire (SerialBridge with `set_param`) for
+  the `set_param` call.  Telemetry reads work with or without agent-05.
+- The runner **refuses to start** if the sweep target is not in the livewatch
+  writable registry — the patch gate is enforced.
+- `scikit-optimize` is optional; without it, Bayesian mode raises `RuntimeError`
+  and the runner falls back to Nelder-Mead or schedule-only mode.
+- The runner handles `SIGINT` / `SIGTERM` by reverting all swept params to their
+  pre-sweep values before writing the CSV and exiting.
+
+---
+
+## MCP server (agent-04)
+
+Exposes the bench toolchain as MCP tools so any LLM front-end (Cursor, Claude
+Code, Aider) can drive the drone as a native resource. Stdio transport only for v0.
+
+### Install
+
+`mcp` is already in `requirements.txt`. Install it with:
+
+```bash
+pip install mcp
+```
+
+Or from the repo venv:
+
+```bash
+.venv/bin/pip install mcp
+```
+
+### Run
+
+```bash
+python -m ground_station.mcp_server   # stdio; exits on stdin EOF
+# or, after installing the entry point:
+mcp-drone
+```
+
+### Cursor config
+
+`.cursor/mcp_servers.json` (checked in):
+
+```json
+{
+  "mcpServers": {
+    "drone-bench": {
+      "command": ".venv/bin/mcp-drone"
+    }
+  }
+}
+```
+
+### Tool list
+
+| Tool | Description | Hardware? |
+|---|---|---|
+| `livewatch_read` | Read live RAM variables via SWD/UART5 | yes |
+| `livewatch_verify` | Prove ELF matches flashed firmware | yes |
+| `livewatch_writable` | List RAM-writable DWARF paths | no |
+| `livewatch_patch` | Write a float to live RAM | yes — **safety gate** |
+| `ulog_query` | Query PX4 `.ulg` files (topics/fields/series) | no |
+| `param_set` | Set a MAVLink param | stub (agent-05) |
+| `param_get` | Get a MAVLink param | stub (agent-05) |
+| `sweep_run` | Run a parameter sweep | stub (agent-07) |
+| `offboard_command` | Send MAVLink offboard command | stub (agent-06) |
+| `sim_run` | Run a closed-loop simulation scenario | no |
+| `sindy_fit` | SINDy sparse regression on flight logs | no |
+
+### Caveats
+
+- `param_set` / `sweep_run` / `offboard_command` are **stubs** until their
+  respective specs ship. They return a structured `not_implemented` payload.
+- `livewatch_patch` requires `i_understand=True` or the tool returns a
+  `SafetyGateError` payload. This gate is enforced in the server.
+- The server holds **no persistent pyocd session**. Each tool opens its
+  transport context and tears it down on completion.
+
+---
+
+## Ulog replay (agent-01)
+
+Turns a PX4 `.ulg` file into DataFrames indexed by timestamp (seconds). Optionally resolves ulog field names to DWARF firmware symbols.
+
+### Install
+
+```bash
+pip install pyulog pandas    # already in requirements.txt
+```
+
+### CLI
+
+```bash
+python -m ground_station.ulog_query dump    file.ulg [--elf path] [--topic name]
+python -m ground_station.ulog_query at       file.ulg --at 12.345 [--elf path]
+python -m ground_station.ulog_query between   file.ulg --t0 1.0 --t1 2.5 [--topic name]
+python -m ground_station.ulog_query fields   file.ulg [--elf path]
+```
+
+### DWARF resolution
+
+DWARF resolution is best-effort — ambiguous fields fall back to raw ulog names.
+Use `fields` to audit which firmware symbols your ulog actually covers:
+
+```bash
+python -m ground_station.ulog_query fields tests/fixtures/sample.ulg \
+    --elf OBJ/JX_FLY.axf
+```
+
+### Library API
+
+```python
+from ground_station.ulog_reader import load_ulog, ULogReader
+reader = load_ulog("flight.ulg", elf_path="OBJ/JX_FLY.axf")
+df = reader.topic("vehicle_local_position")
+snap = reader.at(t_seconds=12.3)
+fields = reader.fields_resolved()   # ResolvedField | UnresolvedField per field
+```
+
+### Caveats
+
+- DWARF resolution is structurally ambiguous for underscore-separated field names
+  (``s_ekf_x_3`` could mean ``s_ekf.x[3]`` or ``s_ekf_x.3``); the ulog→DWARF
+  converter uses the last underscore as the array index separator, and the resolver
+  tries both the raw field name and the converted form against DWARF.
+- `.tlog` (MAVLink UDP captures) is not yet supported.

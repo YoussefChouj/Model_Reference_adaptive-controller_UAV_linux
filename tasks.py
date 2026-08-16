@@ -56,7 +56,7 @@ LANES = {
 }
 
 # Import-time cost of the heavy scientific stack makes these worth knowing before you wait.
-REQUIRED_PKGS = ["pyocd", "serial", "numpy", "scipy", "pytest", "yaml", "matplotlib"]
+REQUIRED_PKGS = ["pyocd", "serial", "numpy", "scipy", "pytest", "yaml", "matplotlib", "streamlit"]
 
 
 def run(*args: str, check: bool = True) -> int:

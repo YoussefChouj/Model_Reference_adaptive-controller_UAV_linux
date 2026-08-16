@@ -124,6 +124,15 @@ thesis priority settled on 2026-08-05 survives contact with the literature.
     the hard part is that switching priors mid-flight makes it a **switched system**, needing
     switched-system stability tools. No paper does exactly this. Maturity: theory. The proof
     is the author's to write.
+9.  **Independent third-party reinforcement from Kunapuli et al., RSS 2025** (grilling memo
+    [`leveling-the-playing-field.md`](leveling-the-playing-field.md), 2026-08-14). Two of their
+    ablations land on positions we already hold: (a) training on a delay-/dynamics-free plant
+    produces a controller that fails when evaluated under realistic motor dynamics — direct
+    reinforcement of `ADR-0006 D4` and the `prior-00b` finding that drives `prior-02`; (b)
+    substituting PID integral action for trajectory feedforward terms in GC is **worse** than
+    no feedforward at all — direct reinforcement that the `prior-11` envelope cannot be
+    replaced by integral action. Neither closes a novelty-ledger entry; both are citable
+    corroborations.
 
 ## 5. Numbers the thesis must now answer to
 
