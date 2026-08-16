@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import struct
 import sys
 from pathlib import Path
 
+from .patch import SafetyGateError, patch_symbol
 from .registry import Registry
-from .symbols import SymbolResolver
+from .symbols import SymbolResolver, WritableField
 from .transport import LiveTransportError, SwdCmsisDap, Uart5LongRange
 
 _DEFAULT_ELF = Path(__file__).resolve().parents[2] / "OBJ" / "JX_FLY.axf"
@@ -113,6 +115,88 @@ def cmd_watch(args):
             if fh:
                 fh.close()
                 print(f"# wrote {args.csv}", file=sys.stderr)
+
+
+def _SAFETY_MESSAGE() -> str:
+    return (
+        "\n"
+        "livewatch patch — SAFETY GATE\n"
+        "===============================\n"
+        "This command WRITES to RAM on the running target via SWD.\n"
+        "A torn write to a 32-bit variable is not possible on Cortex-M4\n"
+        "(ARM AAPCS guarantees atomic 32-bit stores), but the write is\n"
+        "irreversible within the running session and WILL be lost on\n"
+        "reboot or power-cycle.\n"
+        "\n"
+        "Always disarm before patching.  The --no-disarm-check flag is\n"
+        "logged at WARNING level and should only be used on the bench\n"
+        "with props OFF and the operator ready to power-cycle.\n"
+    )
+
+
+def cmd_patch(args):
+    import math
+
+    if not args.i_understand:
+        print(_SAFETY_MESSAGE(), file=sys.stderr)
+        print("ERROR: --i-understand is required.  Exiting.", file=sys.stderr)
+        raise SystemExit(2)
+
+    try:
+        value = float(args.value)
+    except ValueError:
+        print(f"ERROR: {args.value!r} is not a valid float", file=sys.stderr)
+        raise SystemExit(1)
+
+    if not math.isfinite(value):
+        print(f"ERROR: {value} is not a finite float", file=sys.stderr)
+        raise SystemExit(1)
+
+    transport = _transport(args)
+    with transport:
+        try:
+            result = patch_symbol(
+                elf_path=args.elf,
+                symbol_name=args.symbol,
+                value=value,
+                transport=transport,
+                i_understand=True,
+                require_disarmed=not args.no_disarm_check,
+                halt_for_write=args.halt,
+                verify=not args.verify_only,
+                dry_run=args.dry_run,
+            )
+        except SafetyGateError as exc:
+            if not args.no_disarm_check:
+                print(f"\n[livewatch patch] DISARM GATE BLOCKED\n", file=sys.stderr)
+            print(f"ERROR: {exc}", file=sys.stderr)
+            raise SystemExit(2)
+
+    # Banner
+    mode = "DRY-RUN" if args.dry_run else ("VERIFY ONLY" if args.verify_only else "WRITE")
+    banner_lines = [
+        "",
+        "[livewatch patch] *** LIVE RAM WRITE ***",
+        f"  symbol:  {args.symbol}",
+        f"  address: 0x{result.address:08X}",
+        f"  old:     {struct.unpack('<f', result.old_value.to_bytes(4, 'little'))[0]:.6f}",
+        f"  new:     {struct.unpack('<f', result.new_value.to_bytes(4, 'little'))[0]:.6f}",
+        f"  mode:    {mode}",
+        f"  verify:  {'on' if (not args.verify_only and not args.dry_run) else 'skipped'}",
+        f"  gate:    {'DISARMED' if not args.no_disarm_check else 'DISARM_CHECK DISABLED'}",
+        f"  duration: {result.duration_ms:.1f} ms",
+        "",
+    ]
+    for line in banner_lines:
+        print(line)
+
+    if args.no_disarm_check:
+        print("WARNING: --no-disarm-check was set.  Vehicle arm state was NOT verified.",
+              file=sys.stderr)
+
+    if result.verified:
+        print("[OK] write verified", file=sys.stderr)
+    return 0
 
 
 def cmd_verify(args):
@@ -222,6 +306,32 @@ def cmd_budget(args):
         print(f"    region 0x{r.start:08X} +{r.size} B")
 
 
+def cmd_writable(args):
+    """List all RAM-writable members under a base name (or all globals if no base given)."""
+    r = _resolver(args)
+    base = args.base_name if args.base_name else ""
+    fields = r.writable_members(base)
+
+    if args.format == "json":
+        import json
+        out = [
+            {
+                "name": w.name,
+                "address": f"0x{w.address:08X}",
+                "c_type": w.c_type,
+                "size_bytes": w.size_bytes,
+                "parent": w.parent,
+            }
+            for w in fields
+        ]
+        print(json.dumps(out, indent=2))
+    else:
+        print(f"{'name':<45} {'address':>10}  {'c_type':<20} {'size':>5}  parent")
+        print("-" * 95)
+        for w in fields:
+            print(f"{w.name:<45} 0x{w.address:08X}  {w.c_type:<20} {w.size_bytes:>5}  {w.parent}")
+
+
 def cmd_log(args):
     """Log a manifest to a uniquely named CSV, after checking the rate is real."""
     from .manifest import unique_csv_path, write_meta
@@ -317,9 +427,32 @@ def build_parser():
     _transport_args(sp)
     sp.set_defaults(func=cmd_watch)
 
+    sp = sub.add_parser("patch", help="write a float value to a RAM symbol (needs hardware)")
+    sp.add_argument("symbol", help="DWARF symbol or path (e.g. mrac_state.pitch.What[0])")
+    sp.add_argument("value", help="float value to write")
+    sp.add_argument("--i-understand", action="store_true",
+                    help="REQUIRED: acknowledge this writes to live RAM")
+    sp.add_argument("--no-disarm-check", action="store_true",
+                    help="skip arm-state check (logged at WARNING; bench use only)")
+    sp.add_argument("--halt", action="store_true",
+                    help="halt CPU before write, resume after (slower but safer)")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="resolve address + show old value; do not write")
+    sp.add_argument("--verify-only", action="store_true",
+                    help="read old value and verify path; do not write")
+    _transport_args(sp)
+    sp.set_defaults(func=cmd_patch)
+
     sp = sub.add_parser("verify", help="check the ELF matches the flashed firmware (needs hardware)")
     sp.add_argument("--chunks", type=int, default=5, help="chunks sampled per flash segment")
     sp.set_defaults(func=cmd_verify)
+
+    sp = sub.add_parser("writable", help="list RAM-writable members (DWARF-only, no hardware)")
+    sp.add_argument("base_name", nargs="?", default="",
+                   help="base symbol name (empty = all globals)")
+    sp.add_argument("--format", choices=("text", "json"), default="text",
+                   help="output format (default text)")
+    sp.set_defaults(func=cmd_writable)
 
     sp = sub.add_parser("freshness",
                        help="read a field N times, verify it advances (catches wireless-bridge staleness)")

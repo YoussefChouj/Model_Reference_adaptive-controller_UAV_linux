@@ -14,13 +14,15 @@ Safety contract (enforced in reader.py): attach connect, read-only, cortex_m
 override, resume_on_disconnect=False. No write/halt/reset path exists in this
 package. Reading RAM cannot change the ARM flag, so motors stay off.
 """
-from .symbols import SymbolResolver, Symbol
+from .patch import SafetyGateError, PatchResult, patch_symbol
+from .symbols import SymbolResolver, Symbol, WritableField
 from .reader import LiveReader
 from .transport import (
     LiveTransport, LiveTransportError, SwdCmsisDap, Uart5LongRange,
 )
 
 __all__ = [
-    "SymbolResolver", "Symbol", "LiveReader", "LiveTransport",
+    "SymbolResolver", "Symbol", "WritableField", "LiveReader", "LiveTransport",
     "LiveTransportError", "SwdCmsisDap", "Uart5LongRange",
+    "SafetyGateError", "PatchResult", "patch_symbol",
 ]
